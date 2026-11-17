@@ -1,6 +1,6 @@
 import type { AgentCorpusResolverLike, ResolvedAgentCorpus } from "../agentCorpus.js";
 import { resolveSessionBinding, type SessionBinding } from "../chat/sessionBinding.js";
-import { EntitlementError, type AuthIdentityResolver } from "../entitlements.js";
+import { AuthorizationError, type AuthIdentityResolver } from "../entitlements.js";
 import { UUID_V4_RE } from "../identity.js";
 import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import type { ApiCaller } from "./auth.js";
@@ -55,14 +55,16 @@ export class ModelCatalog {
     if (!productId) throw this.missing(model);
     try {
       const binding = await resolveSessionBinding(
-        { auth_token: caller.token, product_id: productId }, undefined, this.corpora(), this.deps.identities,
+        { auth_token: caller.token, product_id: productId }, this.corpora(), this.deps.identities,
         { sub: caller.accountId }, signal
       );
+      // The Responses API is the owner's own: any live Product opens for chat, but only its creator's key runs it here.
+      if (binding.creatorId !== caller.accountId) throw this.missing(model);
       // The run's model calls are the Chat API's, billed to the owner, and to the key that made the request.
       return { ...binding, usageSurface: "responses_api", ...(caller.clientType === "api_key" && caller.sessionId ? { apiKeyId: caller.sessionId } : {}) };
     } catch (error) {
       const gone = error instanceof AgentReleaseUnavailableError
-        || (error instanceof EntitlementError && error.code === "entitlement_required")
+        || (error instanceof AuthorizationError && error.code === "entitlement_required")
         || (error instanceof Error && error.message.startsWith("No current Agent Corpus"));
       if (gone) throw this.missing(model);
       throw error;
@@ -75,7 +77,7 @@ export class ModelCatalog {
   }
 
   private corpora(): AgentCorpusResolverLike {
-    if (!this.deps.corpora) throw new EntitlementError("agent_corpus_unavailable", "Models are not available on this Runtime.");
+    if (!this.deps.corpora) throw new AuthorizationError("agent_corpus_unavailable", "Models are not available on this Runtime.");
     return this.deps.corpora;
   }
 

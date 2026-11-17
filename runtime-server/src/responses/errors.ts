@@ -3,7 +3,7 @@ import { BriefValidationError } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
 import { ConversationRepositoryError } from "../conversationRepository.js";
 import { ConversationError } from "../conversations/conversation.js";
-import { EntitlementError } from "../entitlements.js";
+import { AuthorizationError } from "../entitlements.js";
 import { resetDay, USAGE_CAP_EXCEEDED, UsageCapExceeded } from "../usage/usageCap.js";
 
 export type ErrorType =
@@ -82,7 +82,7 @@ export function toApiError(error: unknown): { error: ApiError; internal: boolean
     if (mapped) return { error: mapped, internal: false };
   } else if (error instanceof BriefValidationError) {
     return { error: invalidRequest(error.code === "brief_required_answer_missing" ? "task_brief_required" : "invalid_task_brief", error.message, "task_brief"), internal: false };
-  } else if (error instanceof EntitlementError) {
+  } else if (error instanceof AuthorizationError) {
     if (UNAVAILABLE_CODES.has(error.code)) return { error: unavailable("Hatch could not verify access right now. Try again shortly."), internal: false };
     if (UNAUTHENTICATED_CODES.has(error.code)) return { error: invalidApiKey("The API key is no longer valid."), internal: false };
     return { error: new ApiError(403, "permission_error", "access_denied", "This account may not use this model."), internal: false };

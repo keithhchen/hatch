@@ -1,7 +1,6 @@
 import type { AgentCorpus, AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCorpus.js";
 import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import type { AuthIdentity, EntitlementResolver } from "../entitlements.js";
-import { assertEntitlementMatchesIdentity } from "./sessionBinding.js";
 
 /** What a client sees of an Expert Agent: its Creator, the Product's public face, and how it presents. */
 export function creatorAgentView(corpus: AgentCorpus) {
@@ -19,7 +18,7 @@ export function creatorAgentView(corpus: AgentCorpus) {
   };
 }
 
-/** The Expert Agents an account may open: the Products it owns, then every entitlement it holds. */
+/** The Agents an account has at hand: the Products it owns, then its library (every Agent it saved by chatting with it). */
 export async function listCreatorAgents(input: {
   claims: AuthIdentity | undefined;
   authToken: string;
@@ -28,9 +27,7 @@ export async function listCreatorAgents(input: {
   signal?: AbortSignal;
 }): Promise<Array<Record<string, unknown>>> {
   const { claims, authToken, entitlementResolver, agentCorpusResolver, signal } = input;
-  // Access is relational: owned rows are the account's own published
-  // Products (addressed by product_id, no entitlement_id); every other
-  // row is an entitlement grant.
+  // Owned rows are the account's own published Products; every other row is an Agent in its library.
   const creatorAgents: Array<Record<string, unknown>> = claims && agentCorpusResolver
     ? (await agentCorpusResolver.list(claims.sub, signal)).map(({ corpus, digest }) => ({
       creator_id: corpus.creator.id,
@@ -51,7 +48,6 @@ export async function listCreatorAgents(input: {
     // transient memory by the full grant count.
     for (const entitlement of entitlements) {
       signal?.throwIfAborted();
-      assertEntitlementMatchesIdentity(claims, entitlement);
       if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
       let resolved: Awaited<ReturnType<AgentCorpusResolver["resolve"]>>;
       try {
@@ -66,11 +62,9 @@ export async function listCreatorAgents(input: {
         throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
       }
       creatorAgents.push({
-        entitlement_id: entitlement.entitlement_id,
         creator_id: entitlement.creator_id,
         product_id: entitlement.product_id,
         corpus_digest: resolved.digest,
-        purchased_corpus_digest: entitlement.purchased_corpus_digest ?? resolved.digest,
         effective_corpus_digest: resolved.digest,
         ...creatorAgentView(resolved.corpus)
       });

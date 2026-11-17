@@ -21,18 +21,6 @@ import type { RuntimeStore, VisibleConversationPart } from "../store.js";
 import type { ConversationRepository, RunReply } from "../conversationRepository.js";
 import { RunFenced } from "../runHold.js";
 import type { ToolBridge } from "../toolBridge.js";
-import {
-  findCompletedDelivery,
-  prepareDelivery,
-  recordPreparedDelivery,
-  releaseDeliveryUnit,
-  reserveDeliveryUnit,
-  type CommerceEventSink,
-  type DeliveryArtifact,
-  type DeliveryBinding,
-  type DeliveryUnitReservation
-} from "../delivery.js";
-import type { DeliveryAccountingCommand, DeliveryAccountingOutbox } from "../deliveryOutbox.js";
 import { materializeAgentCorpus, type MaterializedAgentCorpus } from "../agentCorpusMaterialization.js";
 import type { AgentCorpus } from "../agentCorpus.js";
 import {
@@ -41,7 +29,6 @@ import {
   type GuardedOutputResult,
   type OutputGuard
 } from "../outputGuard.js";
-import { writeOperationalError } from "../operationalLogging.js";
 import type { RuntimeAssetStore } from "../assetStore.js";
 import { withLangfuseTurn } from "../langfuse.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
@@ -58,13 +45,8 @@ export type TurnBinding = {
   productId: string;
   corpusDigest: string;
   runtimeDigest?: string;
-  purchasedCorpusDigest?: string;
-  /** Free purchases are permanent access; metered accounting is opt-in. */
-  accessMode?: "unmetered" | "metered";
   agentCorpus?: AgentCorpus;
   agentCorpusRoot?: string;
-  entitlementId?: string;
-  orderId?: string;
   /** Where the Run's tokens are counted. Absent is app or channel chat; the Responses API says `responses_api` and its key. */
   usageSurface?: UsageSurface;
   apiKeyId?: string;
@@ -120,9 +102,6 @@ async function runModelTurnInternal(
   send: (message: OutboundMessage) => Promise<void>,
   outputGuard: OutputGuard,
   abortSignal: AbortSignal,
-  commerceEventSink: CommerceEventSink | undefined,
-  deliveryAccountingOutbox: DeliveryAccountingOutbox | undefined,
-  scheduleDeliveryReconciliation: () => void,
   clientOf: () => ClientAttributes,
   claimSteered: () => Promise<ConversationMessage[]>,
   onSteer: (listener: () => void) => () => void,
@@ -134,11 +113,6 @@ async function runModelTurnInternal(
   let modelFirstText: number | undefined;
   let firstSafeSegment: number | undefined;
   const guardTiming: Array<import("../outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
-  let deliveredArtifact: DeliveryArtifact | undefined;
-  const deliveryBinding = deliveryBindingFromSession(binding);
-  let deliveryReservation: DeliveryUnitReservation | undefined;
-  let deliveryReservationConsumed = false;
-  let deliveryAccountingPending = false;
   try {
     abortSignal.throwIfAborted();
     await state.start();
@@ -263,11 +237,7 @@ async function runModelTurnInternal(
         if (timing) timing.released_ms = releasedAt - turnStarted;
       }
     };
-    const commitTerminal = async (
-      finishReason: OutputFinishReason,
-      recordDelivery = true
-    ): Promise<void> => {
-      let receiptStatus: "recorded" | "syncing" | undefined;
+    const commitTerminal = async (finishReason: OutputFinishReason): Promise<void> => {
       // The reply is written by the Run's ending, in the same transaction as its status: a crash cannot leave a reply on a Run that was not ended.
       const reply: RunReply = {
         message: { role: "assistant", content: finishReason === "content_filter" ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE : approvedAssistantText },
@@ -276,50 +246,11 @@ async function runModelTurnInternal(
           ? visibleParts.filter((part) => part.type === "thinking")
           : visibleParts
       };
-      if (finishReason === "stop" && recordDelivery && commerceEventSink && deliveryBinding) {
-        const receipt = prepareDelivery(
-          deliveryBinding,
-          input.conversation_id,
-          input.run_id,
-          deliveredArtifact ?? { type: "message", content: approvedAssistantText }
-        );
-        try {
-          const recorded = await recordPreparedDelivery(
-            commerceEventSink,
-            deliveryBinding,
-            input.conversation_id,
-            input.run_id,
-            receipt,
-            deliveryReservation
-          );
-          deliveryReservationConsumed = Boolean(deliveryReservation);
-          receiptStatus = "recorded";
-          await emit({ type: "delivery.ready", run_id: input.run_id, ...recorded, receipt_status: receiptStatus });
-        } catch (error) {
-          if (!deliveryAccountingOutbox || !deliveryReservation) throw error;
-          const command: DeliveryAccountingCommand = {
-            version: 1,
-            commandId: receipt.delivery_id,
-            binding: deliveryBinding,
-            conversationId: input.conversation_id,
-            runId: input.run_id,
-            artifact: { type: receipt.artifact_type, digest: receipt.artifact_digest },
-            reservation: deliveryReservation
-          };
-          await deliveryAccountingOutbox.enqueue(command);
-          deliveryAccountingPending = true;
-          receiptStatus = "syncing";
-          writeOperationalError("commerce_delivery_receipt_deferred", error);
-          await emit({ type: "delivery.ready", run_id: input.run_id, ...receipt, receipt_status: receiptStatus });
-          scheduleDeliveryReconciliation();
-        }
-      }
       const completedAt = performance.now();
       await emit({
         type: "turn.completed",
         run_id: input.run_id,
         finish_reason: finishReason,
-        ...(receiptStatus ? { receipt_status: receiptStatus } : {}),
         timing: {
           total_ms: completedAt - turnStarted,
           setup_ms: setupCompleted - turnStarted,
@@ -334,39 +265,17 @@ async function runModelTurnInternal(
       const pushed = await guardedOutput.push(content);
       await emitReleased(pushed);
       if (pushed.blocked) {
-        await commitTerminal("content_filter", false);
+        await commitTerminal("content_filter");
         return;
       }
       const final = await guardedOutput.finish();
       await emitReleased(final);
-      await commitTerminal(final.blocked ? "content_filter" : "stop", false);
+      await commitTerminal(final.blocked ? "content_filter" : "stop");
     };
-    if (commerceEventSink && deliveryBinding) {
-      const completedDelivery = await findCompletedDelivery(
-        commerceEventSink,
-        deliveryBinding,
-        input.conversation_id,
-        input.run_id
-      );
-      if (completedDelivery) {
-        await send({ type: "delivery.ready", run_id: input.run_id, ...completedDelivery, receipt_status: "recorded" });
-        await sendFixedAssistant("This delivery was already completed. The existing artifact has not been changed.");
-        return;
-      }
-    }
     if (input.message.content.trim() === "/compact") {
       await compaction.manual(committedInput);
       await sendFixedAssistant("Compaction complete.");
       return;
-    }
-
-    if (commerceEventSink && deliveryBinding) {
-      deliveryReservation = await reserveDeliveryUnit(
-        commerceEventSink,
-        deliveryBinding,
-        input.conversation_id,
-        input.run_id
-      );
     }
 
     const preTurnCompaction = await compaction.ifNeeded(committedInput, "pre_turn");
@@ -456,18 +365,6 @@ async function runModelTurnInternal(
         }
         continue;
       }
-      if (
-        event.type === "tool_call.delta"
-        && event.locality === "client"
-        && event.name === "file_write"
-        && event.status === "completed"
-        && typeof event.arguments?.content === "string"
-      ) {
-        deliveredArtifact = {
-          type: "file",
-          content: event.arguments.content
-        };
-      }
       if (event.type === "turn.completed") {
         const final = await guardedOutput.finish();
         await emitReleased(final);
@@ -493,34 +390,7 @@ async function runModelTurnInternal(
     // Shutting down is a handoff; another instance continues the Run.
     if (abortSignal.reason instanceof RunHandoff || error instanceof RunFenced) return;
     await recordFailure({ run: input.run_id, conversation: input.conversation_id }, error, state);
-  } finally {
-    if (commerceEventSink && deliveryReservation && !deliveryReservationConsumed && !deliveryAccountingPending) {
-      const releaseReason = state.status === "cancelled"
-        ? "run_cancelled"
-        : state.status === "failed"
-          ? "run_failed"
-          : "delivery_not_completed";
-      await releaseDeliveryUnit(commerceEventSink, deliveryReservation, releaseReason).catch((error) => {
-        writeOperationalError("commerce_delivery_reservation_release_failed", error);
-      });
-    }
   }
-}
-
-function deliveryBindingFromSession(binding: TurnBinding): DeliveryBinding | undefined {
-  // Permanent free purchases do not reserve, consume, or produce delivery
-  // events. Metering is an explicit future paid-product capability.
-  if (binding.accessMode !== "metered" || !binding.entitlementId || !binding.orderId) return undefined;
-  return {
-    entitlementId: binding.entitlementId,
-    orderId: binding.orderId,
-    userId: binding.userId,
-    creatorId: binding.creatorId,
-    agentId: binding.productId,
-    productId: binding.productId,
-    purchasedCorpusDigest: binding.purchasedCorpusDigest ?? binding.corpusDigest,
-    corpusDigest: binding.corpusDigest
-  };
 }
 
 async function persistSkillEvent(

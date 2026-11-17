@@ -11,7 +11,7 @@ import type { AssetDesk, UploadedAsset } from "../conversations/assets.js";
 import { PipelineAssets } from "../conversations/pipelineAssets.js";
 import { clientMessageInputDigest, MAX_USER_MESSAGE_CHARS, type ConversationMessage } from "../protocol.js";
 import type { ContentPart } from "../surfaces/contract.js";
-import { ChatError } from "./principal.js";
+import { ChatError, GUEST_PREFIX } from "./principal.js";
 
 const MAX_ASSETS_PER_MESSAGE = 10;
 
@@ -74,6 +74,8 @@ export class ChatAssets implements PartsReader {
 
   /** Upload first, reference by assetId: the file is a ready asset, or refused with the reason, before any message is sent. */
   async upload(conversation: ConversationRecord, input: { name: string; bytes: Buffer }): Promise<UploadedAsset> {
+    // A visitor's files would be stranded under a scope that stops existing when they sign in.
+    if (conversation.ownerAccountId.startsWith(GUEST_PREFIX)) throw new ChatError("login_required", "Sign in to attach files.", 403);
     try {
       const asset = await this.deps.pipeline.accept(assetScopeOf(conversation), input);
       if (asset.state === "failed") throw new AssetError(asset.record.failure!.code as AssetError["code"], asset.record.failure!.message);

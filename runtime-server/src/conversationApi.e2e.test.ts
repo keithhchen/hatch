@@ -13,7 +13,7 @@ import { useSearchFixture } from "./searchFixture.testkit.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { chatCompactionAdapter } from "./compaction.js";
 import { CompactionStrategy, policyFor } from "./compactionStrategy.js";
-import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } from "./entitlements.js";
+import type { AuthIdentityResolver } from "./entitlements.js";
 import { RuntimeAssetStore } from "./assetStore.js";
 import { AttachmentFiles } from "./assets/files.js";
 import { harness, png } from "./assets/kit.test.js";
@@ -254,29 +254,20 @@ test("Conversation snapshot preserves attachment references and serves only boun
 
 test("Conversation HTTP creation carries the published corpus BriefSpec into an immutable snapshot", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-api-brief-"));
-  const entitlement: EntitlementBinding = {
-    entitlement_id: "44444444-4444-4444-8444-444444444444",
-    order_id: "55555555-5555-4555-8555-555555555555",
+  const entitlement = {
     user_id: "11111111-1111-4111-8111-111111111111",
     creator_id: "22222222-2222-4222-8222-222222222222",
     agent_id: "33333333-3333-4333-8333-333333333333",
-    product_id: "33333333-3333-4333-8333-333333333333",
-    status: "active"
+    product_id: "33333333-3333-4333-8333-333333333333"
   };
   const briefSpec = {
     contract_version: "1" as const,
     fields: [{ id: "goal", label: "What should Hatch help you accomplish?", required: true }]
   };
-  entitlement.brief_spec = { contract_version: "1", fields: [{ id: "obsolete", label: "Old purchase form", required: true }] };
-  const entitlementResolver: EntitlementResolver = {
-    list: async () => [entitlement],
-    resolve: async () => entitlement
-  };
   const authIdentityResolver: AuthIdentityResolver = {
     resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
-  const agentCorpusResolver = {
-    resolve: async () => ({
+  const resolveCorpus = async () => ({
       root: "",
       digest: `sha256:${"b".repeat(64)}`,
       corpus: {
@@ -292,20 +283,15 @@ test("Conversation HTTP creation carries the published corpus BriefSpec into an 
         knowledge: { documents: [] },
         tools: []
       } as unknown as AgentCorpus
-    })
-  } as unknown as AgentCorpusResolver;
+    });
+  const agentCorpusResolver = { resolve: resolveCorpus, resolveByProduct: resolveCorpus } as unknown as AgentCorpusResolver;
   runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(dataDir),
-    entitlementResolver,
     authIdentityResolver,
     agentCorpusResolver
   });
   const base = await listen(runtime.server);
-  const query = new URLSearchParams({
-    entitlement_id: entitlement.entitlement_id,
-    creator_id: entitlement.creator_id,
-    product_id: entitlement.product_id
-  }).toString();
+  const query = new URLSearchParams({ product_id: entitlement.product_id }).toString();
   const created = await json(base, `/v1/conversations?${query}`, {
     method: "POST",
     headers: { authorization: "Bearer brief-session" },

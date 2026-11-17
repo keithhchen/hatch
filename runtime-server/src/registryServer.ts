@@ -55,6 +55,7 @@ import { ChannelHub } from "./channels/hub.js";
 import { ChannelService } from "./channels/service.js";
 import { GuardedTarget, liveOwnProduct } from "./channels/guardedTarget.js";
 import { ChatFlow } from "./channels/chatTarget.js";
+import { ImLinks } from "./channels/imLink.js";
 import { ProductTarget } from "./channels/productTarget.js";
 import { HttpChatGateway } from "./channels/runtimeChat.js";
 import { safeError } from "./factoryAgents/runtime.js";
@@ -166,6 +167,7 @@ type RegistryContext = {
   productChannelsUnavailable?: string;
   credentialSeal?: CredentialSeal;
   ownApps?: OwnApps;
+  imLinks?: ImLinks;
   /** The platforms a person signs in with; absent without the Registry database. */
   platformLogin?: PlatformLogin;
   publicOrigin?: string;
@@ -412,9 +414,10 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Without a Chat gateway Product Connections have no handler: readiness says so, and their webhooks are refused. HATCH_PRODUCT_CHANNELS=off makes that deliberate.
     const productChannelsOff = environment.HATCH_PRODUCT_CHANNELS?.trim() === "off";
     const productChannelsUnavailable = gateway || productChannelsOff ? undefined : "Product channels need HATCH_RUNTIME_CHAT_URL and HATCH_RUNTIME_CHAT_SERVICE_TOKEN; set both, or set HATCH_PRODUCT_CHANNELS=off.";
-    if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
+    const imLinks = runtimeServiceToken ? new ImLinks({ secret: runtimeServiceToken, origin: siteOrigin, connections: stores.connections }) : undefined;
+    if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter, ...(imLinks ? { imLinks } : {}) })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { productChannelsUnavailable, assistant, forms, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
+    Object.assign(registryContext, { productChannelsUnavailable, assistant, forms, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, ...(imLinks ? { imLinks } : {}), publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -2030,6 +2033,18 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
       : (await assistant.decide(account.id, taskId!, action as "approve" | "decline", key)).task;
     await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`, action === "answer" ? `answered:${key}` : "decided");
     sendJson(response, 200, { task });
+    return;
+  }
+  // The web sign-in page hands over the link a contact was sent: the person behind it is now this account.
+  if (url.pathname === "/v1/channels/im-link/claim" && request.method === "POST") {
+    if (!context.imLinks) { sendJson(response, 503, { error: { code: "im_link_unavailable", message: "IM links are not available." } }); return; }
+    try {
+      const claimed = await context.imLinks.claim(String((await readJson(request)).token ?? ""), account.id);
+      sendJson(response, 200, { product_id: claimed.productId, connection_id: claimed.connectionId, channel: claimed.channel }, { "cache-control": "no-store" });
+    } catch (error) {
+      if (!(error instanceof ChatError)) throw error;
+      sendJson(response, error.status, { error: { code: error.code, message: error.message } });
+    }
     return;
   }
   const credentialsRoute = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/credentials$/);

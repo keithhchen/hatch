@@ -97,7 +97,7 @@ test("a browser session and an API key both authenticate HTTP and WebSocket agai
       socket.close();
     }
 
-    assert.equal((await call(`/v1/conversations?${query}`, "hk_not_a_key", {})).status, 403);
+    assert.equal((await call(`/v1/conversations?${query}`, "hk_not_a_key", {})).status, 401);
 
     // WebSocket upgrade: a cookie needs an allowed Origin, and no credential may be in the URL.
     const wsUrl = `${base.replace("http", "ws")}/runtime`;
@@ -110,7 +110,7 @@ test("a browser session and an API key both authenticate HTTP and WebSocket agai
     // A revoked API key stops working for new messages.
     const created = await (await call(`/v1/conversations?${query}`, key.token, { client_request_id: "revoke" })).json() as { conversation: { id: string } };
     assert.equal((await fetch(`${registryBase}/v1/auth/api-keys/${key.id}`, { method: "DELETE", headers: { authorization: `Bearer ${browserToken}` } })).status, 204);
-    assert.equal((await call(`/v1/conversations/${created.conversation.id}/messages?${query}&wait=1`, key.token, { client_message_id: "after-revoke", content: "hi" })).status, 403);
+    assert.equal((await call(`/v1/conversations/${created.conversation.id}/messages?${query}&wait=1`, key.token, { client_message_id: "after-revoke", content: "hi" })).status, 401);
   } finally {
     await runtime?.close();
     await registry.close();

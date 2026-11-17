@@ -5,7 +5,7 @@ import { BriefValidationError } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
 import { ConversationRepositoryError } from "../conversationRepository.js";
 import { ConversationError } from "../conversations/conversation.js";
-import { EntitlementError } from "../entitlements.js";
+import { AuthorizationError } from "../entitlements.js";
 import { admissionStatus, toProblem } from "./problem.js";
 
 const shape = (error: unknown) => { const { status, code } = toProblem(error); return [status, code]; };
@@ -29,12 +29,13 @@ test("pinned: a refusal while a message or retry is admitted", () => {
   assert.equal(admissionStatus("conversation_not_found"), 400);
 });
 
-test("entitlement failures say 403 for access and 503 for an unavailable verifier, never the cause", () => {
-  assert.deepEqual(shape(new EntitlementError("entitlement_not_found", "secret detail")), [403, "entitlement_required"]);
-  const unavailable = toProblem(new EntitlementError("auth_registry_unavailable", "http://registry.internal down"));
+test("authorization failures say 401 to sign in, 404 for an Agent that is gone and 503 for an unavailable verifier, never the cause", () => {
+  assert.deepEqual(shape(new AuthorizationError("auth_invalid", "secret detail")), [401, "authentication_required"]);
+  assert.deepEqual(shape(new AuthorizationError("agent_corpus_unavailable", "secret detail")), [404, "agent_unavailable"]);
+  const unavailable = toProblem(new AuthorizationError("auth_registry_unavailable", "http://registry.internal down"));
   assert.deepEqual([unavailable.status, unavailable.code], [503, "authorization_unavailable"]);
   assert.doesNotMatch(unavailable.message, /internal/);
-  assert.deepEqual(shape(new EntitlementError("something_else", "x")), [500, "internal_error"]);
+  assert.deepEqual(shape(new AuthorizationError("something_else", "x")), [500, "internal_error"]);
 });
 
 test("malformed requests", () => {

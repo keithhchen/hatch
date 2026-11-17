@@ -26,7 +26,7 @@ import type {
   ConversationRecord,
   ConversationRepository
 } from "../conversationRepository.js";
-import type { AuthIdentityResolver, EntitlementResolver } from "../entitlements.js";
+import type { AuthIdentityResolver } from "../entitlements.js";
 import { clientAttributesOf, MAX_USER_MESSAGE_CHARS, ToolCallResultSchema } from "../protocol.js";
 import type { RuntimeStore } from "../store.js";
 import type { ContentPart } from "../surfaces/contract.js";
@@ -52,7 +52,6 @@ export type ConversationRouteDeps = {
   repository: ConversationRepository;
   store: RuntimeStore | undefined;
   assetStore: RuntimeAssetStore | undefined;
-  entitlementResolver: EntitlementResolver | undefined;
   agentCorpusResolver: AgentCorpusResolver | undefined;
   authIdentityResolver: AuthIdentityResolver | undefined;
   legacyHmacAuth: LegacyHmacAuth;
@@ -80,13 +79,12 @@ export async function handleConversationHttpRequest(
   signal: AbortSignal | undefined
 ): Promise<void> {
   const {
-    repository, store, assetStore, entitlementResolver, agentCorpusResolver, authIdentityResolver,
+    repository, store, assetStore, agentCorpusResolver, authIdentityResolver,
     legacyHmacAuth, edge, maxHttpResponseBytes, allowedOrigins
   } = deps;
   const binding = await requireConversationBinding(
     req,
     url,
-    entitlementResolver,
     agentCorpusResolver,
     authIdentityResolver,
     legacyHmacAuth,

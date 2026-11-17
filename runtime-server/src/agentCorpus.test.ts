@@ -155,11 +155,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     status: "active" as const
   };
   const entitlementResolver = {
-    list: async ({ licenseToken }: { licenseToken: string }) => licenseToken === "license-jordan" ? [entitlement] : [],
-    resolve: async ({ licenseToken, entitlementId }: { licenseToken: string; entitlementId: string }) => {
-      if (licenseToken !== "license-jordan" || entitlementId !== entitlement.entitlement_id) throw new Error("not entitled");
-      return entitlement;
-    }
+    list: async ({ licenseToken }: { licenseToken: string }) => licenseToken === "license-jordan" ? [entitlement] : []
   };
   const agentCorpusResolver = new AgentCorpusResolver(root);
   const resolvedCorpus = await agentCorpusResolver.resolve(CREATOR_ID, PRODUCT_ID);
@@ -179,6 +175,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     createRuntime: () => new DeterministicAgentRuntime(),
     agentCorpusResolver,
     entitlementResolver,
+    authIdentityResolver: { resolveIdentity: async (token?: string) => token === "license-jordan" ? { sub: USER_ID } : undefined },
     conversationRepository
   });
   await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
@@ -201,7 +198,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
         protocol_version: PROTOCOL_VERSION,
         conversation_id: conversationId,
         license_token: "license-jordan",
-        entitlement_id: entitlement.entitlement_id,
+        product_id: PRODUCT_ID,
         local_tools: []
       })));
     });

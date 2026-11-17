@@ -1,7 +1,7 @@
 import type { AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCorpus.js";
 import { ConversationRepositoryError, type ConversationRecord } from "../conversationRepository.js";
 import { resolveCreatorTools, type CreatorToolControlPlane } from "../creatorTools.js";
-import { EntitlementError, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
+import { AuthorizationError, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
 import { toProblem } from "../errors/problem.js";
 import { log } from "../observability/log.js";
 import {
@@ -16,7 +16,7 @@ import type { ChatAssets, PartsReader, PreparedMessage } from "./assets.js";
 import type { Retried, Submission } from "./chatService.js";
 import type { ChatRuntime } from "./chatRuntime.js";
 import { errorMessage } from "./modelTurn.js";
-import { ChatError, accountPrincipal } from "./principal.js";
+import { ChatError, userPrincipal } from "./principal.js";
 import type { ChatServiceApi } from "./serviceApi.js";
 import { controlledTurnAuthorizationError, resolveTurnAgentBinding, revalidateTurnAuthorization, type SessionBinding } from "./sessionBinding.js";
 import { prepareSocketMessage } from "./socketAttachments.js";
@@ -71,7 +71,7 @@ export async function authorizedBinding(edge: ChatEdge, session: ChatSession, si
   }
   let binding = session.binding;
   try {
-    await revalidateTurnAuthorization({ auth_token: session.authToken }, binding, edge.entitlementResolver, edge.authIdentityResolver, signal);
+    await revalidateTurnAuthorization({ auth_token: session.authToken }, binding, edge.authIdentityResolver, signal);
     if (binding.agentCorpus) {
       binding = await resolveTurnAgentBinding(binding, edge.agentCorpusResolver, signal);
       // A disabled binding blocks the message here, before any Run exists.
@@ -81,8 +81,8 @@ export async function authorizedBinding(edge: ChatEdge, session: ChatSession, si
       };
     }
   } catch (error) {
-    if (error instanceof EntitlementError) throw error;
-    throw new EntitlementError("authorization_unavailable", errorMessage(error));
+    if (error instanceof AuthorizationError) throw error;
+    throw new AuthorizationError("authorization_unavailable", errorMessage(error));
   } finally {
     releaseAuthorization();
     releaseUserAuthorization();
@@ -109,7 +109,7 @@ export async function submitUserMessage(
   const canonicalMessage = prepared?.message ?? (async (): Promise<ConversationMessage> => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }));
   signal?.throwIfAborted();
   const submission = await edge.chat.service.submit({
-    principal: accountPrincipal(binding.userId),
+    principal: userPrincipal(binding.userId),
     conversation: session.conversation,
     scope: binding,
     client: request.client,
@@ -139,7 +139,7 @@ export async function retryRun(
   const binding = await authorizedBinding(edge, session, signal);
   signal?.throwIfAborted();
   return edge.chat.service.retry({
-    principal: accountPrincipal(binding.userId),
+    principal: userPrincipal(binding.userId),
     conversation: session.conversation,
     scope: binding,
     client: request.client,
@@ -153,7 +153,7 @@ export async function retryRun(
 
 /** A failure a client can act on, whichever way it arrived. */
 export function chatFailure(error: unknown): { code: string; message: string } {
-  if (error instanceof EntitlementError) return controlledTurnAuthorizationError(error);
+  if (error instanceof AuthorizationError) return controlledTurnAuthorizationError(error);
   if (error instanceof ChatError) return { code: error.code, message: error.message };
   if (error instanceof ConversationRepositoryError) {
     return {

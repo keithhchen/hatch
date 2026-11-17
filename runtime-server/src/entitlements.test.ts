@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  EntitlementError,
+  AuthorizationError,
   FileEntitlementResolver,
   RegistryEntitlementResolver,
   registryAuthorizationTimeoutMs
@@ -70,29 +70,6 @@ test("Registry entitlement resolver strips registry bookkeeping fields", async (
   });
 });
 
-test("Registry entitlement resolution requests only the selected binding", async () => {
-  let requestedUrl = "";
-  const resolver = new RegistryEntitlementResolver(
-    "https://registry.example.test",
-    async (input) => {
-      requestedUrl = String(input);
-      return new Response(JSON.stringify([{
-        entitlement_id: ENTITLEMENT_ID,
-        user_id: USER_ID,
-        creator_id: CREATOR_ID,
-        agent_id: PRODUCT_ID,
-        product_id: PRODUCT_ID,
-        status: "active",
-      }]), { status: 200 });
-    },
-  );
-  assert.equal((await resolver.resolve({
-    authToken: "opaque-token",
-    entitlementId: ENTITLEMENT_ID,
-  })).entitlement_id, ENTITLEMENT_ID);
-  assert.equal(new URL(requestedUrl).searchParams.get("entitlement_id"), ENTITLEMENT_ID);
-});
-
 test("Runtime reads the same authoritative entitlement boundary as Web and never asks Registry for ownership", async () => {
   const requested: string[] = [];
   const binding = {
@@ -102,11 +79,7 @@ test("Runtime reads the same authoritative entitlement boundary as Web and never
     creator_id: CREATOR_ID,
     agent_id: PRODUCT_ID,
     product_id: PRODUCT_ID,
-    status: "active",
-    purchased_corpus_digest: `sha256:${"a".repeat(64)}`,
-    effective_corpus_digest: `sha256:${"a".repeat(64)}`,
-    version_policy: "pinned",
-    version_history: []
+    status: "active"
   };
   const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -118,10 +91,6 @@ test("Runtime reads the same authoritative entitlement boundary as Web and never
     if (url.pathname === `/v1/internal/access/users/${USER_ID}/entitlements`) {
       return new Response(JSON.stringify({ entitlements: [binding] }), { status: 200 });
     }
-    if (url.pathname === `/v1/internal/access/entitlements/${ENTITLEMENT_ID}`) {
-      assert.equal(url.searchParams.get("user_id"), USER_ID);
-      return new Response(JSON.stringify({ entitlement: binding }), { status: 200 });
-    }
     return new Response("{}", { status: 404 });
   };
   const resolver = new RegistryEntitlementResolver("https://registry.example.test", fetchImpl, {
@@ -130,7 +99,6 @@ test("Runtime reads the same authoritative entitlement boundary as Web and never
   });
 
   assert.deepEqual(await resolver.list({ authToken: "opaque-user-token" }), [binding]);
-  assert.deepEqual(await resolver.resolve({ authToken: "opaque-user-token", entitlementId: ENTITLEMENT_ID }), binding);
   assert.equal(requested.some((url) => new URL(url).pathname === "/v1/user/product-access"), false);
 });
 
@@ -159,7 +127,7 @@ test("Registry authorization rejects oversized bodies before buffering them", as
   );
   await assert.rejects(
     resolver.resolveIdentity("opaque-token"),
-    (error) => error instanceof EntitlementError && error.code === "auth_registry_unavailable",
+    (error) => error instanceof AuthorizationError && error.code === "auth_registry_unavailable",
   );
 });
 
@@ -205,11 +173,11 @@ test("Registry identity and entitlement requests time out with explicit unavaila
 
   await assert.rejects(
     resolver.resolveIdentity("opaque-token"),
-    (error) => error instanceof EntitlementError && error.code === "auth_registry_unavailable"
+    (error) => error instanceof AuthorizationError && error.code === "auth_registry_unavailable"
   );
   await assert.rejects(
     resolver.list({ authToken: "opaque-token" }),
-    (error) => error instanceof EntitlementError && error.code === "entitlement_registry_unavailable"
+    (error) => error instanceof AuthorizationError && error.code === "entitlement_registry_unavailable"
   );
 });
 
@@ -228,7 +196,7 @@ test("Registry authorization requests propagate caller cancellation", async () =
 
   await assert.rejects(
     pending,
-    (error) => error instanceof EntitlementError && error.code === "authorization_cancelled"
+    (error) => error instanceof AuthorizationError && error.code === "authorization_cancelled"
   );
   assert.equal(requestSignal?.aborted, true);
   assert.equal(registryAuthorizationTimeoutMs({ HATCH_REGISTRY_AUTH_TIMEOUT_MS: "250" }), 250);

@@ -4,7 +4,7 @@ import type { AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCor
 import { conversationBinding, durableConversationId, type LegacyHmacAuth } from "../chat/sessionBinding.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
-import type { AuthIdentityResolver, EntitlementResolver } from "../entitlements.js";
+import type { AuthIdentityResolver } from "../entitlements.js";
 import { requireAllowedOrigin, requireConversationBinding } from "../http/requestBinding.js";
 import { readJsonObject, writeJsonBounded } from "../http/httpSupport.js";
 import type { ArtifactMode } from "./mode.js";
@@ -14,7 +14,6 @@ import type { ReportBlobs, ReportRecord } from "./ports.js";
 export type ArtifactRouteDeps = {
   artifact: ArtifactMode;
   repository: ConversationRepository;
-  entitlementResolver: EntitlementResolver | undefined;
   agentCorpusResolver: AgentCorpusResolver | undefined;
   authIdentityResolver: AuthIdentityResolver | undefined;
   legacyHmacAuth: LegacyHmacAuth;
@@ -71,11 +70,10 @@ export async function handleProductArtifactRequest(req: http.IncomingMessage, re
   if (!match) return false;
   const productId = decodeURIComponent(match[1]!);
   const { artifact, repository } = deps;
-  // The viewer is bound the way a chat conversation's creator is: by the entitlement the web names, or as the product's owner.
+  // The viewer is bound the way a chat conversation's is: to the live product the path names.
   const bound = new URL(url);
-  if (!bound.searchParams.get("entitlement_id")) bound.searchParams.set("product_id", productId);
-  const binding = await requireConversationBinding(req, bound, deps.entitlementResolver, deps.agentCorpusResolver, deps.authIdentityResolver, deps.legacyHmacAuth);
-  if (binding.productId !== productId) throw new ConversationHttpError(403, "entitlement_required", "This entitlement is for another product.");
+  bound.searchParams.set("product_id", productId);
+  const binding = await requireConversationBinding(req, bound, deps.agentCorpusResolver, deps.authIdentityResolver, deps.legacyHmacAuth);
   const write = (status: number, body: unknown) => writeJsonBounded(res, status, body, deps.maxHttpResponseBytes);
   const config = await artifact.configs.get(productId);
   if (!config) throw new ConversationHttpError(404, "artifact_not_found", "This product has no report mode.");

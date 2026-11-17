@@ -11,7 +11,11 @@ import {
 import type { ChatEdge } from "../chat/turnSubmission.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
 import type { ConversationRepository } from "../conversationRepository.js";
-import { EntitlementError, type AuthIdentity, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
+import type { GuestCarryOver } from "../chat/library.js";
+import type { GuestTokens } from "../guestToken.js";
+import { handleGuestRequest } from "./guestRoutes.js";
+import { handleAudienceRequest, handleProductAgentRequest } from "./productRoutes.js";
+import { AuthorizationError, type AuthIdentity, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
 import type { RuntimeStore } from "../store.js";
 import { ResponsesHttpApi } from "../responses/router.js";
 import type { ArtifactMode } from "../artifact/mode.js";
@@ -31,7 +35,6 @@ export type RuntimeReadiness = {
   /** Set once shutdown begins, so the proxy sends nothing new. */
   draining?: boolean;
   repository: ReadinessCheck;
-  deliveryAccounting: ReadinessCheck | "disabled";
 };
 
 /** What the Runtime's HTTP surface needs from the rest of the Runtime; the composition root supplies it. */
@@ -52,6 +55,9 @@ export type RuntimeHttpDeps = {
   allowedOrigins: readonly string[];
   /** Report mode: products that offer it, and conversations that are reports. */
   artifact?: ArtifactMode;
+  /** Guests: how a visitor's signed id is verified, and what happens to their conversations when they sign in. */
+  guests?: GuestTokens;
+  carryOver?: Pick<GuestCarryOver, "carry">;
 };
 
 export async function handleHttpRequest(
@@ -78,14 +84,11 @@ export async function handleHttpRequest(
   }
   if (req.method === "GET" && url.pathname === "/readyz") {
     const repository = readiness?.repository ?? "failed";
-    const deliveryAccounting = readiness?.deliveryAccounting ?? "disabled";
-    const ready = !readiness?.draining && repository === "ready"
-      && (deliveryAccounting === "ready" || deliveryAccounting === "disabled");
+    const ready = !readiness?.draining && repository === "ready";
     writeJson(res, ready ? 200 : 503, {
       ok: ready,
       checks: {
-        conversation_repository: repository,
-        delivery_accounting: deliveryAccounting
+        conversation_repository: repository
       }
     });
     return;
@@ -101,7 +104,7 @@ export async function handleHttpRequest(
     try {
       identity = await resolveAuthIdentity(authToken, authIdentityResolver, signal);
     } catch (error) {
-      writeJson(res, 503, { error: { code: error instanceof EntitlementError ? error.code : "authentication_unavailable", message: errorMessage(error) } });
+      writeJson(res, 503, { error: { code: error instanceof AuthorizationError ? error.code : "authentication_unavailable", message: errorMessage(error) } });
       return;
     }
     const claims = identity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth);
@@ -141,6 +144,15 @@ export async function handleHttpRequest(
     return;
   }
 
+  if (url.pathname.startsWith("/v1/guest/")) {
+    try {
+      if (!await handleGuestRequest(req, res, url, { guests: deps.guests, carryOver: deps.carryOver, authIdentityResolver, allowedOrigins, maxHttpResponseBytes })) throw new ConversationHttpError(404, "not_found", "Route was not found.");
+    } catch (error) {
+      writeConversationHttpError(req, res, error);
+    }
+    return;
+  }
+
   if (url.pathname === "/v1/conversations" || url.pathname.startsWith("/v1/conversations/")) {
     if (!conversationRepository) {
       writeJson(res, 503, { error: { code: "conversation_repository_unavailable", message: "Conversation storage is unavailable." } });
@@ -152,7 +164,6 @@ export async function handleHttpRequest(
         repository: conversationRepository,
         store: conversationStore,
         assetStore,
-        entitlementResolver,
         agentCorpusResolver,
         authIdentityResolver,
         legacyHmacAuth,
@@ -167,11 +178,22 @@ export async function handleHttpRequest(
     return;
   }
 
+  if (conversationRepository && (url.pathname === "/v1/creator/audience" || /^\/v1\/products\/[^/]+\/agent$/.test(url.pathname))) {
+    try {
+      await repositoryReady;
+      const productDeps = { repository: conversationRepository, agentCorpusResolver, authIdentityResolver, legacyHmacAuth, maxHttpResponseBytes };
+      if (await handleAudienceRequest(req, res, url, productDeps, signal) || await handleProductAgentRequest(req, res, url, productDeps, signal)) return;
+    } catch (error) {
+      writeConversationHttpError(req, res, error);
+      return;
+    }
+  }
+
   if (url.pathname.startsWith("/v1/products/") && artifact && conversationRepository) {
     try {
       await repositoryReady;
       if (await handleProductArtifactRequest(req, res, url, {
-        artifact, repository: conversationRepository, entitlementResolver, agentCorpusResolver, authIdentityResolver,
+        artifact, repository: conversationRepository, agentCorpusResolver, authIdentityResolver,
         legacyHmacAuth, maxHttpResponseBytes, allowedOrigins
       })) return;
     } catch (error) {

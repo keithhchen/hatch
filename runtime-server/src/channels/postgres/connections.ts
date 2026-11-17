@@ -8,11 +8,11 @@ const LINK_CODE_MS = 15 * 60_000;
 const ACTIVE = "WHERE credentials IS NOT NULL OR audience <> 'public'";
 
 const COLUMNS = "id, owner_account_id, channel, scope, client, target, audience, task_specific, state";
-const IDENTITY_COLUMNS = "i.id AS identity_id, i.sender_id, i.thread_id";
+const IDENTITY_COLUMNS = "i.id AS identity_id, i.sender_id, i.thread_id, (SELECT p.account_id FROM hatch_channel_people p WHERE p.id = i.person_id) AS account_id";
 const connectionOf = (row: Record<string, any>): ChannelConnection => ({
   id: row.id, ownerAccountId: row.owner_account_id, channel: row.channel, scope: row.scope, client: row.client, target: row.target, audience: row.audience as Audience, taskSpecific: row.task_specific, state: row.state as ConnectionState,
 });
-const identityOf = (row: Record<string, any>): Identity => ({ id: row.identity_id ?? row.id, connectionId: row.connection_id ?? row.id, senderId: row.sender_id, threadId: row.thread_id });
+const identityOf = (row: Record<string, any>): Identity => ({ id: row.identity_id ?? row.id, connectionId: row.connection_id ?? row.id, senderId: row.sender_id, threadId: row.thread_id, ...(row.account_id ? { accountId: row.account_id } : {}) });
 
 export class PostgresConnections implements ConnectionRepository {
   private constructor(private pool: Pool, private scopeOf: (ownerAccountId: string, channel: ChannelKind) => string) {}
@@ -192,6 +192,13 @@ export class PostgresConnections implements ConnectionRepository {
       ON CONFLICT (channel, platform_user_id) DO UPDATE SET account_id = EXCLUDED.account_id WHERE hatch_channel_people.account_id IS NULL OR hatch_channel_people.account_id = EXCLUDED.account_id
       RETURNING id`, [channel, platformUserId, accountId]);
     return result.rowCount === 1;
+  }
+
+  async contact(identityId: string): Promise<Resolved | undefined> {
+    if (!/^[0-9a-f-]{36}$/.test(identityId)) return undefined;
+    const row = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
+      FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id WHERE i.id = $1 AND i.role = 'owner'`, [identityId])).rows[0];
+    return row && { connection: connectionOf(row), identity: identityOf(row) };
   }
 
   async meet(connection: ChannelConnection, who: { senderId: string; threadId: string; profile?: SenderProfile }): Promise<Identity> {

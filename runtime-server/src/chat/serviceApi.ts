@@ -9,7 +9,7 @@ import { ChatError } from "./principal.js";
 const text = z.string().min(1).max(512);
 const Principal = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("account"), accountId: text }).strict(),
-  z.object({ kind: z.literal("contact"), connectionId: text, contactId: text }).strict()
+  z.object({ kind: z.literal("contact"), connectionId: text, contactId: text, accountId: text.optional() }).strict()
 ]);
 const Conversation = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("conversation"), id: text }).strict(),

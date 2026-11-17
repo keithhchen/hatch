@@ -6,7 +6,9 @@ import { admissionStatus } from "../errors/problem.js";
 import type { RunEventHub } from "./runEventHub.js";
 import type { RunTerminator } from "./runTerminator.js";
 import type { RunSupervisor } from "./runSupervisor.js";
-import { ChatError } from "./principal.js";
+import { accountOf, ChatError } from "./principal.js";
+import type { Library } from "./library.js";
+import { log } from "../observability/log.js";
 import { assertProductUsable } from "./toolSurface.js";
 import type { RunCap } from "../usage/usageCap.js";
 import type { ChatAnalytics } from "./chatAnalytics.js";
@@ -97,6 +99,8 @@ export class ChatService<Scope> {
     compaction?: { waitForCompaction(conversationId: string): Promise<void> };
     /** Told of each message taken, for product analytics. */
     analytics?: ChatAnalytics;
+    /** Chatting with an Agent saves it to the account's library; asked once per Run that starts, and never waited for. */
+    library?: Pick<Library, "save">;
     /** A report conversation's report becomes 'generating' with the Run its first message starts. */
     artifacts?: { runAccepted(conversation: ConversationRecord, run: ConversationRunRecord): Promise<void>; assertAcceptsMessage(conversation: ConversationRecord, runId: string): Promise<void> };
   }) {}
@@ -136,7 +140,7 @@ export class ChatService<Scope> {
   }
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap, analytics, artifacts } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap, analytics, artifacts, library } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
@@ -180,6 +184,10 @@ export class ChatService<Scope> {
         registry.rememberClient(command.conversation.id, command.client, command.timeZone);
         if (outcome === "started") await artifacts?.runAccepted(command.conversation, accepted.run);
         if (!known) analytics?.messageAccepted({ conversation: command.conversation, principal: command.principal, client: command.client });
+        const account = accountOf(command.principal);
+        if (outcome === "started" && account && library) {
+          library.save(account, command.conversation.productId).catch((error: unknown) => log.error("library_save_failed", { error: error instanceof Error ? error.message : String(error) }));
+        }
       }
       if (outcome === "started") {
         registry.rememberScope(accepted.run.id, command.scope);

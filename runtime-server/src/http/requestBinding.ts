@@ -3,12 +3,9 @@ import type { AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCor
 import { errorMessage } from "../chat/modelTurn.js";
 import {
   conversationBinding,
-  durableConversationId,
   legacyAuthClaims,
   resolveAuthIdentity,
   resolveSessionBinding,
-  runtimeNotConfiguredError,
-  unconfiguredEntitlementResolver,
   type LegacyHmacAuth,
   type SessionBinding
 } from "../chat/sessionBinding.js";
@@ -18,55 +15,31 @@ import {
   ConversationRepositoryError,
   type ConversationRepository
 } from "../conversationRepository.js";
-import { EntitlementError, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
+import { AuthorizationError, type AuthIdentityResolver } from "../entitlements.js";
 import { toProblem } from "../errors/problem.js";
+import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import { sessionTokenFromCookie } from "../chat/originPolicy.js";
 import { bearerToken } from "./httpSupport.js";
 
 export async function bindingFromHistoryRequest(
   req: http.IncomingMessage,
   url: URL,
-  entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
   authIdentityResolver?: AuthIdentityResolver,
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
   signal?: AbortSignal
 ): Promise<SessionBinding | undefined> {
-  const entitlementId = url.searchParams.get("entitlement_id") ?? undefined;
   const authToken = bearerToken(req);
   const authIdentity = await resolveAuthIdentity(authToken, authIdentityResolver, signal);
-  // Owner REST requests use the same owned-Product authorization as client.hello.
   const selectedProduct = url.searchParams.get("product_id");
-  const productMode = Boolean(entitlementResolver || agentCorpusResolver);
-  if (entitlementResolver === unconfiguredEntitlementResolver) throw runtimeNotConfiguredError();
-  if (productMode && selectedProduct && !entitlementId) {
+  if (agentCorpusResolver && selectedProduct) {
     return resolveSessionBinding({
       auth_token: authToken,
       product_id: selectedProduct
-    }, entitlementResolver, agentCorpusResolver, authIdentityResolver,
+    }, agentCorpusResolver, authIdentityResolver,
     authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth), signal);
   }
-  if (productMode) {
-    if (!entitlementResolver || !agentCorpusResolver) {
-      throw new EntitlementError(
-        "entitlement_configuration_incomplete",
-        "Expert Agent access is unavailable because entitlement verification is not fully configured."
-      );
-    }
-    if (!entitlementId || !authToken) {
-      throw new EntitlementError("entitlement_required", "A Bearer token and Expert Agent entitlement are required.");
-    }
-    if (authIdentityResolver && !authIdentity) {
-      throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
-    }
-    // HTTP and WebSocket use the same account/access/Product binding. A
-    // purchase record authorizes access; it does not select Agent instructions.
-    return resolveSessionBinding({
-      auth_token: authToken,
-      entitlement_id: entitlementId
-    }, entitlementResolver, agentCorpusResolver, authIdentityResolver,
-    authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth), signal);
-  }
+  if (agentCorpusResolver) throw new AuthorizationError("product_required", "A product_id is required.");
 
   // Self-reported scope is accepted only when no product resolver is configured.
   // This keeps resolver-free local development usable without creating a
@@ -80,7 +53,6 @@ export async function bindingFromHistoryRequest(
 export async function requireConversationBinding(
   req: http.IncomingMessage,
   url: URL,
-  entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
   authIdentityResolver?: AuthIdentityResolver,
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
@@ -90,19 +62,20 @@ export async function requireConversationBinding(
     const binding = await bindingFromHistoryRequest(
       req,
       url,
-      entitlementResolver,
       agentCorpusResolver,
       authIdentityResolver,
       legacyHmacAuth,
       signal
     );
-    if (!binding) throw new ConversationHttpError(400, "binding_required", "A signed-in Expert Agent binding is required.");
+    if (!binding) throw new ConversationHttpError(400, "binding_required", "A product_id is required.");
     return binding;
   } catch (error) {
     if (error instanceof ConversationHttpError) throw error;
     // A Registry outage is a 503, not a refusal of access.
-    if (error instanceof EntitlementError && toProblem(error).status === 503) throw error;
-    throw new ConversationHttpError(403, "entitlement_required", errorMessage(error));
+    if (error instanceof AuthorizationError && toProblem(error).status === 503) throw error;
+    if (error instanceof AgentReleaseUnavailableError) throw new ConversationHttpError(404, "agent_unavailable", "This Agent is not available.");
+    const problem = toProblem(error);
+    throw new ConversationHttpError(problem.status === 500 ? 403 : problem.status, problem.status === 500 ? "access_denied" : problem.code, errorMessage(error));
   }
 }
 
@@ -112,12 +85,16 @@ export async function requireBoundConversation(
   publicId: string
 ) {
   if (!publicId) throw new ConversationHttpError(400, "conversation_id_required", "A conversation ID is required.");
-  const conversation = await repository.getConversation(durableConversationId(binding, publicId));
+  // By the owner and the id the client knows: a conversation that moved to an account when its visitor signed in keeps its id.
+  const owner = conversationBinding(binding);
+  const conversation = await repository.findOwnedConversation({ ownerAccountId: owner.ownerAccountId, creatorId: owner.creatorId }, publicId);
   if (!conversation) throw new ConversationHttpError(404, "conversation_not_found", `Conversation ${publicId} was not found.`);
   try {
     assertConversationBinding(conversation, conversationBinding(binding));
   } catch (error) {
     if (error instanceof ConversationRepositoryError) {
+      // Another Product's conversation is not in this Product's scope: not found, as before the owner lookup.
+      if (error.code === "conversation_binding_mismatch") throw new ConversationHttpError(404, "conversation_not_found", `Conversation ${publicId} was not found.`);
       throw new ConversationHttpError(403, error.code, error.message);
     }
     throw error;

@@ -30,15 +30,21 @@ export interface Uploads {
 export class ServiceChatGateway<Scope> implements ChatGateway {
   constructor(private readonly deps: {
     chat: ChatService<Scope>;
-    binders: Record<Principal["kind"], PrincipalBinder<Scope>>;
+    /** A guest is a web visitor and never reaches Chat through a channel: it has no binder here. */
+    binders: Record<Exclude<Principal["kind"], "guest">, PrincipalBinder<Scope>>;
     parts: PartsReader;
     uploads?: Uploads;
     repository: Pick<ConversationRepository, "findRun" | "latestRunStateCursor" | "snapshot">;
     history: { readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> };
   }) {}
 
+  private binderOf(principal: Principal): PrincipalBinder<Scope> {
+    if (principal.kind === "guest") throw new ChatError("principal_not_allowed", "A guest does not use channels.", 403);
+    return this.deps.binders[principal.kind];
+  }
+
   async send(principal: Principal, ref: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]): Promise<SentMessage> {
-    const bound = await this.deps.binders[principal.kind].bind(principal, ref);
+    const bound = await this.binderOf(principal).bind(principal, ref);
     const { message, digest, bind } = await this.deps.parts.prepare(parts, bound.conversation, messageId);
     const submission = await this.deps.chat.submit({
       principal, client, message, digest, ...(bind ? { bind } : {}), ...bound,
@@ -49,14 +55,14 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
   }
 
   async restart(principal: Principal, ref: Extract<ConversationRef, { kind: "thread" }>, key: string): Promise<{ conversationId: string }> {
-    const binder = this.deps.binders[principal.kind];
+    const binder = this.binderOf(principal);
     if (!binder.restart) throw new ChatError("restart_unavailable", "This conversation cannot be restarted.", 409);
     return { conversationId: (await binder.restart(principal, ref, key)).id };
   }
 
   async upload(principal: Principal, ref: ConversationRef, input: { name: string; bytes: Buffer }): Promise<UploadedRef> {
     if (!this.deps.uploads) throw new ChatError("attachments_unavailable", "This Runtime cannot take attachments.", 501);
-    const { conversation } = await this.deps.binders[principal.kind].bind(principal, ref);
+    const { conversation } = await this.binderOf(principal).bind(principal, ref);
     const { asset_id: assetId, kind } = await this.deps.uploads.upload(conversation, input);
     return { assetId, kind };
   }

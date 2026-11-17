@@ -39,7 +39,7 @@ test("a buyer's HTTP event stream carries no private corpus path, as on the WebS
   };
   const { baseRoot, corpusRoot } = await writeCorpus(entitlement);
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-private-boundary-"));
-  const entitlementResolver: EntitlementResolver = { list: async () => [entitlement], resolve: async () => entitlement };
+  const entitlementResolver: EntitlementResolver = { list: async () => [entitlement] };
   const authIdentityResolver: AuthIdentityResolver = { resolveIdentity: async () => ({ sub: entitlement.user_id }) };
   const runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(dataDir), entitlementResolver, authIdentityResolver, agentCorpusResolver: new AgentCorpusResolver(baseRoot),
@@ -54,7 +54,7 @@ test("a buyer's HTTP event stream carries no private corpus path, as on the WebS
     const address = runtime.server.address();
     if (!address || typeof address === "string") throw new Error("no port");
     const base = `http://127.0.0.1:${address.port}`;
-    const query = new URLSearchParams({ entitlement_id: entitlement.entitlement_id, creator_id: entitlement.creator_id, product_id: entitlement.product_id }).toString();
+    const query = new URLSearchParams({ product_id: entitlement.product_id }).toString();
     const headers = { authorization: "Bearer buyer-session", "content-type": "application/json" };
     const created = await (await fetch(`${base}/v1/conversations?${query}`, { method: "POST", headers, body: JSON.stringify({ client_request_id: "private_boundary" }) })).json() as { conversation: { id: string } };
     const stream = await fetch(`${base}/v1/conversations/${encodeURIComponent(created.conversation.id)}/messages?${query}`, {

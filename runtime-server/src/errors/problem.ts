@@ -3,13 +3,13 @@ import { BriefValidationError } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
 import { ConversationRepositoryError } from "../conversationRepository.js";
 import { ConversationError } from "../conversations/conversation.js";
-import { EntitlementError } from "../entitlements.js";
+import { AuthorizationError } from "../entitlements.js";
 
 /** How any failure is told to a client. `internal` marks a failure nobody anticipated: the adapter logs the real error. */
 export type Problem = { status: number; code: string; message: string; details?: unknown; internal?: true };
 
 const UNAVAILABLE = new Set(["auth_registry_unavailable", "auth_registry_invalid", "entitlement_registry_unavailable", "authorization_unavailable", "authorization_cancelled"]);
-const DENIED = new Set(["authentication_required", "auth_invalid", "entitlement_required", "entitlement_not_found", "agent_entitlement_mismatch"]);
+const SIGN_IN = new Set(["authentication_required", "auth_invalid"]);
 
 /** The status of a repository refusal on the Conversation HTTP routes. */
 export const repositoryStatus = (code: string): number =>
@@ -29,9 +29,11 @@ export function toProblem(error: unknown): Problem {
   if (error instanceof ConversationError) return { status: error.status, code: error.code, message: error.message, ...(error.details === undefined ? {} : { details: error.details }) };
   if (error instanceof ChatError) return { status: error.status, code: error.code, message: error.message };
   if (error instanceof BriefValidationError) return { status: 422, code: error.code, message: error.message };
-  if (error instanceof EntitlementError) {
+  if (error instanceof AuthorizationError) {
     if (UNAVAILABLE.has(error.code)) return { status: 503, code: "authorization_unavailable", message: "Hatch could not verify access right now. Try again shortly." };
-    if (DENIED.has(error.code)) return { status: 403, code: "entitlement_required", message: "This Expert Agent is not available for the signed-in account." };
+    if (SIGN_IN.has(error.code)) return { status: 401, code: "authentication_required", message: "Your Hatch session is not valid. Sign in again." };
+    if (error.code === "agent_corpus_unavailable") return { status: 404, code: "agent_unavailable", message: "This Agent is not available." };
+    if (error.code === "product_required") return { status: 400, code: "product_required", message: "A product_id is required." };
     return { status: 500, code: "internal_error", message: "The Runtime could not complete this request.", internal: true };
   }
   if (error instanceof ConversationRepositoryError) return { status: repositoryStatus(error.code), code: error.code, message: error.message };

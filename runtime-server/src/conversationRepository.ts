@@ -6,6 +6,7 @@ import type { PostgresStore, PostgresTransactionClient } from "./postgresStore.j
 import { LocalRuntimeAuthority, localRuntimeAuthority, type RunStatus, type StoreEvent, type SubmissionReceipt } from "./store.js";
 import type { OutputFinishReason, ToolRequest } from "./protocol.js";
 import type { ConversationMessage } from "./protocol.js";
+import { TASK_START_DIGEST } from "./protocol.js";
 import { failureOfReason, type PublicFailure } from "./errors/failures.js";
 import type { VisibleConversationPart } from "./store.js";
 import { RunFenced, type RunHold } from "./runHold.js";
@@ -60,6 +61,17 @@ export type ConversationBinding = {
 
 /** The account whose own Products a caller chats with: the owner is also the creator. */
 export type OwnerScope = Pick<ConversationBinding, "ownerAccountId" | "creatorId">;
+
+/** Who opened conversations with one Product of a creator: one row per (Product, owner), with counts only, never what was said. */
+export type AudienceRow = {
+  productId: string;
+  /** The conversations' owner key: an account id, `guest:<id>`, or `contact:<connection>:<contact>`. */
+  ownerAccountId: string;
+  conversations: number;
+  messages: number;
+  firstAt: string;
+  lastAt: string;
+};
 
 export type ConversationRecord = ConversationBinding & {
   /** Private storage key. The server scopes it to the authenticated binding. */
@@ -317,7 +329,16 @@ export interface ConversationRepository {
   /** Lookup used to acknowledge a transport retry without starting tools again. */
   getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined>;
   listRuns(conversationId: string): Promise<ConversationRunRecord[]>;
-  /** Messages the owner has sent to this Agent across all conversations; failed runs are not counted. */
+  /** Who has opened conversations with the creator's Products (not the creator themself), the most recently active first. */
+  listAudience(creatorId: string, options?: { productId?: string; limit?: number }): Promise<AudienceRow[]>;
+  /** The Products an owner has conversations with, each once. */
+  ownedProductIds(ownerAccountId: string): Promise<string[]>;
+  /**
+   * Everything `from` owns becomes `to`'s, in one step: a visitor's conversations when they sign in. Repeating it moves nothing more.
+   * A conversation's request key goes with its old owner, so it can never collide with one the account made. Returns how many moved.
+   */
+  reown(from: string, to: string): Promise<number>;
+  /** Messages the owner has sent to this Agent across all conversations; failed runs are not counted. A Run the system started from the Brief is not a message. */
   countSentMessages(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">): Promise<number>;
   /** Moves a Run between its live states. Ending one is `endRun`'s alone. With `hold`, only the executor that holds the Run may. */
   transitionRun(runId: string, status: LiveRunStatus, reason?: string, hold?: RunHold): Promise<ConversationRunRecord>;
@@ -902,11 +923,43 @@ export class InMemoryConversationRepository implements ConversationRepository {
     return run ? cloneRun(run) : undefined;
   }
 
+  async listAudience(creatorId: string, options: { productId?: string; limit?: number } = {}): Promise<AudienceRow[]> {
+    await this.readReady();
+    const rows = new Map<string, AudienceRow>();
+    for (const conversation of this.conversations.values()) {
+      if (conversation.creatorId !== creatorId || conversation.ownerAccountId === creatorId || (options.productId && conversation.productId !== options.productId)) continue;
+      const key = `${conversation.productId}\u0000${conversation.ownerAccountId}`;
+      const messages = [...this.runs.values()].filter((run) => run.conversationId === conversation.id && run.status !== "failed" && run.inputDigest !== TASK_START_DIGEST).length;
+      const row = rows.get(key);
+      rows.set(key, row
+        ? { ...row, conversations: row.conversations + 1, messages: row.messages + messages, firstAt: row.firstAt < conversation.createdAt ? row.firstAt : conversation.createdAt, lastAt: row.lastAt > conversation.createdAt ? row.lastAt : conversation.createdAt }
+        : { productId: conversation.productId, ownerAccountId: conversation.ownerAccountId, conversations: 1, messages, firstAt: conversation.createdAt, lastAt: conversation.createdAt });
+    }
+    return [...rows.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt)).slice(0, options.limit ?? 200);
+  }
+
+  async ownedProductIds(ownerAccountId: string): Promise<string[]> {
+    await this.readReady();
+    return [...new Set([...this.conversations.values()].filter((conversation) => conversation.ownerAccountId === ownerAccountId).map((conversation) => conversation.productId))];
+  }
+
+  async reown(from: string, to: string): Promise<number> {
+    return this.write(async () => {
+      let moved = 0;
+      for (const [id, conversation] of this.conversations) {
+        if (conversation.ownerAccountId !== from) continue;
+        this.conversations.set(id, { ...conversation, ownerAccountId: to });
+        moved += 1;
+      }
+      return moved;
+    });
+  }
+
   async countSentMessages(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">): Promise<number> {
     await this.readReady();
     return [...this.runs.values()].filter((run) => {
       const conversation = this.conversations.get(run.conversationId);
-      return run.status !== "failed"
+      return run.status !== "failed" && run.inputDigest !== TASK_START_DIGEST
         && conversation?.ownerAccountId === binding.ownerAccountId
         && conversation.creatorId === binding.creatorId
         && conversation.agentId === binding.agentId;
@@ -1179,6 +1232,9 @@ BEGIN
 END $$;
 CREATE INDEX IF NOT EXISTS hatch_conversations_owner_public_idx
   ON hatch_conversations (owner_account_id, public_id);
+-- Who opened conversations with a creator's Products: the Users view reads by creator and Product.
+CREATE INDEX IF NOT EXISTS hatch_conversations_creator_agent_created_idx
+  ON hatch_conversations (creator_id, agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS hatch_conversations_library_created_idx
   ON hatch_conversations (owner_account_id, creator_id, agent_id, created_at DESC, id COLLATE "C" DESC);
 DROP INDEX IF EXISTS hatch_conversations_library_idx;
@@ -1907,6 +1963,41 @@ export class PostgresConversationRepository implements ConversationRepository {
     return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
   }
 
+  async listAudience(creatorId: string, options: { productId?: string; limit?: number } = {}): Promise<AudienceRow[]> {
+    await this.initialize();
+    const result = await this.pool.query<{ product_id: string; owner_account_id: string; conversations: string; messages: string; first_at: Date; last_at: Date }>(`
+      SELECT c.product_id, c.owner_account_id, count(DISTINCT c.id) AS conversations,
+             count(r.id) FILTER (WHERE r.status <> 'failed' AND r.input_digest IS DISTINCT FROM $4) AS messages,
+             min(c.created_at) AS first_at, max(c.created_at) AS last_at
+      FROM hatch_conversations c LEFT JOIN hatch_conversation_runs r ON r.conversation_id = c.id
+      WHERE c.creator_id = $1 AND c.owner_account_id <> $1 AND ($2::text IS NULL OR c.agent_id = $2)
+      GROUP BY c.product_id, c.owner_account_id
+      ORDER BY max(c.created_at) DESC
+      LIMIT $3`, [creatorId, options.productId ?? null, options.limit ?? 200, TASK_START_DIGEST]);
+    return result.rows.map((row) => ({
+      productId: row.product_id, ownerAccountId: row.owner_account_id, conversations: Number(row.conversations), messages: Number(row.messages),
+      firstAt: new Date(row.first_at).toISOString(), lastAt: new Date(row.last_at).toISOString()
+    }));
+  }
+
+  async ownedProductIds(ownerAccountId: string): Promise<string[]> {
+    await this.initialize();
+    const result = await this.pool.query<{ product_id: string }>("SELECT DISTINCT product_id FROM hatch_conversations WHERE owner_account_id = $1", [ownerAccountId]);
+    return result.rows.map((row) => row.product_id);
+  }
+
+  async reown(from: string, to: string): Promise<number> {
+    await this.initialize();
+    return this.inTransaction(async (repository) => {
+      const moved = await repository.pool.query("UPDATE hatch_conversations SET owner_account_id = $2, client_request_id = NULL WHERE owner_account_id = $1 RETURNING id", [from, to]);
+      // Report mode keeps its own record of who owns a report conversation; it moves with the conversation or not at all.
+      if ((await repository.pool.query<{ reports: string | null }>("SELECT to_regclass('hatch_artifact_reports') AS reports")).rows[0]?.reports) {
+        await repository.pool.query("UPDATE hatch_artifact_reports SET owner_account_id = $2 WHERE owner_account_id = $1", [from, to]);
+      }
+      return moved.rows.length;
+    });
+  }
+
   async countSentMessages(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">): Promise<number> {
     await this.initialize();
     const result = await this.pool.query<{ count: string }>(`
@@ -1914,7 +2005,8 @@ export class PostgresConversationRepository implements ConversationRepository {
       FROM hatch_conversation_runs AS r
       JOIN hatch_conversations AS c ON c.id = r.conversation_id
       WHERE c.owner_account_id = $1 AND c.creator_id = $2 AND c.agent_id = $3 AND r.status <> 'failed'
-    `, [binding.ownerAccountId, binding.creatorId, binding.agentId]);
+        AND r.input_digest IS DISTINCT FROM $4
+    `, [binding.ownerAccountId, binding.creatorId, binding.agentId, TASK_START_DIGEST]);
     return Number(result.rows[0]?.count ?? 0);
   }
 

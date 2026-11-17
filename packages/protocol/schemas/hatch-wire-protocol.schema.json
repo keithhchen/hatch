@@ -149,19 +149,7 @@
       "type": "object",
       "additionalProperties": false,
       "allOf": [
-        { "anyOf": [{ "required": ["auth_token"] }, { "required": ["license_token"] }] },
-        {
-          "if": { "required": ["entitlement_id"] },
-          "then": {
-            "not": {
-              "anyOf": [
-                { "required": ["creator_id"] },
-                { "required": ["user_id"] },
-                { "required": ["product_id"] }
-              ]
-            }
-          }
-        }
+        { "anyOf": [{ "required": ["auth_token"] }, { "required": ["license_token"] }] }
       ],
       "required": [
         "type",
@@ -175,7 +163,6 @@
         "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "auth_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "license_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
-        "entitlement_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "creator_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "user_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "product_id": { "type": "string", "minLength": 1, "maxLength": 256 },
@@ -281,12 +268,6 @@
         "product_id": { "type": "string", "minLength": 1 },
         "agent_id": { "type": "string", "minLength": 1 },
         "corpus_digest": { "$ref": "#/$defs/digest" },
-        "purchased_corpus_digest": { "$ref": "#/$defs/digest" },
-        "effective_corpus_digest": { "$ref": "#/$defs/digest" },
-        "version_policy": { "type": "string", "enum": ["pinned", "track_current_compatible"] },
-        "version_history": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
-        "access_mode": { "type": "string", "enum": ["unmetered", "metered"] },
-        "entitlement_id": { "type": "string", "minLength": 1 },
         "creator_agent": {
           "type": "object",
           "additionalProperties": false,
@@ -616,23 +597,7 @@
       "properties": {
         "type": { "const": "turn.completed" },
         "run_id": { "type": "string" },
-        "finish_reason": { "enum": ["stop", "content_filter", "length"] },
-        "receipt_status": { "enum": ["recorded", "syncing"] }
-      }
-    },
-    "deliveryReady": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type", "run_id", "product_id", "artifact_id", "artifact_digest", "delivery_id"],
-      "properties": {
-        "type": { "const": "delivery.ready" },
-        "run_id": { "type": "string", "minLength": 1 },
-        "product_id": { "type": "string", "minLength": 1 },
-        "artifact_id": { "type": "string", "minLength": 1 },
-        "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
-        "delivery_id": { "type": "string", "minLength": 1 },
-        "artifact_type": { "enum": ["file", "message"] },
-        "receipt_status": { "enum": ["recorded", "syncing"] }
+        "finish_reason": { "enum": ["stop", "content_filter", "length"] }
       }
     },
     "turnFailed": {
@@ -684,7 +649,6 @@
         { "$ref": "#/$defs/turnState" },
         { "$ref": "#/$defs/messageAccepted" },
         { "$ref": "#/$defs/sessionCompacted" },
-        { "$ref": "#/$defs/deliveryReady" },
         { "$ref": "#/$defs/turnCompleted" },
         { "$ref": "#/$defs/turnFailed" }
       ]

@@ -1,7 +1,4 @@
 export const OPERATIONAL_FAILURES = {
-  commerce_delivery_reconciliation_failed: "delivery_accounting",
-  commerce_delivery_receipt_deferred: "delivery_accounting",
-  commerce_delivery_reservation_release_failed: "delivery_accounting",
   steered_claim_after_failure_failed: "conversation",
   runtime_startup_failed: "runtime_startup",
   registry_startup_failed: "registry_startup"
@@ -14,8 +11,7 @@ const SAFE_ERROR_NAMES = new Set([
   "AbortError",
   "AggregateError",
   "ConversationRepositoryError",
-  "DeliveryAccountingOutboxError",
-  "EntitlementError",
+  "AuthorizationError",
   "Error",
   "EvalError",
   "NonError",

@@ -75,16 +75,27 @@ export class ContactBinder {
 
 const threadKey = (principal: ContactPrincipal, ref: Extract<ConversationRef, { kind: "thread" }>): ThreadKey => ({ connectionId: ref.connectionId, threadId: ref.threadId, principalId: principal.contactId });
 
-/** A contact may send a bounded number of messages to a Product: the repository counts them. */
+/** What anyone may send to one Agent before signing in. */
+export const FREE_MESSAGES = 3;
+
+/**
+ * Messages to one Product are bounded: a guest, and a contact whose person has not signed in on the web, may send a few, then must sign in
+ * (`login_required`). A contact has a cap for good, signed in or not. The repository counts them.
+ */
 export class SentMessageLimits implements PrincipalLimits {
   constructor(
     private readonly repository: Pick<ConversationRepository, "countSentMessages">,
-    private readonly maxMessages: number
+    private readonly maxMessages: number,
+    private readonly freeMessages = FREE_MESSAGES
   ) {}
 
   async check(principal: Principal, conversation: ConversationRecord): Promise<void> {
-    if (principal.kind !== "contact") return;
-    if (await this.repository.countSentMessages(conversation) >= this.maxMessages) {
+    if (principal.kind === "account") return;
+    const sent = await this.repository.countSentMessages(conversation);
+    if (!("accountId" in principal && principal.accountId) && sent >= this.freeMessages) {
+      throw new ChatError("login_required", "Sign in to keep talking to this Agent.", 403);
+    }
+    if (principal.kind === "contact" && sent >= this.maxMessages) {
       throw new ChatError("contact_limit_reached", "This contact has reached the message limit.", 429);
     }
   }

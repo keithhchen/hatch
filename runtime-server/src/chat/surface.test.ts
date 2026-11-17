@@ -118,7 +118,8 @@ test("a contact is refused on a degraded or self Connection, an org member is bo
   assert.equal(member.conversation.productId, productId);
   const bound = await new ContactBinder({ get: async () => connection() }, products, repository).bind(alice, ref);
   const limits = new SentMessageLimits({ countSentMessages: async () => 3 }, 3);
-  await assert.rejects(limits.check(alice, bound.conversation), (error: unknown) => error instanceof ChatError && error.status === 429);
+  await assert.rejects(limits.check({ ...alice, accountId: "signed-in" }, bound.conversation), (error: unknown) => error instanceof ChatError && error.status === 429);
+  await assert.rejects(limits.check(alice, bound.conversation), (error: unknown) => error instanceof ChatError && error.code === "login_required");
   await new SentMessageLimits({ countSentMessages: async () => 3 }, 3).check({ kind: "account", accountId: "a" }, bound.conversation);
 });
 

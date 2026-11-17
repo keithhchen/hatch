@@ -4,6 +4,8 @@ import type { Inbox, InboxItem } from "./inbox.js";
 import type { ChatTarget } from "./chatTarget.js";
 import type { ChatGateway, Inbound, ReplyPolicy } from "./ports.js";
 import type { Rate, RateLimiter } from "./rateLimiter.js";
+import { ChatError } from "../chat/principal.js";
+import type { ImLinks } from "./imLink.js";
 import { log } from "../observability/log.js";
 
 /** A contact may write this much: a burst of 10, then one message every 20 seconds. */
@@ -11,9 +13,12 @@ const CONTACT_RATE: Rate = { capacity: 10, perSecond: 1 / 20 };
 export const FAILED = "出了点问题，请再发一次。\nSomething went wrong, please send that again.";
 const BUSY = "消息有点多，请稍后再发。\nToo many messages, please try again in a moment.";
 
+const SIGN_IN_ON_WEB = "免费消息已用完，请登录 Hatch 网站后继续。\nYou have used your free messages. Please sign in on the Hatch website to continue.\n無料メッセージを使い切りました。続けるには Hatch のサイトにログインしてください。";
+const signInWithLink = (link: string) => `免费消息已用完，请登录后继续（链接 30 分钟内有效）：\n${link}\nYou have used your free messages. Sign in to continue (link valid for 30 minutes):\n${link}\n無料メッセージを使い切りました。ログインして続けてください（30分間有効）：\n${link}`;
+
 /** Chat answers the Connection: an Expert Product talking to its owner, an organization, or the public. */
 export class ProductTarget implements ChatTarget {
-  constructor(private deps: { gateway: ChatGateway; limiter: RateLimiter; contactRate?: Rate }) {}
+  constructor(private deps: { gateway: ChatGateway; limiter: RateLimiter; contactRate?: Rate; /** Where a contact past the free messages signs in. Without it the reply has no link. */ imLinks?: ImLinks }) {}
 
   async linked(): Promise<string> { return "连上了。可以开始聊了。\nConnected. You can start talking."; }
 
@@ -32,8 +37,14 @@ export class ProductTarget implements ChatTarget {
 
   upload({ connection, principal, address }: Inbound, file: { name: string; bytes: Buffer }) { return this.deps.gateway.upload(principal, thread(connection, address), file); }
 
-  send({ connection, principal, address }: Inbound, { key, parts }: { key: string; parts: ContentPart[] }) {
-    return this.deps.gateway.send(principal, thread(connection, address), { client: connection.client }, key, parts);
+  async send({ connection, principal, address }: Inbound, { key, parts }: { key: string; parts: ContentPart[] }) {
+    try { return await this.deps.gateway.send(principal, thread(connection, address), { client: connection.client }, key, parts); }
+    catch (error) {
+      if (!(error instanceof ChatError) || error.code !== "login_required") throw error;
+      const { imLinks } = this.deps;
+      const link = imLinks?.linkable(connection) && principal.kind === "contact" ? imLinks.url(connection.id, principal.contactId) : undefined;
+      throw new ChatError("login_required", link ? signInWithLink(link) : SIGN_IN_ON_WEB, 403);
+    }
   }
 }
 

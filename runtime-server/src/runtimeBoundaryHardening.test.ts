@@ -11,7 +11,7 @@ import type { AgentRuntime, RunContext } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { creatorModelToolName, type CreatorToolControlPlane } from "./creatorTools.js";
 import {
-  EntitlementError,
+  AuthorizationError,
   type AuthIdentityResolver,
   type EntitlementBinding,
   type EntitlementResolver
@@ -254,14 +254,13 @@ test("one account can resolve multiple sessions concurrently", async () => {
   const corpusStarted = new Promise<void>((resolve) => { markCorpusStarted = resolve; });
   let releaseCorpus!: () => void;
   const corpusGate = new Promise<void>((resolve) => { releaseCorpus = resolve; });
-  const corpusResolver = {
-    resolve: async () => {
-      corpusCalls += 1;
-      markCorpusStarted();
-      await corpusGate;
-      return resolvedCorpus;
-    }
-  } as unknown as AgentCorpusResolver;
+  const resolveGated = async () => {
+    corpusCalls += 1;
+    markCorpusStarted();
+    await corpusGate;
+    return resolvedCorpus;
+  };
+  const corpusResolver = { resolve: resolveGated, resolveByProduct: resolveGated } as unknown as AgentCorpusResolver;
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
@@ -273,7 +272,6 @@ test("one account can resolve multiple sessions concurrently", async () => {
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     conversationRepository,
     authIdentityResolver: identityResolver,
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: corpusResolver
   });
   const port = await listen(runtime);
@@ -283,14 +281,14 @@ test("one account can resolve multiple sessions concurrently", async () => {
     const firstReady = waitForMessage(first, (message) => message.type === "session.ready");
     first.send(JSON.stringify({
       ...hello("same-user-session-one", "same-user-install-one"),
-      entitlement_id: entitlement.entitlement_id
+      product_id: entitlement.product_id
     }));
     await corpusStarted;
 
     const secondReady = waitForMessage(second, (message) => message.type === "session.ready");
     second.send(JSON.stringify({
       ...hello("same-user-session-two", "same-user-install-two"),
-      entitlement_id: entitlement.entitlement_id
+      product_id: entitlement.product_id
     }));
     await waitUntil(() => corpusCalls === 2);
 
@@ -334,9 +332,9 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id }) },
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: {
-      resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
+      resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` }),
+      resolveByProduct: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
     } as unknown as AgentCorpusResolver,
     creatorToolControlPlane: controlPlane,
     conversationRepository
@@ -393,7 +391,6 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
     createRuntime: () => agentRuntime,
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id }) },
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: new AgentCorpusResolver(fixture.baseRoot),
     creatorToolControlPlane: controlPlane,
     conversationRepository
@@ -435,7 +432,6 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: identityResolver,
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     maxPendingTurnAuthorizations: 2,
     maxActiveRunsGlobal: 10,
@@ -501,7 +497,6 @@ test("per-user turn authorization capacity prevents one account from occupying t
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: identityResolver,
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     maxPendingTurnAuthorizations: 4,
     maxPendingTurnAuthorizationsPerUser: 1,
@@ -934,7 +929,6 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: identityResolver,
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     conversationRepository
   });
@@ -1217,14 +1211,16 @@ test("HTTP Registry authorization failures return controlled 503 responses", asy
     resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
   const unavailableEntitlements: EntitlementResolver = {
-    list: async () => { throw new EntitlementError("entitlement_registry_unavailable", "upstream detail"); },
-    resolve: async () => { throw new EntitlementError("entitlement_registry_unavailable", "upstream detail"); }
+    list: async () => { throw new AuthorizationError("entitlement_registry_unavailable", "upstream detail"); }
   };
   const runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-auth-"))),
     authIdentityResolver: identityResolver,
     entitlementResolver: unavailableEntitlements,
-    agentCorpusResolver: fixtureCorpusResolver(entitlement)
+    agentCorpusResolver: {
+      ...fixtureCorpusResolver(entitlement),
+      resolveByProduct: async () => { throw new AuthorizationError("entitlement_registry_unavailable", "upstream detail"); }
+    } as unknown as AgentCorpusResolver
   });
   const port = await listen(runtime);
   try {
@@ -1240,9 +1236,7 @@ test("HTTP Registry authorization failures return controlled 503 responses", asy
     });
 
     const history = new URL(`http://127.0.0.1:${port}/v1/conversations/conversation/history`);
-    history.searchParams.set("entitlement_id", entitlement.entitlement_id);
-    history.searchParams.set("creator_id", entitlement.creator_id);
-    history.searchParams.set("agent_id", entitlement.agent_id);
+    history.searchParams.set("product_id", entitlement.product_id);
     const response = await fetch(history, { headers: { authorization: "Bearer opaque-session" } });
     assert.equal(response.status, 503);
     assert.equal(((await response.json()) as { error: { code: string } }).error.code, "authorization_unavailable");
@@ -1260,10 +1254,7 @@ test("a disconnected HTTP request does not block another request from the same s
       return new Promise((resolve) => releases.push(resolve));
     }
   };
-  const entitlements: EntitlementResolver = {
-    list: async () => [],
-    resolve: async () => fixtureEntitlement()
-  };
+  const entitlements: EntitlementResolver = { list: async () => [] };
   const runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-disconnect-"))),
     authIdentityResolver: identityResolver,
@@ -1308,10 +1299,7 @@ test("HTTP request deadlines bound concurrent abort-ignoring authorization work"
   const runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-deadline-"))),
     authIdentityResolver: identityResolver,
-    entitlementResolver: {
-      list: async () => [],
-      resolve: async () => fixtureEntitlement()
-    },
+    entitlementResolver: { list: async () => [] },
     agentCorpusResolver: fixtureCorpusResolver(fixtureEntitlement()),
     httpRequestTimeoutMs: 35
   });
@@ -1399,38 +1387,32 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
   }
 });
 
-test("entitlement-backed turns reject a grant for another account even with a permissive resolver", async () => {
+test("a turn is refused when the session now resolves to another account, and that account cannot read the conversation", async () => {
   const entitlement = fixtureEntitlement();
-  let grant = entitlement;
+  let account = entitlement.user_id;
   let runCalls = 0;
-  const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async () => ({ sub: entitlement.user_id })
-  };
-  const conversationRepository = await authBoundaryConversations(entitlement, ["grant-changing-install"]);
+  const conversationRepository = await authBoundaryConversations(entitlement, ["identity-changing-install"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     conversationRepository,
-    authIdentityResolver: identityResolver,
-    entitlementResolver: { list: async () => [grant], resolve: async () => grant },
+    authIdentityResolver: { resolveIdentity: async () => ({ sub: account }) },
     agentCorpusResolver: fixtureCorpusResolver(entitlement)
   });
   const port = await listen(runtime);
-  const socket = await connectEntitledSocket(port, entitlement, "grant-changing-session", "grant-changing-install");
+  const socket = await connectEntitledSocket(port, entitlement, "identity-changing-session", "identity-changing-install");
   try {
-    grant = { ...entitlement, user_id: "77777777-7777-4777-8777-777777777777" };
-    const rejected = waitForMessage(socket, (message) => message.run_id === "run-grant-changed"
-      && (message.error as { code?: string } | undefined)?.code === "entitlement_required");
-    socket.send(JSON.stringify(clientMessage("run-grant-changed", "grant-changing-install")));
-    assert.equal(((await rejected).error as { code?: string }).code, "entitlement_required");
+    account = "77777777-7777-4777-8777-777777777777";
+    const rejected = waitForMessage(socket, (message) => message.run_id === "run-identity-changed"
+      && (message.error as { code?: string } | undefined)?.code === "authentication_required");
+    socket.send(JSON.stringify(clientMessage("run-identity-changed", "identity-changing-install")));
+    assert.equal(((await rejected).error as { code?: string }).code, "authentication_required");
     assert.equal(runCalls, 0);
 
-    const history = new URL(`http://127.0.0.1:${port}/v1/conversations/grant-change-conversation/history`);
-    history.searchParams.set("entitlement_id", entitlement.entitlement_id);
-    history.searchParams.set("creator_id", entitlement.creator_id);
-    history.searchParams.set("agent_id", entitlement.agent_id);
-    const response = await fetch(history, { headers: { authorization: "Bearer grant-changing-session" } });
-    assert.equal(response.status, 403);
+    const history = new URL(`http://127.0.0.1:${port}/v1/conversations/identity-changing-install/history`);
+    history.searchParams.set("product_id", entitlement.product_id);
+    const response = await fetch(history, { headers: { authorization: "Bearer identity-changing-session" } });
+    assert.equal(response.status, 404);
   } finally {
     socket.close();
     await runtime.close();
@@ -1444,6 +1426,9 @@ test("an existing session runs the latest Agent Corpus on its next turn", async 
   const corpusResolver = {
     resolve: async (creatorId: string, productId: string, signal?: AbortSignal) => (
       new AgentCorpusResolver(currentFixture.baseRoot).resolve(creatorId, productId, signal)
+    ),
+    resolveByProduct: async (productId: string, signal?: AbortSignal) => (
+      new AgentCorpusResolver(currentFixture.baseRoot).resolveByProduct(productId, signal)
     )
   } as unknown as AgentCorpusResolver;
   const identityResolver: AuthIdentityResolver = {
@@ -1463,7 +1448,6 @@ test("an existing session runs the latest Agent Corpus on its next turn", async 
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     conversationRepository,
     authIdentityResolver: identityResolver,
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: corpusResolver
   });
   const port = await listen(runtime);
@@ -1533,13 +1517,6 @@ function fixtureEntitlement(): EntitlementBinding {
     agent_id: "22222222-2222-4222-8222-222222222222",
     product_id: "22222222-2222-4222-8222-222222222222",
     status: "active"
-  };
-}
-
-function fixtureEntitlementResolver(entitlement: EntitlementBinding): EntitlementResolver {
-  return {
-    list: async () => [entitlement],
-    resolve: async () => entitlement
   };
 }
 
@@ -1710,7 +1687,7 @@ async function connectEntitledSocket(
   const ready = waitForMessage(socket, (message) => message.type === "session.ready");
   socket.send(JSON.stringify({
     ...hello(token, conversationId),
-    entitlement_id: entitlement.entitlement_id
+    product_id: entitlement.product_id
   }));
   const readyMessage = await ready;
   assert.equal(readyMessage.type, "session.ready");

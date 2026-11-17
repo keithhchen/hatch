@@ -25,9 +25,6 @@ import {
   type AuthIdentityResolver,
   type EntitlementResolver
 } from "./entitlements.js";
-import { deliveryReceiptFromMetadata, recordPreparedDelivery, type CommerceEventSink } from "./delivery.js";
-import { HttpCommerceEventSink } from "./commerceHttpSink.js";
-import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
 import { AgentCorpusResolver as FilesystemAgentCorpusResolver, type AgentCorpusResolverLike } from "./agentCorpus.js";
 import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
@@ -39,13 +36,14 @@ import {
 } from "./skills.js";
 import { type BriefSpec } from "./brief.js";
 import { createOutputGuardFromEnvironment, PassThroughOutputGuard, type OutputGuard } from "./outputGuard.js";
-import { writeOperationalError } from "./operationalLogging.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { ChatError, principalKey } from "./chat/principal.js";
+import { GuestAwareIdentityResolver, GuestTokens } from "./guestToken.js";
+import { GuestCarryOver, HttpLibrary, type Library } from "./chat/library.js";
 import type { PrincipalLimits, RunAdmission } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
 import { SelfBinder } from "./chat/selfBinding.js";
@@ -89,7 +87,6 @@ import {
 } from "./runtimeConfig.js";
 import {
   unconfiguredAgentCorpusResolver,
-  unconfiguredEntitlementResolver,
   type LegacyHmacAuth,
   type SessionBinding
 } from "./chat/sessionBinding.js";
@@ -144,6 +141,10 @@ export type RuntimeServerOptions = {
   /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
   conversationRepository?: ConversationRepository;
   entitlementResolver?: EntitlementResolver;
+  /** Signs the guests the Dashboard issues; without it nobody chats without an account. */
+  guestTokens?: GuestTokens;
+  /** Where an Agent is saved when an account chats with it. */
+  library?: Library;
   /**
    * Explicit local-development mode (HATCH_ALLOW_INSECURE_LOCAL_MODE). Without resolvers and without this
    * flag every session fails with runtime_not_configured instead of receiving invented local ids.
@@ -154,10 +155,6 @@ export type RuntimeServerOptions = {
   /** Registry-installed current Agent Corpus root, keyed by creator/agent. */
   agentCorpusResolver?: AgentCorpusResolver;
   outputGuard?: OutputGuard;
-  commerceEventSink?: CommerceEventSink;
-  /** Durable, content-free accounting retry queue. */
-  deliveryAccountingOutbox?: DeliveryAccountingOutbox;
-  deliveryReconcileIntervalMs?: number;
   /** Server-only resolver for Creator tool bindings and credentials. */
   creatorToolControlPlane?: CreatorToolControlPlane;
   /**
@@ -212,57 +209,6 @@ export type RuntimeServerOptions = {
   responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "features" | "holdMs" | "keepAliveMs">;
 };
 
-/**
- * The Runtime remains usable without commerce (for local development and
- * protocol tests), but a deployed consumer Runtime must write completed
- * delivery events to the same durable ledger read by the Creator Dashboard.
- *
- * Kept here rather than in a demo-only entry point so `node dist/index.js`
- * has the same transaction behavior as the app we ship.
- */
-export async function commerceEventSinkFromEnvironment(
-  environment: NodeJS.ProcessEnv = process.env
-): Promise<CommerceEventSink | undefined> {
-  const commerceUrl = environment.HATCH_COMMERCE_URL?.trim();
-  if (commerceUrl) {
-    const serviceToken = environment.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN?.trim();
-    if (!serviceToken) throw new Error("HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN is required with HATCH_COMMERCE_URL.");
-    return new HttpCommerceEventSink(commerceUrl, serviceToken);
-  }
-
-  const ledgerFile = environment.HATCH_COMMERCE_LEDGER_FILE?.trim();
-  if (!ledgerFile) return undefined;
-  if (environment.NODE_ENV === "production") {
-    throw new Error("Production Runtime must use HATCH_COMMERCE_URL; shared Commerce ledger files are development-only.");
-  }
-
-  const commerce = await import(new URL("../../packages/commerce/src/index.js", import.meta.url).href) as {
-    CommerceLedger: { open(options: { filePath: string }): Promise<{
-      findByIdempotencyKey(key: string): unknown;
-    }> };
-    CommerceService: new (ledger: unknown) => {
-      getEntitlement(entitlementId: string): unknown;
-      authorizeAndReserve(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
-      releaseReservation(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
-      completeDelivery(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
-    };
-    LedgerCommerceSink: new (ledger: unknown) => {
-      ingest(type: string, payload: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
-    };
-  };
-  const ledger = await commerce.CommerceLedger.open({ filePath: ledgerFile });
-  const recognizedSink = new commerce.LedgerCommerceSink(ledger);
-  const service = new commerce.CommerceService(ledger);
-  return {
-    append: (type, payload, options) => recognizedSink.ingest(type, payload, options),
-    findByIdempotencyKey: (key) => ledger.findByIdempotencyKey(key),
-    getEntitlement: (entitlementId) => service.getEntitlement(entitlementId),
-    authorizeAndReserve: (input, options) => service.authorizeAndReserve(input, options),
-    releaseReservation: (input, options) => service.releaseReservation(input, options),
-    completeDelivery: (input, options) => service.completeDelivery(input, options)
-  };
-}
-
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
@@ -281,6 +227,8 @@ export async function createRuntimeServerFromEnvironment(
       }
     )
     : undefined;
+  // The Dashboard and the Runtime already share the Commerce service token; it also signs the guest ids the Dashboard issues.
+  const guestSecret = environment.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN?.trim();
   const entitlementFile = environment.HATCH_ENTITLEMENTS_FILE?.trim();
   const fileEntitlements = config.legacyHmacEnabled && entitlementFile
     ? new FileEntitlementResolver(entitlementFile, {
@@ -289,17 +237,6 @@ export async function createRuntimeServerFromEnvironment(
     })
     : undefined;
   const analytics = createProductAnalytics(environment);
-  const commerceEventSink = await commerceEventSinkFromEnvironment(environment);
-  const deliveryOutboxFile = environment.HATCH_DELIVERY_OUTBOX_FILE?.trim()
-    || (environment.HATCH_RUNTIME_DATA_DIR?.trim()
-      ? path.join(environment.HATCH_RUNTIME_DATA_DIR.trim(), "delivery-accounting-outbox.json")
-      : undefined);
-  if (registryUrl && environment.NODE_ENV === "production" && !commerceEventSink) {
-    throw new Error("HATCH_COMMERCE_URL is required for entitlement-backed Runtime delivery.");
-  }
-  if (registryUrl && commerceEventSink && environment.NODE_ENV === "production" && !deliveryOutboxFile) {
-    throw new Error("HATCH_DELIVERY_OUTBOX_FILE or HATCH_RUNTIME_DATA_DIR is required for production delivery recovery.");
-  }
   const conversationStore = createConversationStore(environment);
   // Attachments need records that outlive a restart: without a Runtime database a message takes text only.
   const chatBlobs = conversationStore instanceof PostgresStore ? objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))! : undefined;
@@ -315,14 +252,10 @@ export async function createRuntimeServerFromEnvironment(
   await accountFiles?.initialize();
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),
-    commerceEventSink,
-    ...(commerceEventSink ? {
-      deliveryAccountingOutbox: new DeliveryAccountingOutbox(
-        deliveryOutboxFile ?? path.resolve(".hatch-runtime", "delivery-accounting-outbox.json")
-      )
-    } : {}),
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
     entitlementResolver: registryAuth ?? fileEntitlements,
+    ...(guestSecret ? { guestTokens: new GuestTokens(guestSecret) } : {}),
+    ...(guestSecret && environment.HATCH_COMMERCE_URL?.trim() ? { library: new HttpLibrary(environment.HATCH_COMMERCE_URL.trim(), guestSecret) } : {}),
     insecureLocalMode: config.insecureLocalMode,
     authIdentityResolver: registryAuth,
     agentCorpusResolver: runtimeRegistryToken && registryUrl
@@ -368,9 +301,13 @@ export async function createRuntimeServerFromEnvironment(
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const connectionTasks = new Set<Promise<void>>();
   const unconfigured = !options.entitlementResolver && !options.agentCorpusResolver && options.insecureLocalMode !== true;
-  const entitlementResolver = unconfigured ? unconfiguredEntitlementResolver : options.entitlementResolver;
-  const authIdentityResolver = options.authIdentityResolver
+  const entitlementResolver = options.entitlementResolver;
+  const accountIdentities = options.authIdentityResolver
     ?? (entitlementResolver instanceof RegistryEntitlementResolver ? entitlementResolver : undefined);
+  // A guest is told apart by its signed token; every other token is an account's, and the Registry decides.
+  const authIdentityResolver = accountIdentities && options.guestTokens
+    ? new GuestAwareIdentityResolver(options.guestTokens, accountIdentities)
+    : accountIdentities;
   const agentCorpusResolver = unconfigured ? unconfiguredAgentCorpusResolver : options.agentCorpusResolver;
   const legacyHmacSecret = options.legacyHmacSecret?.trim() || undefined;
   if (options.enableLegacyHmacAuth === true && !legacyHmacSecret) {
@@ -429,45 +366,14 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ? conversationStore.dataDirectory
     : path.resolve(process.env.HATCH_RUNTIME_DATA_DIR ?? ".hatch-runtime");
   const assetStore = options.assetStore ?? runtimeAssetStoreFromEnvironment(process.env, dataDirectory);
-  const commerceEventSink = options.commerceEventSink;
-  const deliveryAccountingOutbox = options.deliveryAccountingOutbox
-    ?? (commerceEventSink?.authorizeAndReserve
-      ? new DeliveryAccountingOutbox(path.join(dataDirectory, "delivery-accounting-outbox.json"))
-      : undefined);
   const repositoryReady = conversationRepository.initialize();
   const readiness: RuntimeReadiness = {
-    repository: "starting",
-    deliveryAccounting: commerceEventSink ? "starting" : "disabled"
+    repository: "starting"
   };
   void repositoryReady.then(
     () => { readiness.repository = "ready"; },
     () => { readiness.repository = "failed"; }
   );
-  const reconciliationTasks = new Set<Promise<unknown>>();
-  let reconciliationInFlight = false;
-  const scheduleDeliveryReconciliation = (): void => {
-    if (!commerceEventSink || !deliveryAccountingOutbox || reconciliationInFlight) return;
-    reconciliationInFlight = true;
-    const product = repositoryReady.then(async () => {
-      await deliveryAccountingOutbox.initialize();
-      await commerceEventSink.checkReady?.();
-      await reconcileDeliveryAccountingOutbox(deliveryAccountingOutbox, commerceEventSink);
-      readiness.deliveryAccounting = "ready";
-    }).catch((error) => {
-      readiness.deliveryAccounting = "failed";
-      writeOperationalError("commerce_delivery_reconciliation_failed", error);
-    });
-    reconciliationTasks.add(product);
-    void product.finally(() => {
-      reconciliationInFlight = false;
-      reconciliationTasks.delete(product);
-    });
-  };
-  scheduleDeliveryReconciliation();
-  const reconciliationInterval = commerceEventSink && deliveryAccountingOutbox
-    ? setInterval(scheduleDeliveryReconciliation, options.deliveryReconcileIntervalMs ?? 5_000)
-    : undefined;
-  reconciliationInterval?.unref();
   const outputGuard = options.outputGuard ?? new PassThroughOutputGuard();
   const httpRequestTimeoutMs = options.httpRequestTimeoutMs ?? 10_000;
   if (!Number.isSafeInteger(httpRequestTimeoutMs) || httpRequestTimeoutMs < 1) {
@@ -543,7 +449,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
-          commerceEventSink, deliveryAccountingOutbox, scheduleDeliveryReconciliation,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
           { usage: turn.usage, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
@@ -571,6 +476,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
+    ...(options.library ? { library: options.library } : {}),
     ...(artifact ? { artifacts: artifact.lifecycle } : {}),
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
@@ -645,7 +551,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       responses,
       readiness,
       allowedOrigins,
-      artifact
+      artifact,
+      guests: options.guestTokens,
+      ...(options.library ? { carryOver: new GuestCarryOver({ repository: conversationRepository, library: options.library }) } : {})
     }, requestAbortController.signal);
     void requestTask.catch((error) => {
       if (!res.destroyed && !res.writableEnded) handleHttpRequestFailure(res, error);
@@ -699,7 +607,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   let serverClosed: Promise<void> | undefined;
   const stopIntake = async () => {
     readiness.draining = true;
-    if (reconciliationInterval) clearInterval(reconciliationInterval);
     serverClosed ??= new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     serverClosed.catch(() => undefined);
   };
@@ -741,7 +648,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     // Runs are handed off, not failed: another instance continues them.
     artifactRetrier?.stop();
     await chat.stop();
-    await Promise.allSettled([...reconciliationTasks]);
     await conversationStore.close();
     await conversationRepository.close();
     await flushLangfuseObservability();
@@ -849,27 +755,6 @@ async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSk
 }
 
 
-async function reconcileDeliveryAccountingOutbox(
-  outbox: DeliveryAccountingOutbox,
-  sink: CommerceEventSink
-): Promise<void> {
-  await outbox.reconcile(async (command) => {
-    await recordPreparedDelivery(
-      sink,
-      command.binding,
-      command.conversationId,
-      command.runId,
-      deliveryReceiptFromMetadata(
-        command.binding,
-        command.conversationId,
-        command.runId,
-        command.artifact
-      ),
-      command.reservation
-    );
-  });
-}
-
 function emptyRenderedSkills(): ReturnType<typeof renderSkillsSection> {
   return {
     section: "",
@@ -892,8 +777,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   void createRuntimeServerFromEnvironment().then((runtimeServer) => {
     exitOnSignal(() => runtimeServer.shutdown(drainMsFromEnvironment(process.env)));
     runtimeServer.server.listen(port, host, () => {
-      const commerce = process.env.HATCH_COMMERCE_LEDGER_FILE ? " with commerce ledger" : "";
-      console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);
+      console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime`);
     });
   }).catch((error: unknown) => {
     log.error("runtime_startup_failed", { error });

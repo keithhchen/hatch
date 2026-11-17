@@ -25,7 +25,7 @@ async function listConversations(insecureLocalMode?: boolean) {
 test("Runtime without resolvers and without the local-mode flag refuses to serve", async () => {
   const { status, body } = await listConversations();
   assert.notEqual(status, 200);
-  assert.match(body, /no entitlement or Agent Corpus resolver/);
+  assert.match(body, /no Agent Corpus resolver/);
 });
 
 test("Runtime without resolvers serves local ids only with explicit insecureLocalMode", async () => {

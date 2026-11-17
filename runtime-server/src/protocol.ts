@@ -86,10 +86,8 @@ export const ClientHelloSchema = z.object({
   // Kept only for old local fixtures during the migration. Production clients
   // send auth_token issued by Registry.
   license_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
-  entitlement_id: AuthorityIdSchema.optional(),
-  // These fields remain available only for resolver-free local/creator
-  // sessions. A buyer session is selected by entitlement_id; the Runtime
-  // derives creator_id and product_id from the server-owned entitlement.
+  // creator_id and user_id remain available only for resolver-free local sessions. A product session names its product_id; the Runtime
+  // derives the creator from the live release and the user from the verified session.
   creator_id: AuthorityIdSchema.optional(),
   user_id: AuthorityIdSchema.optional(),
   product_id: AuthorityIdSchema.optional(),
@@ -100,13 +98,6 @@ export const ClientHelloSchema = z.object({
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
-  }
-  if (message.entitlement_id && (message.creator_id || message.user_id || message.product_id)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["entitlement_id"],
-      message: "A bound client.hello must identify only entitlement_id; creator and product identity are server-derived"
-    });
   }
 });
 
@@ -418,12 +409,6 @@ export type RuntimeReady = {
   user_id: string;
   product_id: string;
   corpus_digest: string;
-  purchased_corpus_digest?: string;
-  effective_corpus_digest?: string;
-  version_policy?: "pinned" | "track_current_compatible";
-  version_history?: Array<Record<string, unknown>>;
-  access_mode?: "unmetered" | "metered";
-  entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };
     product: {
@@ -436,18 +421,6 @@ export type RuntimeReady = {
     };
     presentation: Record<string, unknown>;
   };
-};
-
-export type DeliveryReady = {
-  type: "delivery.ready";
-  run_id: string;
-  product_id: string;
-  artifact_id: string;
-  artifact_digest: string;
-  delivery_id: string;
-  artifact_type: "file" | "message";
-  /** Accounting may be durably queued after the user-visible artifact is saved. */
-  receipt_status?: "recorded" | "syncing";
 };
 
 export type AgentDelta = {
@@ -598,7 +571,6 @@ export type RunFinal = {
   type: "turn.completed";
   run_id: string;
   finish_reason: OutputFinishReason;
-  receipt_status?: "recorded" | "syncing";
   timing?: {
     total_ms: number;
     setup_ms: number;
@@ -641,7 +613,7 @@ export type FrameRejected = {
   error: { code: string; message: string; reference?: string };
 };
 
-export type OutboundMessage = SessionError | FrameRejected | RuntimeReady | DeliveryReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | CompactionEvent | RunFinal | RunError;
+export type OutboundMessage = SessionError | FrameRejected | RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | CompactionEvent | RunFinal | RunError;
 
 export function contextAttachmentTextSha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
@@ -664,6 +636,9 @@ export function clientMessageInputDigest(message: {
   });
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 }
+
+/** The digest of the Run that starts a task from its Brief: the system sends it, so it is no message of the user's. */
+export const TASK_START_DIGEST = clientMessageInputDigest({ content: "", task_start: true });
 
 /**
  * Keep user-authored text structurally distinct from file context in storage

@@ -3,32 +3,6 @@ import { z } from "zod";
 import { verifyHatchAuthToken } from "./authToken.js";
 import { UUID_V4_RE, isUuidV4 } from "./identity.js";
 
-const BRIEF_FIELD_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
-const BriefSpecSchema = z.object({
-  contract_version: z.literal("1"),
-  fields: z.array(z.object({
-    id: z.string().min(1).max(128).regex(BRIEF_FIELD_ID),
-    label: z.string().min(1).max(500)
-      .refine((value) => value.trim().length > 0, "Brief field labels cannot be blank")
-      .refine((value) => !value.includes("\u0000")),
-    required: z.boolean()
-  }).strict()).min(1).max(16)
-    .superRefine((fields, context) => {
-      const seen = new Set<string>();
-      fields.forEach((field, index) => {
-        if (seen.has(field.id)) context.addIssue({ code: "custom", path: [index, "id"], message: "Brief field ids must be unique" });
-        seen.add(field.id);
-      });
-    })
-}).strict().transform((value) => ({
-  contract_version: "1" as const,
-  fields: value.fields.map((field) => ({
-    id: field.id,
-    label: field.label.trim(),
-    required: field.required
-  }))
-}));
-
 export type AuthIdentity = {
   sub: string;
   exp?: number;
@@ -47,105 +21,46 @@ export interface AuthIdentityResolver {
   resolveIdentity(authToken?: string, options?: AuthorizationRequestOptions): Promise<AuthIdentity | undefined>;
 }
 
-const EntitlementCommonSchema = z.object({
+const EntitlementBindingSchema = z.object({
   entitlement_id: z.string().min(1),
   order_id: z.string().min(1).optional(),
   user_id: z.string().min(1),
   creator_id: z.string().min(1),
   product_id: z.string().min(1),
+  agent_id: z.string().min(1),
   status: z.literal("active")
 }).strict();
 
-const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
-  creator_id: z.string().min(1),
-  agent_id: z.string().min(1),
-  access_mode: z.enum(["unmetered", "metered"]).optional(),
-  purchased_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
-  effective_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
-  version_policy: z.enum(["pinned", "track_current_compatible"]).optional(),
-  version_history: z.array(z.object({
-    from_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    to_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    from_release_id: z.string().nullable().optional(),
-    to_release_id: z.string().nullable().optional(),
-    compatibility_declaration_id: z.string().nullable().optional(),
-    reason: z.string().nullable().optional(),
-    actor_id: z.string().nullable().optional(),
-    advanced_at: z.string().optional()
-  }).strip()).optional(),
-  brief_spec: BriefSpecSchema.optional(),
-}).strict();
-
 // UUID bindings are strict at every authority boundary. Registry verifies the
-// account identity; the Access service owns production entitlements.
-const CanonicalRegistryEntitlementBindingBaseSchema = AgentCorpusEntitlementBindingSchema.extend({
+// account identity; the Commerce ledger owns the library.
+const CanonicalEntitlementBindingSchema = EntitlementBindingSchema.extend({
   entitlement_id: z.string().regex(UUID_V4_RE),
   order_id: z.string().regex(UUID_V4_RE).optional(),
   user_id: z.string().regex(UUID_V4_RE),
   creator_id: z.string().regex(UUID_V4_RE),
   agent_id: z.string().regex(UUID_V4_RE),
   product_id: z.string().regex(UUID_V4_RE)
-}).strict();
-
-const matchingProductBinding = (binding: { agent_id: string; product_id: string }, context: z.RefinementCtx) => {
+}).superRefine((binding, context) => {
   if (binding.agent_id !== binding.product_id) {
     context.addIssue({ code: "custom", path: ["product_id"], message: "agent_id must equal product_id after the UUID cutover" });
   }
-};
+});
 
-const CanonicalRegistryEntitlementBindingSchema = CanonicalRegistryEntitlementBindingBaseSchema
-  .superRefine(matchingProductBinding);
+/** One Agent in an account's library: an active entitlement. It is listed, never a gate on chatting. */
+export type EntitlementBinding = z.infer<typeof EntitlementBindingSchema>;
 
-export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
-
-// Keep the application-facing type intentionally flat: callers can inspect
-// the optional binding selector without carrying the Zod union through every
-// commerce adapter. The schema above remains the runtime authority.
-export type EntitlementBinding = {
-  entitlement_id: string;
-  order_id?: string;
-  user_id: string;
-  creator_id: string;
-  product_id: string;
-  status: "active";
-  agent_id: string;
-  access_mode?: "unmetered" | "metered";
-  /** Immutable purchase snapshot. Required for Commerce-backed grants. */
-  purchased_corpus_digest?: string;
-  effective_corpus_digest?: string;
-  version_policy?: "pinned" | "track_current_compatible";
-  version_history?: EntitlementVersionHistory[];
-  brief_spec?: {
-    contract_version: "1";
-    fields: Array<{ id: string; label: string; required: boolean }>;
-  };
-};
-
-export type EntitlementVersionHistory = {
-  from_digest: string;
-  to_digest: string;
-  from_release_id?: string | null;
-  to_release_id?: string | null;
-  compatibility_declaration_id?: string | null;
-  reason?: string | null;
-  actor_id?: string | null;
-  advanced_at?: string;
-};
-
-const StoredEntitlementSchema = AgentCorpusEntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict();
+const StoredEntitlementSchema = EntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict();
 
 export type EntitlementLookup = {
   /** Signed Registry account token. */
   authToken?: string;
   /** Development-only opaque token used by local fixtures. */
   licenseToken?: string;
-  entitlementId?: string;
   signal?: AbortSignal;
 };
 
 export interface EntitlementResolver {
   list(input: EntitlementLookup): Promise<EntitlementBinding[]>;
-  resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding>;
 }
 
 /**
@@ -183,19 +98,13 @@ export class FileEntitlementResolver implements EntitlementResolver {
       .map(({ license_token: _licenseToken, ...binding }) => binding);
   }
 
-  async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
-    const binding = (await this.list(input)).find((entry) => entry.entitlement_id === input.entitlementId);
-    if (!binding) throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
-    return binding;
-  }
-
   private async readRegistry(): Promise<Array<EntitlementBinding & { license_token: string }>> {
     const payload = JSON.parse(await readFile(this.filePath, "utf8"));
     return z.array(StoredEntitlementSchema).parse(payload);
   }
 }
 
-/** Production adapter: Registry verifies identity; Access owns entitlements. */
+/** Production adapter: Registry verifies identity; the Commerce ledger lists the library. */
 export class RegistryEntitlementResolver implements EntitlementResolver, AuthIdentityResolver {
   private readonly timeoutMs: number;
   private readonly commerceUrl?: string;
@@ -234,13 +143,13 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
         `/v1/internal/access/users/${encodeURIComponent(identity.sub)}/entitlements`,
         input.signal
       );
-      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
+      if (!response.ok) throw new AuthorizationError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
       try {
         const payload = JSON.parse(body) as { entitlements?: unknown };
-        return parseCommerceEntitlements(payload.entitlements);
+        return parseEntitlements(payload.entitlements);
       } catch (error) {
-        if (error instanceof EntitlementError) throw error;
-        throw new EntitlementError("access_service_invalid", "The access service returned invalid entitlement data.");
+        if (error instanceof AuthorizationError) throw error;
+        throw new AuthorizationError("access_service_invalid", "The access service returned invalid entitlement data.");
       }
     }
     const { response, body } = await this.request(
@@ -249,58 +158,15 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       input.signal,
       "entitlement"
     );
-    if (response.status === 401) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
-    if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
+    if (response.status === 401) throw new AuthorizationError("auth_invalid", "Your Hatch session is no longer valid.");
+    if (!response.ok) throw new AuthorizationError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     let payload: unknown;
     try {
       payload = JSON.parse(body);
     } catch {
-      throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
+      throw new AuthorizationError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     }
-    return parseRegistryEntitlements(payload);
-  }
-
-  async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
-    if (!input.authToken) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
-    if (this.commerceUrl && this.commerceServiceToken) {
-      const identity = await this.resolveIdentity(input.authToken, { signal: input.signal });
-      if (!identity) {
-        throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
-      }
-      const { response, body } = await this.requestCommerce(
-        `/v1/internal/access/entitlements/${encodeURIComponent(input.entitlementId)}?user_id=${encodeURIComponent(identity.sub)}`,
-        input.signal
-      );
-      if (response.status === 404) {
-        throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
-      }
-      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
-      try {
-        const payload = JSON.parse(body) as { entitlement?: unknown };
-        const [binding] = parseCommerceEntitlements([payload.entitlement]);
-        if (!binding || binding.entitlement_id !== input.entitlementId || binding.user_id !== identity.sub) {
-          throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
-        }
-        return binding;
-      } catch (error) {
-        if (error instanceof EntitlementError) throw error;
-        throw new EntitlementError("access_service_invalid", "The access service returned invalid entitlement data.");
-      }
-    }
-    const { response, body } = await this.request(
-      `/v1/user/product-access?entitlement_id=${encodeURIComponent(input.entitlementId)}`,
-      { headers: { authorization: `Bearer ${input.authToken}`, accept: "application/json" } },
-      input.signal,
-      "entitlement",
-    );
-    if (response.status === 401) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
-    if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
-    let payload: unknown;
-    try { payload = JSON.parse(body); }
-    catch { throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable."); }
-    const binding = parseRegistryEntitlements(payload).find((entry) => entry.entitlement_id === input.entitlementId);
-    if (!binding) throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
-    return binding;
+    return parseEntitlements(payload);
   }
 
   async resolveIdentity(authToken?: string, options: AuthorizationRequestOptions = {}): Promise<AuthIdentity | undefined> {
@@ -312,7 +178,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       "identity"
     );
     if (response.status === 401) return undefined;
-    if (!response.ok) throw new EntitlementError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
+    if (!response.ok) throw new AuthorizationError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
     let payload: Record<string, unknown>;
     try {
       const parsed = JSON.parse(body) as unknown;
@@ -323,7 +189,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       payload = {};
     }
     if (typeof payload.id !== "string" || !isUuidV4(payload.id)) {
-      throw new EntitlementError("auth_registry_invalid", "The Registry returned an invalid account identity.");
+      throw new AuthorizationError("auth_registry_invalid", "The Registry returned an invalid account identity.");
     }
     const expiresAt = typeof payload.session_expires_at === "string" ? Date.parse(payload.session_expires_at) : Number.NaN;
     return {
@@ -360,12 +226,12 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       return { response, body };
     } catch {
       if (externalSignal?.aborted && !timedOut) {
-        throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
+        throw new AuthorizationError("authorization_cancelled", "Authorization verification was cancelled.");
       }
       if (boundary === "identity") {
-        throw new EntitlementError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
+        throw new AuthorizationError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
       }
-      throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
+      throw new AuthorizationError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     } finally {
       clearTimeout(timer);
       externalSignal?.removeEventListener("abort", abortFromCaller);
@@ -395,9 +261,9 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       return { response, body: await readBoundedResponseBody(response, 2 * 1024 * 1024) };
     } catch {
       if (externalSignal?.aborted) {
-        throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
+        throw new AuthorizationError("authorization_cancelled", "Authorization verification was cancelled.");
       }
-      throw new EntitlementError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
+      throw new AuthorizationError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
     } finally {
       clearTimeout(timer);
       externalSignal?.removeEventListener("abort", abortFromCaller);
@@ -405,18 +271,10 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
   }
 }
 
-function parseRegistryEntitlements(payload: unknown): EntitlementBinding[] {
-  // Registry grants carry bookkeeping/presentation fields that are not part of
-  // the runtime authority. Parse only the binding contract and strip the rest.
-  return z.array(CanonicalRegistryEntitlementBindingSchema.strip()).max(50).parse(payload);
-}
-
-function parseCommerceEntitlements(payload: unknown): EntitlementBinding[] {
-  return z.array(CanonicalRegistryEntitlementBindingBaseSchema.extend({
-    order_id: z.string().regex(UUID_V4_RE),
-    purchased_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    effective_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/)
-  }).strict().superRefine(matchingProductBinding)).max(50).parse(payload);
+function parseEntitlements(payload: unknown): EntitlementBinding[] {
+  // The Registry and Commerce rows carry bookkeeping and presentation fields that are not part of
+  // the binding contract. Parse only the binding and strip the rest.
+  return z.array(CanonicalEntitlementBindingSchema.strip()).max(50).parse(payload);
 }
 
 async function readBoundedResponseBody(response: Response, maximumBytes: number): Promise<string> {
@@ -460,9 +318,9 @@ export function registryAuthorizationTimeoutMs(
   return value;
 }
 
-export class EntitlementError extends Error {
+export class AuthorizationError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
-    this.name = "EntitlementError";
+    this.name = "AuthorizationError";
   }
 }

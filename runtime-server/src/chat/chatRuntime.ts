@@ -12,6 +12,7 @@ import type { ClientGroup } from "../surfaces/contract.js";
 import { DEFAULT_RUN_LEASE_MS } from "../conversationRepository.js";
 import type { RuntimeStore } from "../store.js";
 import { ChatCompaction } from "./chatCompaction.js";
+import type { Library } from "./library.js";
 import { ChatService, RunRegistry, type PrincipalLimits, type RunAdmission } from "./chatService.js";
 import { ConversationFeed } from "./conversationFeed.js";
 import type { EventRelay } from "./eventRelay.js";
@@ -60,6 +61,8 @@ export type ChatRuntimeOptions<Scope> = {
   cap?: RunCap<Scope>;
   /** Tells product analytics of each message and each failed reply. Absent for the Assistant's own conversation. */
   analytics?: ChatAnalytics;
+  /** Where an Agent is saved when its Run starts for an account. */
+  library?: Library;
   /** Report conversations' lifecycle: a Run that ends with no report published fails the report. */
   artifacts?: ArtifactLifecycle;
 };
@@ -107,7 +110,7 @@ export class ChatRuntime<Scope> {
       { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },
       terminators
     );
-    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction, analytics: options.analytics, artifacts: options.artifacts });
+    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction, analytics: options.analytics, library: options.library, artifacts: options.artifacts });
   }
 
   /** Ends the Runs a previous instance left behind as interrupted, then keeps watching for more. */

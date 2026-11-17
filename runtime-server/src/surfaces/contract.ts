@@ -49,8 +49,14 @@ export function authorizeToolCall(tool: SurfaceTool, client: ClientGroup): ToolA
   return { allowed: false, error: { code: "tool_unsupported_on_client", message: `${tool.name} is not available on ${client}. Available on: ${tool.supportedClients.join(", ")}.` } };
 }
 
-/** Who is acting. A contact exists only inside the Connection that met it. */
-export type Principal = { kind: "account"; accountId: string } | { kind: "contact"; connectionId: string; contactId: string };
+/**
+ * Who is acting. A contact exists only inside the Connection that met it; `accountId` is the Hatch account the person behind it signed in as,
+ * known to the channel layer, which is trusted to say so. A guest is a web visitor who has not signed in: one id per browser.
+ */
+export type Principal =
+  | { kind: "account"; accountId: string }
+  | { kind: "contact"; connectionId: string; contactId: string; accountId?: string }
+  | { kind: "guest"; guestId: string };
 
 export type Audience = "self" | "org" | "public";
 export type ConnectionState = "active" | "degraded";

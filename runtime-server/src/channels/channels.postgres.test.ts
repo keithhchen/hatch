@@ -16,6 +16,8 @@ import type { ChatGateway, Handled, Inbound, TargetHandler } from "./ports.js";
 import type { ConversationRef, RunProgress } from "../chat/gateway.js";
 import { ChatFlow } from "./chatTarget.js";
 import { ProductTarget } from "./productTarget.js";
+import { ImLinks } from "./imLink.js";
+import { principalFor } from "./connections.js";
 import { GuardedTarget, liveOwnProduct } from "./guardedTarget.js";
 import { ChatError } from "../chat/principal.js";
 import { PostgresConnections } from "./postgres/connections.js";
@@ -1548,4 +1550,44 @@ test("A link code redeemed by a sender whose event is then retried is still a su
   await env.service.accept(env.adapter, [{ eventId: "link-other", address: address("56"), text: code }]);
   await env.service.drain();
   assert.match(env.adapter.texts.at(-1)!, /已失效/, "another sender cannot use it");
+}));
+
+test("A contact past the free messages is sent a sign-in link; claiming it links the person, whose next messages carry the account", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  const clock = { at: new Date() };
+  const links = new ImLinks({ secret: "registry-secret", origin: "https://hatch.test", connections: env.connections, now: () => clock.at });
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter, imLinks: links })));
+  const id = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'public') RETURNING id", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
+  const contact = await env.connections.meet((await env.connections.get(id))!, address("u9"));
+  env.service.start();
+  try {
+    await env.service.accept(env.adapter, [message("u9", "one")]);
+    await env.settle();
+    assert.equal("accountId" in gateway.submitted.at(-1)!.principal, false, "an unlinked contact has no account");
+    gateway.failSend = new ChatError("login_required", "Sign in to continue.", 403);
+    await env.service.accept(env.adapter, [message("u9", "four")]);
+    await env.settle();
+    const token = env.adapter.texts.at(-1)!.match(/https:\/\/hatch\.test\/link\/im\?t=([\w.-]+)/)?.[1]!;
+    assert.ok(token, "the refusal is answered with a link");
+    assert.match(env.adapter.texts.at(-1)!, /免费消息[\s\S]*free messages[\s\S]*無料/, "in three languages");
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox WHERE state = 'failed'")).rows[0].n, 0, "a refusal is an answer");
+
+    const [a, b] = [randomUUID(), randomUUID()];
+    const claimed = await links.claim(token, a);
+    assert.deepEqual(claimed, { productId: "p1", connectionId: id, channel: "telegram" });
+    assert.deepEqual(await links.claim(token, a), claimed, "the same account again is the same result");
+    await assert.rejects(links.claim(token, b), { code: "im_already_linked", status: 409 }, "no other account takes it over");
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_people WHERE account_id = $1", [a])).rows[0].n, 1);
+
+    const resolved = await env.connections.resolveConnection({ channel: "telegram", scope: "", senderId: "u9" });
+    assert.equal(resolved?.identity?.id, contact.id);
+    assert.deepEqual(principalFor(resolved!.connection, resolved!.identity!), { kind: "contact", connectionId: id, contactId: contact.id, accountId: a });
+    await env.service.accept(env.adapter, [message("u9", "five")]);
+    await env.settle();
+    assert.equal((gateway.submitted.at(-1)!.principal as { accountId?: string }).accountId, a, "the Runtime is told whose contact this is");
+
+    clock.at = new Date(clock.at.getTime() + 31 * 60_000);
+    await assert.rejects(links.claim(token, a), { code: "im_link_expired", status: 410 });
+  } finally { await env.service.close(); }
 }));

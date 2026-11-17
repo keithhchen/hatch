@@ -5,7 +5,8 @@ import type { ChannelKind, SenderProfile } from "./types.js";
 /** A Connection as the channel layer holds it. `scope` is the platform tenant it was authorized on: empty for our shared account. */
 export type ChannelConnection = Connection & { scope: string };
 /** A sender known to a Connection: the Expert who linked, or a contact who wrote in. `threadId` is where they were reached last. */
-export type Identity = { id: string; connectionId: string; senderId: string; threadId: string };
+/** `accountId`: the Hatch account the person behind a contact signed in as, once they have. */
+export type Identity = { id: string; connectionId: string; senderId: string; threadId: string; accountId?: string };
 export type OwnedConnection = ChannelConnection & { linked: boolean; hasCredentials: boolean; lastEventAt?: string; /** Who is bound, as the platform names them. */ senderId?: string };
 export type Resolved = { connection: ChannelConnection; identity?: Identity };
 /** A Connection a sender was just bound to. */
@@ -31,7 +32,7 @@ export function assertReachable(connection: Pick<Connection, "audience" | "targe
 export function principalFor(connection: ChannelConnection, identity: Identity): Principal {
   return connection.audience === "self"
     ? { kind: "account", accountId: connection.ownerAccountId }
-    : { kind: "contact", connectionId: connection.id, contactId: identity.id };
+    : { kind: "contact", connectionId: connection.id, contactId: identity.id, ...(identity.accountId ? { accountId: identity.accountId } : {}) };
 }
 
 /**
@@ -60,6 +61,8 @@ export interface ConnectionRepository {
   recognize(connection: ChannelConnection, who: { senderId: string; profile?: SenderProfile }): Promise<void>;
   /** The person behind this platform user signed in as `accountId`. False when they are already linked to another account. */
   linkAccount(channel: ChannelKind, platformUserId: string, accountId: string): Promise<boolean>;
+  /** A contact by its identity id, with the account its person is linked to. */
+  contact(identityId: string): Promise<Resolved | undefined>;
   /** The Assistant Connections the account owns that someone is linked to, most recently active first: where the Assistant reaches them. */
   linked(ownerAccountId: string): Promise<Resolved[]>;
   /** Every Connection the account owns, linked or not, with what Studio shows of it. */

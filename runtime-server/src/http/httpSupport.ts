@@ -1,7 +1,7 @@
 import type http from "node:http";
 import { sessionTokenFromCookie } from "../chat/originPolicy.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
-import { EntitlementError } from "../entitlements.js";
+import { AuthorizationError } from "../entitlements.js";
 import { toProblem } from "../errors/problem.js";
 import { log } from "../observability/log.js";
 
@@ -85,7 +85,7 @@ export function writeHttpAuthorizationFailure(
   error: unknown,
   forbiddenCode: string
 ): void {
-  const code = error instanceof EntitlementError ? error.code : "";
+  const code = error instanceof AuthorizationError ? error.code : "";
   if (code === "auth_registry_unavailable"
     || code === "auth_registry_invalid"
     || code === "entitlement_registry_unavailable"
@@ -99,14 +99,8 @@ export function writeHttpAuthorizationFailure(
     });
     return;
   }
-  if (code === "authentication_required"
-    || code === "auth_invalid"
-    || code === "entitlement_required"
-    || code === "entitlement_not_found"
-    || code === "agent_entitlement_mismatch") {
-    writeJson(res, 403, {
-      error: { code: forbiddenCode, message: "This Expert Agent is not available for the signed-in account." }
-    });
+  if (code === "authentication_required" || code === "auth_invalid") {
+    writeJson(res, 401, { error: { code: "authentication_required", message: "Your Hatch session is not valid. Sign in again." } });
     return;
   }
   writeJson(res, 500, {

@@ -6,14 +6,13 @@ import {
   type ConversationRecord,
   type ConversationRepository
 } from "../conversationRepository.js";
-import { EntitlementError } from "../entitlements.js";
+import { AuthorizationError } from "../entitlements.js";
 import { creatorAgentView } from "../chat/creatorAgentCatalog.js";
 import { errorMessage } from "../chat/modelTurn.js";
 import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import { SocketSink, projecting } from "../chat/sinks.js";
 import {
   conversationBinding,
-  durableConversationId,
   privateBoundaryProjection,
   resolveHelloAuthClaims,
   resolveSessionBinding,
@@ -48,7 +47,7 @@ export async function handleRuntimeSocket(
     edge, store, conversationRepository, repositoryReady, legacyHmacAuth,
     helloTimeoutMs, connectionHeartbeatMs, connectionIdleTimeoutMs, maxSocketBufferedBytes
   } = deps;
-  const { chat, entitlementResolver, agentCorpusResolver, authIdentityResolver } = edge;
+  const { chat, agentCorpusResolver, authIdentityResolver } = edge;
   const connectionAbortController = new AbortController();
   let hello: ClientHello | undefined;
   const helloDeadline = setTimeout(() => {
@@ -166,18 +165,18 @@ export async function handleRuntimeSocket(
             );
             const nextBinding = await resolveSessionBinding(
               message,
-              entitlementResolver,
               agentCorpusResolver,
               authIdentityResolver,
               authClaims,
               connectionAbortController.signal
             );
             connectionAbortController.signal.throwIfAborted();
-            const requestedStorageConversationId = nextBinding.explicit
-              ? durableConversationId(nextBinding, message.conversation_id)
-              : message.conversation_id;
             await repositoryReady;
-            const conversation = await conversationRepository.getConversation(requestedStorageConversationId);
+            // By the owner and the id the client knows: a conversation that moved to an account when its visitor signed in keeps its id.
+            const owner = conversationBinding(nextBinding);
+            const conversation = nextBinding.explicit
+              ? await conversationRepository.findOwnedConversation({ ownerAccountId: owner.ownerAccountId, creatorId: owner.creatorId }, message.conversation_id)
+              : await conversationRepository.getConversation(message.conversation_id);
             if (!conversation) {
               throw new ConversationRepositoryError(
                 "conversation_not_found",
@@ -199,14 +198,6 @@ export async function handleRuntimeSocket(
               agent_id: nextBinding.productId,
               product_id: nextBinding.productId,
               corpus_digest: nextBinding.corpusDigest,
-              ...(nextBinding.purchasedCorpusDigest ? {
-                purchased_corpus_digest: nextBinding.purchasedCorpusDigest,
-                effective_corpus_digest: nextBinding.corpusDigest,
-                version_policy: nextBinding.versionPolicy ?? "pinned",
-                version_history: nextBinding.versionHistory ?? []
-              } : {}),
-              ...(nextBinding.entitlementId ? { access_mode: nextBinding.accessMode ?? "unmetered" } : {}),
-              ...(nextBinding.entitlementId ? { entitlement_id: nextBinding.entitlementId } : {}),
               client_version: message.client_version,
               local_tools: message.local_tools
             });
@@ -233,14 +224,6 @@ export async function handleRuntimeSocket(
               user_id: binding.userId,
               product_id: binding.productId,
               corpus_digest: binding.corpusDigest,
-              ...(binding.purchasedCorpusDigest ? {
-                purchased_corpus_digest: binding.purchasedCorpusDigest,
-                effective_corpus_digest: binding.corpusDigest,
-                version_policy: binding.versionPolicy ?? "pinned",
-                version_history: binding.versionHistory ?? []
-              } : {}),
-              ...(binding.entitlementId ? { access_mode: binding.accessMode ?? "unmetered" } : {}),
-              ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
               ...(binding.agentCorpus ? { creator_agent: creatorAgentView(binding.agentCorpus) } : {})
             });
             // A connection sees its conversation's live events, whoever started the Run.
@@ -348,7 +331,7 @@ export async function handleRuntimeSocket(
           return;
         }
         // Anything else is a refusal of the session; its text is for the client's developer.
-        await sessionError(error instanceof EntitlementError || error instanceof ConversationRepositoryError ? error.code : "protocol_error", errorMessage(error));
+        await sessionError(error instanceof AuthorizationError || error instanceof ConversationRepositoryError ? error.code : "protocol_error", errorMessage(error));
       }
     })();
     messageTasks.add(messageTask);
