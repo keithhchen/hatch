@@ -21,7 +21,8 @@
 .artifact__summary-page { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 18px rgb(0 0 0 / 0.08); }
 .artifact__rest { position: relative; max-height: 560px; overflow: hidden; }
 .artifact__rest img { display: block; width: 100%; height: auto; }
-.artifact__rest button { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); }
+/* Centred with auto margins, not a transform: the shared button hover sets transform and would drop a translateX. */
+.artifact__rest button { position: absolute; top: 72px; left: 0; right: 0; width: max-content; margin: 0 auto; }
 .artifact__pages { display: flex; flex-direction: column; gap: 16px; }
 .artifact__page { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 18px rgb(0 0 0 / 0.08); }
 .artifact__debug { width: 100%; font-size: 12px; color: var(--chat-muted); }
