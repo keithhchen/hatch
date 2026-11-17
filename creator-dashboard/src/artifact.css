@@ -47,3 +47,5 @@
 @media (prefers-reduced-motion: reduce) { .artifact__glyph svg, .artifact__step { animation: none; } }
 .artifact__header-download { margin-left: auto; flex: none; }
 @media (max-width: 640px) { .artifact__header-download { padding-inline: 12px; } }
+.artifact__pages:empty::before { content: ""; display: block; width: 100%; aspect-ratio: 210 / 297; border-radius: 6px; background: #fff; animation: artifact-page-wait 1.6s ease-in-out infinite; }
+@keyframes artifact-page-wait { 50% { background: #f3efe6; } }

@@ -22,7 +22,6 @@ const must = (name: string, bytes: Buffer, magic: Buffer) => {
 const validated = (phase: ReportPhase, r: RenderedReport) => {
   must(`${phase}.pdf`, r.pdf, PDF);
   if (phase === "summary") must("summary.png", r.firstPagePng, PNG);
-  else if (r.pageImages?.length !== r.pages) throw new Error("The renderer produced no image for some page");
   return r;
 };
 
@@ -49,7 +48,7 @@ export class ReportPublisher {
     for (let attempt = 0; !rendered; attempt++) {
       const deadline = AbortSignal.timeout(renderTimeoutMs);
       try {
-        rendered = validated(input.phase, await renderer.render(input.html, { pages: input.phase === "full" ? "all" : "first", signal: input.signal ? AbortSignal.any([input.signal, deadline]) : deadline }));
+        rendered = validated(input.phase, await renderer.render(input.html, input.signal ? AbortSignal.any([input.signal, deadline]) : deadline));
       } catch (error) {
         input.signal?.throwIfAborted();
         if (attempt >= pausesMs.length) throw new Error(`Rendering the report failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -61,12 +60,8 @@ export class ReportPublisher {
     const files: Array<[keyof ReportKeys, string, Buffer, string]> = input.phase === "summary"
       ? [["summaryHtml", "summary.html", Buffer.from(input.html), HTML], ["summaryPdf", "summary.pdf", rendered.pdf, "application/pdf"], ["summaryPng", "summary.png", rendered.firstPagePng, "image/png"]]
       : [["fullHtml", "full.html", Buffer.from(input.html), HTML], ["fullPdf", "full.pdf", rendered.pdf, "application/pdf"]];
-    const pages = (rendered.pageImages ?? []).map((bytes, i): [string, Buffer] => [`full/page-${i + 1}.webp`, bytes]);
-    const keys: ReportKeys = { ...Object.fromEntries(files.map(([key, name]) => [key, `${prefix}/${name}`])), ...(pages.length ? { fullPages: pages.map(([name]) => `${prefix}/${name}`) } : {}) };
-    await Promise.all([
-      ...files.map(([, name, bytes, contentType]) => blobs.put(`${prefix}/${name}`, bytes, { contentType })),
-      ...pages.map(([name, bytes]) => blobs.put(`${prefix}/${name}`, bytes, { contentType: "image/webp" }))
-    ]);
+    const keys: ReportKeys = Object.fromEntries(files.map(([key, name]) => [key, `${prefix}/${name}`]));
+    await Promise.all(files.map(([, name, bytes, contentType]) => blobs.put(`${prefix}/${name}`, bytes, { contentType })));
     const record = await reports.ready(conversation.id, input.attempt, input.phase, keys, clock());
     if (!record) throw new Error("This report is now being produced by a newer attempt; stop.");
     analytics?.capture(conversation.ownerAccountId, reportReady(Math.round((Date.now() - input.startedAt) / 1000)));

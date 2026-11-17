@@ -1,12 +1,10 @@
 import type { Browser } from "playwright-core";
-import sharp from "sharp";
-import { PdfParsePageRenderer, type PdfAllPagesRenderer, type PdfPageRenderer } from "../assets/pdfPages.js";
+import { PdfParsePageRenderer } from "../assets/pdfPages.js";
 import type { RenderedReport, ReportRenderer } from "./ports.js";
 
 // A4 at 192 dpi: sharp on a phone or a retina screen, where the image is drawn at about 400–800 CSS pixels wide.
 const PAGE_WIDTH_PX = 1588;
 const RENDER_TIMEOUT_MS = 120_000;
-const WEBP_QUALITY = 82;
 
 const PRINT = { format: "A4", printBackground: true, preferCSSPageSize: true } as const;
 
@@ -17,15 +15,15 @@ const PRINT = { format: "A4", printBackground: true, preferCSSPageSize: true } a
 export class ChromiumReportRenderer implements ReportRenderer {
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly options: { timeoutMs?: number; launch?: () => Promise<Browser>; pages?: PdfPageRenderer & PdfAllPagesRenderer } = {}) {}
+  constructor(private readonly options: { timeoutMs?: number; launch?: () => Promise<Browser>; pages?: PdfParsePageRenderer } = {}) {}
 
-  render(html: string, { pages, signal }: Parameters<ReportRenderer["render"]>[1]): Promise<RenderedReport> {
-    const run = this.queue.then(() => this.once(html, pages, signal));
+  render(html: string, signal?: AbortSignal): Promise<RenderedReport> {
+    const run = this.queue.then(() => this.once(html, signal));
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  private async once(html: string, pages: "first" | "all", signal?: AbortSignal): Promise<RenderedReport> {
+  private async once(html: string, signal?: AbortSignal): Promise<RenderedReport> {
     signal?.throwIfAborted();
     const browser = await (this.options.launch ?? defaultLaunch)();
     const deadline = AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(this.options.timeoutMs ?? RENDER_TIMEOUT_MS)]);
@@ -42,15 +40,8 @@ export class ChromiumReportRenderer implements ReportRenderer {
         await page.setContent(html, { waitUntil: "load" });
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
         const pdf = await page.pdf(PRINT);
-        const renderer = this.options.pages ?? new PdfParsePageRenderer(PAGE_WIDTH_PX);
-        if (pages === "first") {
-          const first = await renderer.render(pdf, 1);
-          return { pdf, pages: first.pages, firstPagePng: first.png };
-        }
-        const pngs = await renderer.renderAll(pdf);
-        const pageImages: Buffer[] = [];
-        for (const png of pngs) pageImages.push(await sharp(png).webp({ quality: WEBP_QUALITY }).toBuffer());
-        return { pdf, pages: pngs.length, firstPagePng: pngs[0]!, pageImages };
+        const first = await (this.options.pages ?? new PdfParsePageRenderer(PAGE_WIDTH_PX)).render(pdf, 1);
+        return { pdf, pages: first.pages, firstPagePng: first.png };
       })()]);
     } finally {
       await browser.close().catch(() => undefined);

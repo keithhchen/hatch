@@ -5,12 +5,11 @@ import type { ArtifactObjectStore } from "../creatorLearning/objectStore.js";
 /** Where a report's files are kept. A store that can presign lets a browser fetch them straight from it. */
 export type ReportBlobs = AssetBlobs & Partial<Pick<ArtifactObjectStore, "presign">>;
 
-/** `pageImages` (WebP, one per page, in order) is present only when every page was asked for. */
-export type RenderedReport = { pdf: Buffer; pages: number; firstPagePng: Buffer; pageImages?: Buffer[] };
+export type RenderedReport = { pdf: Buffer; pages: number; firstPagePng: Buffer };
 
-/** Turns a report document's HTML into its PDF, the PDF's page count and its first page as a PNG; with `pages: "all"`, every page as a WebP too. Adapter: headless Chromium in the Runtime; tests use a double. */
+/** Turns a report document's HTML into its PDF, the PDF's page count and its first page as a PNG. Adapter: headless Chromium in the Runtime; tests use a double. */
 export interface ReportRenderer {
-  render(html: string, options: { pages: "first" | "all"; signal?: AbortSignal }): Promise<RenderedReport>;
+  render(html: string, signal?: AbortSignal): Promise<RenderedReport>;
 }
 
 /** One string, or the same text per language. */
@@ -38,7 +37,7 @@ export type ReportStatus = "draft" | "generating" | "ready" | "failed";
 export type ReportStage = "queued" | "reading" | "consulting" | "researching" | "writing" | "proofreading" | "rendering" | "ready" | "failed";
 /** The report is written in two phases: the one-page summary first, the full report once the parent unlocks it. */
 export type ReportPhase = "summary" | "full";
-export type ReportKeys = { summaryHtml?: string; summaryPdf?: string; summaryPng?: string; fullHtml?: string; fullPdf?: string; fullPages?: string[] };
+export type ReportKeys = { summaryHtml?: string; summaryPdf?: string; summaryPng?: string; fullHtml?: string; fullPdf?: string };
 export type ReportStep = { at: string; stage: ReportStage; detail?: string };
 export const MAX_REPORT_STEPS = 20;
 /**

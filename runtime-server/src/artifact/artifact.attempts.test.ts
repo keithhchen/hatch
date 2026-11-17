@@ -32,7 +32,7 @@ async function world(script: Behavior[]) {
   const reports = new InMemoryReportRepository();
   const clock = { now: new Date("2026-01-01T00:00:00Z") };
   const analytics = new RecordingAnalytics();
-  const renderer: ReportRenderer = { render: async () => ({ pdf: PDF, pages: 1, firstPagePng: PNG, pageImages: [PNG] }) };
+  const renderer: ReportRenderer = { render: async () => ({ pdf: PDF, pages: 1, firstPagePng: PNG }) };
   const artifact = new ArtifactMode({ configs: new InMemoryArtifactConfigRepository(), reports, renderer, blobs: kit.blobs, assets: { uploadedCount: async () => 0 }, analytics, clock: () => clock.now,
     publishing: { sleep: async () => undefined, pausesMs: [0, 0] } });
   const runs: string[] = [];
@@ -174,7 +174,7 @@ test("publishing replaces the report as one unit; a failed publish leaves the pr
   assert.equal(await publish(), "Report published.");
   const first = (await w.reports.get(w.id))!;
   const blobs = w.artifact.blobs;
-  for (const key of Object.values(first.keys!).flat()) assert.ok((await blobs.get(key!)).length > 0);
+  for (const key of Object.values(first.keys!)) assert.ok((await blobs.get(key!)).length > 0);
 
   render.bad = true;
   await assert.rejects(publish(), /invalid summary\.pdf/);
@@ -186,7 +186,7 @@ test("publishing replaces the report as one unit; a failed publish leaves the pr
   assert.equal(await publish(), "Report published.");
   const second = (await w.reports.get(w.id))!;
   assert.notEqual(second.keys!.summaryPdf, first.keys!.summaryPdf);
-  assert.equal(new Set(Object.values(second.keys!).flat().map((k) => k!.split("/").slice(0, -1).join("/"))).size, 1, "the files under one fresh prefix");
+  assert.equal(new Set(Object.values(second.keys!).map((k) => k!.split("/").slice(0, -1).join("/"))).size, 1, "the files under one fresh prefix");
   assert.ok((await blobs.get(first.keys!.summaryPdf!)).length > 0, "the old set may stay");
   assert.equal(second.status, "ready");
   await w.chat.stop();

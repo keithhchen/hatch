@@ -49,11 +49,10 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from("P
 const renderer = (): ReportRenderer & { calls: number; pages: number; fail?: string } => ({
   calls: 0,
   pages: 1,
-  async render(html, { pages }) {
+  async render(html) {
     this.calls++;
     if (this.fail) throw new Error(this.fail);
-    return { pdf: Buffer.from(`%PDF-${html.includes("SUMMARY") ? "SUMMARY" : "FULL"}PDF`), pages: this.pages, firstPagePng: PNG,
-      ...(pages === "all" ? { pageImages: Array.from({ length: this.pages }, (_, i) => Buffer.from(`WEBP${i + 1}`)) } : {}) };
+    return { pdf: Buffer.from(`%PDF-${html.includes("SUMMARY") ? "SUMMARY" : "FULL"}PDF`), pages: this.pages, firstPagePng: PNG };
   }
 });
 
@@ -176,7 +175,7 @@ test("unlock is one conditional write from (summary, ready) to (full, generating
   assert.deepEqual(await publishFile(full, fullHtml), { output: "Report published." });
   const done = (await reports.get(c.id))!;
   assert.deepEqual([done.status, done.phase], ["ready", "full"]);
-  assert.deepEqual(Object.keys(done.keys!).sort(), ["fullHtml", "fullPages", "fullPdf", "summaryHtml", "summaryPdf", "summaryPng"], "the summary files stay");
+  assert.deepEqual(Object.keys(done.keys!).sort(), ["fullHtml", "fullPdf", "summaryHtml", "summaryPdf", "summaryPng"], "the summary files stay");
   assert.equal((await artifact.blobs.get(done.keys!.fullPdf!)).toString(), "%PDF-FULLPDF");
   assert.equal(await reports.ready(c.id, 1, "summary", { summaryPdf: "late" }, clock.now), undefined, "a late summary publish cannot touch the full phase");
 });
@@ -317,33 +316,20 @@ test("files are served per phase: summary files once the summary is ready, full 
   await assert.rejects(handleReportRequest({ method: "GET" } as http.IncomingMessage, fakeResponse().res, "/report", chat, artifact, 1 << 20, origins), /no report/);
 });
 
-test("a full publish stores every page as a WebP under the same prefix; the report says how many and serves each", async () => {
-  const { reports, artifact, r } = await fullReport(3);
-  const record = (await reports.get("c1"))!;
-  assert.equal(record.keys!.fullPages!.length, 3);
-  assert.ok(record.keys!.fullPages![0]!.endsWith("/full/page-1.webp"));
-  assert.equal((await artifact.blobs.get(record.keys!.fullPages![2]!)).toString(), "WEBP3");
-  assert.equal(r.calls, 2, "summary then full");
-  const { call, json } = caller(artifact);
-  assert.equal((await json("GET", "/report")).pages, 3);
-  const page = await call("GET", "/report/files/pages/2.webp");
-  assert.deepEqual([page.status, page.headers["content-type"], page.body.toString()], [200, "image/webp", "WEBP2"]);
-  assert.equal((await call("GET", "/report/files/pages/4.webp")).status, 404);
-  assert.equal((await call("GET", "/report/files/pages/0.webp")).status, 404);
-});
-
-test("files redirect to a signed URL of the store; html never does; download=1 asks for an attachment; a non-https URL streams the bytes", async () => {
+test("files redirect to a signed URL of the store; the ready report carries the PDF link; html never redirects; download=1 asks for an attachment; a non-https URL streams the bytes", async () => {
   const { artifact } = await fullReport(2);
   const signed: Array<{ key: string; options: Record<string, unknown> }> = [];
   let scheme = "https";
   Object.assign(artifact.deps.blobs, { presign: async (key: string, options: Record<string, unknown>) => { signed.push({ key, options }); return { url: `${scheme}://oss.example/${key}?sig=1`, method: "GET", headers: {}, expiresAt: "" }; } });
-  const { call } = caller(artifact);
-  for (const [name, type] of [["summary.png", "png"], ["full.pdf", "pdf"], ["pages/1.webp", "webp"]] as const) {
+  const { call, json } = caller(artifact);
+  assert.match((await json("GET", "/report")).pdf_url, /^https:\/\/oss\.example\/.*full\.pdf\?sig=1$/);
+  assert.equal(signed.pop()!.options.expiresSeconds, 3600, "long enough to read the whole report");
+  for (const [name, type] of [["summary.png", "png"], ["full.pdf", "pdf"]] as const) {
     const res = await call("GET", `/report/files/${name}`);
     assert.deepEqual([res.status, res.headers["cache-control"], res.body.length], [302, "private, no-store", 0], name);
-    assert.match(String(res.headers.location), /^https:\/\/oss\.example\/.*\.(png|pdf|webp)\?sig=1$/, type);
+    assert.match(String(res.headers.location), /^https:\/\/oss\.example\/.*\.(png|pdf)\?sig=1$/, type);
   }
-  assert.deepEqual(signed.map((s) => s.options), [{ method: "GET", expiresSeconds: 600 }, { method: "GET", expiresSeconds: 600 }, { method: "GET", expiresSeconds: 600 }]);
+  assert.deepEqual(signed.map((s) => s.options), [{ method: "GET", expiresSeconds: 600 }, { method: "GET", expiresSeconds: 600 }]);
   signed.length = 0;
   await call("GET", "/report/files/full.pdf", undefined, true);
   await call("GET", "/report/files/summary.png", undefined, true);
