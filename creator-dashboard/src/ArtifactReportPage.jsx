@@ -8,7 +8,7 @@ import { WebChatEgg } from "./webChatGate.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
 
 const POLL_MS = 5000;
-const ESTIMATE_MINUTES = 6;
+const ESTIMATE_MINUTES = { summary: 1, full: 5 };
 /** One animated glyph per step; the animation is the step's own motion (a page turning, a globe turning, a pen writing). */
 const STEP_GLYPHS = { reading: BookOpen, consulting: Lightbulb, researching: Globe, writing: PenLine, proofreading: ScanSearch, rendering: FileCheck };
 /** A PDF shown as its pages, drawn by pdf.js at the column's width: the same pages a download would give. Read straight from its object-store link. */
@@ -138,7 +138,7 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, on
           <span>{t(`artifactStep_${name}`)}</span>
         </div>;
       })()}
-      <span className="artifact__elapsed">{t("artifactEstimate", { minutes: ESTIMATE_MINUTES })}{Number.isNaN(startedAt) ? "" : ` · ${t("artifactElapsed", { time: formatElapsed(now - startedAt) })}`}</span>
+      <span className="artifact__elapsed">{t("artifactEstimate", { minutes: ESTIMATE_MINUTES[report.phase] })}{Number.isNaN(startedAt) ? "" : ` · ${t("artifactElapsed", { time: formatElapsed(now - startedAt) })}`}</span>
       {error ? <InlineAlert tone="warning" title={t("artifactStatusUnavailable")}>{webChatErrorText(error, locale)}</InlineAlert> : null}
       {debug ? <div className="artifact__debug">
         <b>{report.stage}{report.attempt > 1 ? ` · attempt ${report.attempt}` : ""}</b>
