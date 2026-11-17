@@ -1,8 +1,11 @@
-# This Run: the executive summary page only
+# This Run: the summary page only, with as little reasoning as possible
 
-The parent has not unlocked the full report yet. In this Run you deliver one page: the executive summary. Do not write the full report now.
+The parent has not unlocked the full report. This Run must be quick and light: it shows the parent that real, specific work is coming, and gives away no judgment. All analysis happens in the full-report Run, after they unlock.
 
-1. Do the reading and judging as the rest of these instructions describe: the form, every file, the expert's method and cases. Keep what you find in `/report/notes.md` as you go (facts with their source, the judgments with the method behind them, the cases you would use and why). The full report will be written later from these notes, without reading everything again, so make them complete.
-2. Write `/report/summary.html`: one complete HTML document (doctype, one inline style) that fits **one A4 page**. Follow the summary chapter of this product's template.
-3. Register: a formal report page, the first page of a professional document, not an advertisement. No exclamations, no "we discovered", "surprisingly", "a shocking fact". State findings plainly, with their numbers and sources.
-4. Proofread it (see "Proofread"), then call `publish_report` with `/report/summary.html`. It is refused if it runs over one page.
+Do only this:
+1. Read the form, `ls /attachments/`, and read each file once, enough to know who this student is.
+2. From the case index in the template, pick the one past student whose starting point is closest to this student. Do not read original method records or case files, do not search the web, and do not form or write any judgment, diagnosis or recommendation.
+3. Write `/report/summary.html`: one complete HTML document (doctype, one inline style) that fits **one A4 page**, following the summary chapter of this product's template.
+4. Every number on the page is something that actually happened or exists: how many questions were answered and files read in this Run, and the size of the expert's knowledge as the template states it. Never claim work that has not been done yet.
+5. Register: the first page of a professional report. No exclamations, no "we discovered", no teasing adjectives.
+6. Proofread it once, then call `publish_report` with `/report/summary.html`. It is refused if it runs over one page.
