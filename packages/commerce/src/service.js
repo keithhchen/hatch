@@ -794,7 +794,7 @@ export class CommerceService {
           creator_id: order.creator_id,
           agent_id: order.agent_id,
           product_id: order.product_id,
-          reason: "order_refunded"
+          reason: input.revoke_reason ?? "order_refunded"
         },
         idempotencyKey: `${idempotencyKey}:revoke`
       });

@@ -723,7 +723,7 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   assert.equal(replay.status, 200);
   assert.equal(dashboard.ledger.listEvents().length, 2);
   // Subscribing is recorded once, for the buyer's account id; a replay records nothing.
-  assert.deepEqual(captured.filter((entry) => entry.event === "agent_subscribed"), [{ distinctId: "buyer-zero", event: "agent_subscribed", properties: { agent_id: catalogAgent.product_id } }]);
+  assert.deepEqual(captured.filter((entry) => entry.event === "agent_saved"), [{ distinctId: "buyer-zero", event: "agent_saved", properties: { agent_id: catalogAgent.product_id } }]);
 
   await new Promise((resolve) => setTimeout(resolve, 20));
   const secondPurchase = await checkout("legacy-free-checkout-two");
@@ -747,6 +747,55 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   const olderPage = await olderPageResponse.json();
   assert.equal(olderPageResponse.status, 200);
   assert.equal(olderPage.entitlements[0].entitlement_id, firstBody.entitlement.entitlement_id);
+});
+
+test("library save is internal and service-token authed; remove is a session DELETE", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-library-"));
+  const captured = [];
+  const registry = registryFixture({ signedIn: "buyer" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
+    commerceRuntimeServiceToken: "test-runtime-service",
+    registryUrl: serverUrl(registry),
+    analytics: { capture: (distinctId, event) => captured.push({ distinctId, ...event }) },
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const result = async (response) => { const { request_id: _requestId, ...rest } = await response.json(); return rest; };
+  const save = (token) => fetch(`${serverUrl(api)}/v1/internal/library/save`, {
+    method: "POST",
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" },
+    body: JSON.stringify({ account_id: "buyer-zero", product_id: catalogAgent.product_id })
+  });
+  assert.equal((await save()).status, 403);
+  assert.equal((await save("wrong")).status, 403);
+  assert.equal(dashboard.ledger.listEvents().length, 0);
+
+  const first = await save("test-runtime-service");
+  assert.equal(first.status, 200);
+  assert.deepEqual(await result(first), { saved: true, created: true });
+  assert.deepEqual(await result(await save("test-runtime-service")), { saved: true, created: false });
+  assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "entitlement.granted").length, 1);
+
+  const token = await login(api);
+  const listing = () => fetch(`${serverUrl(api)}/v1/library?status=active`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+  assert.deepEqual((await listing()).entitlements.map((entry) => entry.product_id), [catalogAgent.product_id]);
+
+  const remove = (auth) => fetch(`${serverUrl(api)}/v1/library/${catalogAgent.product_id}`, { method: "DELETE", headers: auth ? { authorization: `Bearer ${auth}` } : {} });
+  assert.equal((await remove()).status, 401);
+  assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "entitlement.revoked").length, 0);
+  assert.deepEqual(await result(await remove(token)), { removed: true });
+  assert.deepEqual(await result(await remove(token)), { removed: false });
+  assert.deepEqual((await listing()).entitlements, []);
+
+  assert.deepEqual(await result(await save("test-runtime-service")), { saved: true, created: true });
+  assert.deepEqual(captured.map((entry) => entry.event).filter((event) => event !== "signed_in"), ["agent_saved", "agent_removed", "agent_saved"]);
 });
 
 test("buyer list APIs omit records whose Creator account is missing and return the remaining records", async (context) => {

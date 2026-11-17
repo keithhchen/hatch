@@ -20,6 +20,7 @@ import {
   PostgresCommerceLedger
 } from "../packages/commerce/src/index.js";
 import { PortalStateStore, stateError } from "./portalState.mjs";
+import { createLibrary } from "./library.mjs";
 import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
@@ -33,7 +34,7 @@ import {
 } from "./publicMetadata.mjs";
 import { helpPage, injectHelpPage, robotsTxt, sitemapXml } from "./helpSeo.mjs";
 import { createServerAnalytics } from "./analytics.mjs";
-import { agentSubscribed, agentUnsubscribed, signedIn, signupCompleted } from "./analyticsEvents.mjs";
+import { agentRemoved, agentSaved, signedIn, signupCompleted } from "./analyticsEvents.mjs";
 import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 import { bindAccount, currentContext, logEvent, observed, propagatingFetch, requestIdFrom } from "./observability.mjs";
 
@@ -137,7 +138,7 @@ export async function createDashboardApp(options = {}) {
   };
   const trackCheckout = (outcome, session) => {
     if (!outcome?.entitlement_id || outcome?.entitlement?.status === "revoked") return;
-    track(session?.buyer?.id, agentSubscribed(session?.product?.product_id));
+    track(session?.buyer?.id, agentSaved(session?.product?.product_id));
   };
   const startWebSession = async (request, response, auth, method, created = false) => {
     const profile = publicProfile(auth.account);
@@ -182,6 +183,20 @@ export async function createDashboardApp(options = {}) {
     // paid order. Keep the pre-V2 compatibility adapter disabled here even in
     // sandbox mode so no browser-shaped `payment_status=paid` can grant access.
     allowLegacyPaymentConfirmation: false
+  });
+  const library = createLibrary({
+    commerce,
+    findProduct: async (productId) => {
+      const candidates = (await authoritativeCatalog(registryUrl, fetchImpl, portalState)).filter((entry) => entry.product_id === productId);
+      if (candidates.length > 1) throw stateError("ambiguous_product", "This product id is not globally unique.", 409);
+      const [agent] = candidates;
+      return agent && publicCatalogAgent(agent, portalState.getCreatorProduct(agent.creator_id, agent.product_id));
+    },
+    grantInput: (product, accountId) => checkoutCommerceInput({
+      product,
+      creator: { id: product.creator_id, name: product.creator_name },
+      release: { release_id: product.release_id ?? product.corpus_digest, corpus_digest: product.corpus_digest }
+    }, { profile: { id: accountId } })
   });
   const exposeBearerTokens = options.exposeBearerTokens === true;
   const registryDeploymentServiceToken = options.registryDeploymentServiceToken
@@ -608,13 +623,24 @@ export async function createDashboardApp(options = {}) {
         });
         return send(response, 200, { received: true, payout });
       }
-      if (url.pathname.startsWith("/v1/internal/commerce/") || url.pathname.startsWith("/v1/internal/access/")) {
+      if (url.pathname.startsWith("/v1/internal/commerce/") || url.pathname.startsWith("/v1/internal/library/") || url.pathname.startsWith("/v1/internal/access/")) {
         if (!commerceRuntimeServiceToken) {
           return send(response, 503, { error: { code: "commerce_service_unavailable", message: "Internal Commerce commands are not configured." } });
         }
         const serviceToken = bearerTokenFromAuthorization(request);
         if (!serviceToken || !safeEqual(serviceToken, commerceRuntimeServiceToken)) {
           return send(response, 403, { error: { code: "forbidden", message: "A Commerce Runtime service credential is required." } });
+        }
+        if (request.method === "POST" && url.pathname === "/v1/internal/library/save") {
+          const body = await readJson(request);
+          const accountId = String(body.account_id ?? "").trim();
+          const productId = String(body.product_id ?? "").trim();
+          if (!accountId || !UUID_V4_PATTERN.test(productId)) {
+            return send(response, 400, { error: { code: "invalid_library_save", message: "account_id and a UUID v4 product_id are required." } });
+          }
+          const result = await library.saveToLibrary({ accountId, productId });
+          if (result.created) track(accountId, agentSaved(productId));
+          return send(response, 200, result);
         }
         const userAccessMatch = url.pathname.match(/^\/v1\/internal\/access\/users\/([^/]+)\/entitlements$/);
         if (request.method === "GET" && userAccessMatch) {
@@ -1399,7 +1425,7 @@ export async function createDashboardApp(options = {}) {
           reason: String(body.reason ?? "buyer_request"),
           ...providerRefund
         }, { idempotencyKey: commandKey });
-        track(authentication.profile.id, agentUnsubscribed(current.product_id));
+        track(authentication.profile.id, agentRemoved(current.product_id));
         return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], creatorName), access_status: "revoked" });
       }
 
@@ -1814,6 +1840,14 @@ export async function createDashboardApp(options = {}) {
       }
 
       const libraryIdMatch = url.pathname.match(/^\/v1\/library\/([^/]+)$/);
+      if (request.method === "DELETE" && libraryIdMatch) {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const productId = decodeURIComponent(libraryIdMatch[1]);
+        const result = await library.removeFromLibrary({ accountId: authentication.profile.id, productId });
+        if (result.removed) track(authentication.profile.id, agentRemoved(productId));
+        return send(response, 200, result);
+      }
       if (request.method === "GET" && libraryIdMatch) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
