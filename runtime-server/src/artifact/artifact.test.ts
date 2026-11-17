@@ -109,7 +109,7 @@ test("lifecycle: draft, generating, summary ready; failed renders and bad docume
   const turn = (await artifact.turnFor(c, { createdAt: new Date(Date.now() - 5000).toISOString() }))!;
   assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write", "artifact.edit"]);
   assert.match(turn.promptSuffix, /TEMPLATE-TEXT/);
-  assert.match(turn.promptSuffix, /the executive summary page only/, "the summary phase's instructions");
+  assert.match(turn.promptSuffix, /the summary page only, with as little reasoning as possible/, "the summary phase's instructions");
   assert.doesNotMatch(turn.promptSuffix, /# This Run: the full report/);
 
   const bad = await publishFile(turn, "<p>x</p>", "/report/summary.html");
