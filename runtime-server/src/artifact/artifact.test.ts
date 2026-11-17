@@ -384,3 +384,21 @@ test("report tools are registered for artifact conversations only", async () => 
   assert.ok(!names(chatToolsForRun([], undefined)).includes("publish_report"));
   assert.ok(names(chatToolsForRun([], ["artifact.publish_report"])).includes("publish_report"));
 });
+
+test("phase prompts live in the database: seeded from the files once, an edited row wins, a missing one is an error", async () => {
+  const { PostgresPhasePrompts, FilePhasePrompts } = await import("./prompt.js");
+  const rows = new Map<string, string>();
+  const db = { query: async (sql: string, values: unknown[] = []) => {
+    if (sql.startsWith("CREATE TABLE")) return { rows: [] };
+    if (sql.startsWith("INSERT")) { if (!rows.has(values[0] as string)) rows.set(values[0] as string, values[1] as string); return { rows: [] }; }
+    const body = rows.get(values[0] as string); return { rows: body === undefined ? [] : [{ body }] };
+  } };
+  const prompts = new PostgresPhasePrompts(db as never);
+  await prompts.initialize();
+  assert.equal(await prompts.get("summary"), await new FilePhasePrompts().get("summary"), "the first row is the file");
+  rows.set("summary", "edited in the database");
+  await prompts.initialize();
+  assert.equal(await prompts.get("summary"), "edited in the database", "starting again never overwrites an edited prompt");
+  rows.delete("full");
+  await assert.rejects(prompts.get("full"), /no prompt for the full phase/);
+});

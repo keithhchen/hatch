@@ -7,6 +7,7 @@ import { ArtifactMode } from "./mode.js";
 import type { ReportRenderer } from "./ports.js";
 import { PostgresReportRepository } from "./repositories.js";
 import { PostgresDraftStore } from "./drafts.js";
+import { PostgresPhasePrompts } from "./prompt.js";
 import type { SearchProvider } from "../factoryAgents/search.js";
 
 /** Report mode in production: Postgres for configs and reports, the Runtime's object store for files. The renderer is the caller's to choose. */
@@ -17,5 +18,7 @@ export async function openArtifactMode(options: { pool: PostgresQueryExecutor; b
   await reports.initialize();
   const drafts = new PostgresDraftStore(options.pool);
   await drafts.initialize();
-  return new ArtifactMode({ configs, reports, renderer: options.renderer, blobs: options.blobs, assets: options.assets, analytics: options.analytics, search: options.search, drafts });
+  const phasePrompts = new PostgresPhasePrompts(options.pool);
+  await phasePrompts.initialize();
+  return new ArtifactMode({ configs, reports, renderer: options.renderer, blobs: options.blobs, assets: options.assets, analytics: options.analytics, search: options.search, drafts, phasePrompts });
 }

@@ -10,7 +10,7 @@ import type { HostToolRunner } from "../serverTools.js";
 import { log } from "../observability/log.js";
 import { ArtifactLifecycle } from "./lifecycle.js";
 import type { ArtifactConfigRepository, ReportRecord, ReportRenderer, ReportRepository } from "./ports.js";
-import { artifactPrompt } from "./prompt.js";
+import { artifactPrompt, FilePhasePrompts, type PhasePrompts } from "./prompt.js";
 import { ReportProgress } from "./progress.js";
 import { ReportPublisher } from "./publisher.js";
 import { DRAFT_TOOLS, PUBLISH_REPORT_TOOL, WEB_SEARCH_TOOL, reportToolRunner } from "./toolDefinitions.js";
@@ -63,6 +63,8 @@ export class ArtifactMode {
     maxFiles?: number;
     /** The public web, for facts that change; absent when the server has no search configured. */
     search?: SearchProvider;
+    /** What each phase's Run delivers; the files when not given (tests). */
+    phasePrompts?: PhasePrompts;
     /** The report's working files; in memory when not given (tests). */
     drafts?: DraftStore;
     /** Test seams of publishing: pauses, sleep, clock, ids. */
@@ -125,6 +127,6 @@ export class ArtifactMode {
     const config = await this.deps.configs.get(conversation.productId);
     if (!config) throw new Error(`Product ${conversation.productId} has an artifact conversation but no artifact configuration.`);
     const progress = new ReportProgress(this.deps.reports, { conversationId: conversation.id, attempt: report.attempt });
-    return { promptSuffix: await artifactPrompt(config, report.phase), extraTools: [PUBLISH_REPORT_TOOL, ...DRAFT_TOOLS, ...(this.deps.search ? [WEB_SEARCH_TOOL] : [])], tools: reportToolRunner(this.publisher, conversation, run, report.phase, report.attempt, progress, this.drafts, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
+    return { promptSuffix: await artifactPrompt(config, report.phase, this.deps.phasePrompts ?? new FilePhasePrompts()), extraTools: [PUBLISH_REPORT_TOOL, ...DRAFT_TOOLS, ...(this.deps.search ? [WEB_SEARCH_TOOL] : [])], tools: reportToolRunner(this.publisher, conversation, run, report.phase, report.attempt, progress, this.drafts, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
   }
 }
