@@ -71,7 +71,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     approval: "none",
     readOnly: true,
     description: "Hatch-provided public web search.",
-    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) }).strict(),
+    // `objective` is what a report Run sends with its searches; a chat search may leave it out.
+    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5), objective: z.string().optional() }).strict(),
     model: {
       name: "hatch_web_search",
       locality: "server",
@@ -90,7 +91,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     approval: "none",
     readOnly: true,
     description: "Search public web or creator-owned API sources from the runtime server.",
-    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) }).strict(),
+    // `objective` is what a report Run sends with its searches; a chat search may leave it out.
+    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5), objective: z.string().optional() }).strict(),
     model: {
       name: "web_search",
       locality: "server",

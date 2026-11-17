@@ -3,7 +3,7 @@ import type { StallLimits } from "./providerStall.js";
 import { ModelProfileError } from "./errors/modelProfile.js";
 
 /** The catalogue of usable models. Which role runs on which profile is data (`hatch_model_roles`), not code: see modelRoles.ts. */
-export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
@@ -103,6 +103,26 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     providerName: "Moonshot Kimi",
     api: "openai-completions",
     model: KIMI_MODEL,
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKeyEnv: "LLM_API_KEY",
+    endpointEnv: "OPENAI_BASE_URL",
+    // Moonshot's /v1/models reports context_length 1,048,576 (checked 2026-11-16). A smaller number here clamps the
+    // output allowance to the window: past 258k the model was left one token to answer and stopped with "length".
+    contextWindow: 1_048_576,
+    maxTokens: 32_768,
+    reasoning: true,
+    thinkingLevel: "low",
+    reasoningEffort: "low",
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+  },
+  "kimi-k3.1-pro-highspeed": {
+    name: "kimi-k3.1-pro-highspeed",
+    family: "kimi",
+    provider: "moonshotai-cn",
+    providerName: "Moonshot Kimi",
+    api: "openai-completions",
+    // The same model served faster, at twice the price (Moonshot list price).
+    model: "kimi-k3.1-pro-highspeed",
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "LLM_API_KEY",
     endpointEnv: "OPENAI_BASE_URL",
