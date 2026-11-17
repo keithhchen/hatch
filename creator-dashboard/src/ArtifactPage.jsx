@@ -35,11 +35,11 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
     let live = true;
     setMode(null);
     setError(null);
-    loadArtifact(request, access, productId)
+    loadArtifact(request, access, productId, routedConversationId)
       .then(loaded => { if (!live) return; if (loaded) setMode(loaded); else setError({ key: "artifactNoReport" }); })
       .catch(cause => { if (live) setError(cause); });
     return () => { live = false; };
-  }, [access, productId, request]);
+  }, [access, productId, request]); // the routed id is only the first report to fetch early; later routes are fetched by the report page
 
   const toIntake = useCallback(() => navigate(ArtifactRoute.productPath(productId), { replace: true }), [navigate, productId]);
 

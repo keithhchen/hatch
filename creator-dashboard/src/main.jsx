@@ -15,10 +15,12 @@ import { captureRenderError, initSentry } from "./sentry.js";
 import { AnalyticsProvider, useAccountIdentity } from "./analytics/AnalyticsProvider.jsx";
 import { createAnalytics } from "./analytics/createAnalytics.js";
 import { lazyWithReload, reloadOnStaleBuild } from "./staleBuild.js";
+import { startEarlyLoad } from "./earlyLoad.js";
 
 initSentry(import.meta.env);
 const analytics = createAnalytics(import.meta.env);
 reloadOnStaleBuild();
+startEarlyLoad(window.location.pathname, dashboardRequest);
 
 const CREATOR_ROOT = "/studio";
 const BuyerPortalV2 = lazyWithReload(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));

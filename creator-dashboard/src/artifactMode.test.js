@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDashboardApp } from "../server.mjs";
-import { answeredCount, assignNames, buildFormMd, draftStore, fileMediaType, formatElapsed, isAcceptedFile, resumeView, submissionIds, validateIntake } from "./artifactForm.js";
+import { answeredCount, assignNames, buildFormMd, draftStore, fileMediaType, formatElapsed, isAcceptedFile, isMissingReport, resumeView, submissionIds, validateIntake } from "./artifactForm.js";
 import { ArtifactApi, loadArtifact } from "./artifactClient.js";
 import { ArtifactRoute } from "./artifactRoute.js";
 import { WebChatRoute } from "./webChatRoute.js";
+import { startEarlyLoad, takeEarlyAccess } from "./earlyLoad.js";
+import { webChatT } from "./webChatI18n.js";
 
 const fields = [
   { id: "grade", label: "孩子现在读几年级？", type: "choice", required: true, options: ["初二", "初三"] },
@@ -234,4 +236,41 @@ test("the step a report shows only moves forward", async () => {
   assert.equal(reportStep({ stage: "consulting", steps: [{ stage: "reading" }] }), 2);
   assert.equal(reportStep({ stage: "reading", steps: [{ stage: "reading" }, { stage: "writing" }] }), 4, "reading again after writing stays at writing");
   assert.equal(reportStep({ stage: "rendering", steps: [] }), 6);
+});
+
+test("definition, list and the routed report are all asked before any of them answers", async () => {
+  const started = [];
+  const release = [];
+  const request = url => new Promise(resolve => { started.push(url); release.push(() => resolve(url.includes("/artifact/conversations") ? [] : { intake: { fields } })); });
+  const loading = loadArtifact(request, { entitlement_id: "e1" }, "p1", "c1");
+  assert.equal(started.length, 3, "nothing was awaited between the three calls");
+  assert.ok(started.some(url => url.includes("/conversations/c1/report")));
+  release.forEach(done => done());
+  const mode = await loading;
+  const report = mode.api.report("c1"); // taken from the early request, not asked again
+  assert.equal(started.length, 3);
+  assert.ok(report instanceof Promise);
+});
+
+test("a report that is not found or forbidden is its own state, in every language", async () => {
+  assert.ok(isMissingReport({ status: 404 }) && isMissingReport({ status: 403 }));
+  assert.ok(!isMissingReport({ status: 500 }) && !isMissingReport(new Error("network")));
+  assert.equal(webChatT("zh", "artifactReportNotFound"), "找不到这份报告");
+  const request = async url => { if (url.includes("/report")) throw Object.assign(new Error("nope"), { status: 404 }); return url.includes("/artifact/conversations") ? [] : { intake: { fields } }; };
+  const mode = await loadArtifact(request, { entitlement_id: "e1" }, "p1", "unknown");
+  assert.deepEqual(mode.conversations, [], "the list still loads for the sidebar");
+  await assert.rejects(mode.api.report("unknown"), error => isMissingReport(error));
+});
+
+test("on an artifact path the Product-access request starts at once, once; elsewhere nothing starts", async () => {
+  const calls = [];
+  const request = async url => { calls.push(url); return {}; };
+  const loads = [];
+  startEarlyLoad("/studio", request, async () => loads.push("x"));
+  assert.equal(takeEarlyAccess(), null);
+  startEarlyLoad("/artifact/p1", request, async () => loads.push("page"));
+  assert.deepEqual(calls, ["/v1/user/product-access"]);
+  assert.deepEqual(loads, ["page"]);
+  assert.ok(takeEarlyAccess() instanceof Promise);
+  assert.equal(takeEarlyAccess(), null);
 });

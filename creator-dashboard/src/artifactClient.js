@@ -39,7 +39,19 @@ export class ArtifactApi {
     return conversationId;
   }
 
+  /** Asks for a conversation's report now; the next `report` for it takes this answer instead of asking again. */
+  prefetchReport(conversationId) {
+    const promise = this.request(this.transport.conversationUrl(conversationId, "/report"));
+    promise.catch(() => {});
+    this.early = { conversationId, promise };
+  }
+
   report(conversationId) {
+    if (this.early?.conversationId === conversationId) {
+      const { promise } = this.early;
+      this.early = null;
+      return promise;
+    }
     return this.request(this.transport.conversationUrl(conversationId, "/report"));
   }
 
@@ -93,10 +105,15 @@ export class ArtifactApi {
   }
 }
 
-/** The product's artifact definition and the buyer's reports, or null when the product is not in artifact mode. */
-export async function loadArtifact(request, access, productId) {
+/**
+ * The product's artifact definition and the buyer's reports, or null when the product is not in artifact mode.
+ * The definition, the list and the routed conversation's report are asked together, not one after another.
+ */
+export async function loadArtifact(request, access, productId, conversationId = null) {
   const api = new ArtifactApi(request, accessScope(access, productId));
-  const definition = await api.definition(productId);
-  if (!definition) return null;
-  return { api, definition, conversations: await api.listConversations(productId) };
+  if (conversationId) api.prefetchReport(conversationId);
+  const [definition, listed] = await Promise.all([api.definition(productId), api.listConversations(productId).catch(error => ({ error }))]);
+  if (!definition) return null; // a chat-only product has no list either
+  if (listed.error) throw listed.error;
+  return { api, definition, conversations: listed };
 }

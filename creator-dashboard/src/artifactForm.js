@@ -132,3 +132,6 @@ export function reportStep(report) {
   const seen = [report.stage, ...(report.steps ?? []).map(step => step.stage)].map(stage => REPORT_STEPS.indexOf(stage));
   return Math.max(0, ...seen) + 1;
 }
+
+/** An unknown id, or someone else's conversation: the server answers not found or forbidden, and asking again changes nothing. */
+export const isMissingReport = error => error?.status === 404 || error?.status === 403;

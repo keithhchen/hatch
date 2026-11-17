@@ -6,6 +6,7 @@ import { BuyerAccountMenu } from "./BuyerAccountControls.jsx";
 import { WebChatGate } from "./webChatGate.jsx";
 import { useLocale } from "./locale.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
+import { takeEarlyAccess } from "./earlyLoad.js";
 
 /** Shared by the Product's chat and artifact pages: who may open this Product, from the Registry's product-access list. */
 export function useProductAccess(productId, request) {
@@ -13,7 +14,9 @@ export function useProductAccess(productId, request) {
   useEffect(() => {
     let live = true;
     setState({ status: "checking" });
-    request("/v1/user/product-access").then(async payload => {
+    const list = () => request("/v1/user/product-access");
+    const early = takeEarlyAccess(); // already in flight since startup; if it failed, ask again
+    (early ? early.catch(list) : list()).then(async payload => {
       const access = payload.creator_agents?.find(entry => entry.product_id === productId);
       if (access) { if (live) setState({ status: "granted", access }); return; }
       const detail = await request(`/v1/public/products/${encodeURIComponent(productId)}`);

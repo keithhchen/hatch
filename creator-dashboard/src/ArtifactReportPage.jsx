@@ -3,7 +3,7 @@ import { InlineAlert } from "@hatch/ui";
 import { BookOpen, FileCheck, Globe, Lightbulb, Lock, PenLine, ScanSearch } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
 import { reportFileOpened, reportViewed } from "./analytics/events.js";
-import { REPORT_STEPS, formatElapsed, isWaiting, reportStep } from "./artifactForm.js";
+import { REPORT_STEPS, formatElapsed, isMissingReport, isWaiting, reportStep } from "./artifactForm.js";
 import { WebChatEgg } from "./webChatGate.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
 
@@ -84,6 +84,7 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, on
       } catch (cause) {
         if (!live) return;
         setError(cause);
+        if (isMissingReport(cause)) return;
       }
       timer = setTimeout(poll, POLL_MS);
     };
@@ -122,7 +123,9 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, on
   const startedAt = Date.parse(report?.started_at ?? "");
 
   return <div className="web-chat__messages"><div className="web-chat__thread artifact__report">
-    {!report ? (error
+    {!report ? (isMissingReport(error)
+      ? <InlineAlert tone="error" title={t("artifactReportNotFound")} />
+      : error
       ? <InlineAlert tone="error" title={t("artifactStatusUnavailable")}>{webChatErrorText(error, locale)}</InlineAlert>
       : <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /></div>) : null}
     {waiting ? <div className="artifact__generating">
