@@ -13,8 +13,7 @@ function browserTimeZone() {
 
 /**
  * Desktop ConversationTransport: the bearer-token Runtime REST client plus
- * a direct Runtime WebSocket. `agent` supplies the access binding — an owner
- * by `productId`, an acquirer by `entitlementId` — and Runtime decides
+ * a direct Runtime WebSocket. `agent` supplies the `{ productId }` binding and Runtime decides
  * whether it authorizes this account for every request.
  */
 export class DesktopConversationTransport extends ConversationTransport {
@@ -24,9 +23,9 @@ export class DesktopConversationTransport extends ConversationTransport {
     this.assetSources = new Map();
   }
 
-  /** Wire fields for the hello frame: exactly one access key. */
+  /** Wire fields for the hello frame: the product. */
   get scope() {
-    return this.binding.entitlementId ? { entitlement_id: this.binding.entitlementId } : { product_id: this.binding.productId };
+    return { product_id: this.binding.productId };
   }
 
   call(method, ...args) {

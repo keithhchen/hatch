@@ -4,9 +4,9 @@ import { HatchRequestError, requestJson } from "../http.js";
 import { isUuidV4 } from "../identity.js";
 
 /**
- * One Agent the account can chat with. Access is relational: an owned Agent
- * (the account published it) is addressed by `product_id`; an acquired Agent
- * by its `entitlement_id`. Exactly one of the two is ever sent to Runtime.
+ * One Agent the account can chat with, always addressed by `product_id`.
+ * `kind` only groups the Library: a row with no `entitlement_id` is owned
+ * (published by this account), otherwise it is a saved library Agent.
  */
 export class AgentAccess {
   constructor(row) {
@@ -14,9 +14,8 @@ export class AgentAccess {
     this.kind = owned ? "owned" : "acquired";
     this.productId = row.product_id;
     this.creatorId = row.creator_id;
-    this.entitlementId = owned ? null : row.entitlement_id;
-    this.key = owned ? `product:${row.product_id}` : `entitlement:${row.entitlement_id}`;
-    this.binding = Object.freeze(owned ? { productId: row.product_id } : { entitlementId: row.entitlement_id });
+    this.key = `product:${row.product_id}`;
+    this.binding = Object.freeze({ productId: row.product_id });
     this.identity = resolveCreatorIdentity({ access: row });
     this.briefFields = this.identity.briefSpec?.fields ?? [];
     // Mutable meter on a frozen Agent: owners chat freely, customers meet the expert's limit.
@@ -36,7 +35,6 @@ export class AgentAccess {
 
   static isValidRow(row) {
     return isUuidV4(row?.product_id) && isUuidV4(row?.creator_id)
-      && (row.entitlement_id === undefined || row.entitlement_id === null || isUuidV4(row.entitlement_id))
       && Boolean(row.product?.name) && Boolean(row.creator?.name);
   }
 }
@@ -44,7 +42,7 @@ export class AgentAccess {
 /**
  * The account's Agents, read from the shared Web/Desktop access view
  * `GET /v1/user/product-access`: owned rows first (published Products, no
- * entitlement), then acquired rows, each with the creator's current name and
+ * entitlement), then library rows, one Agent per product, each with the creator's current name and
  * avatar. Runtime re-authorizes every conversation request regardless of
  * what this list says.
  */

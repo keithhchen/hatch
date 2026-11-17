@@ -1,7 +1,6 @@
 /**
  * Desktop's Runtime Conversation REST client: bearer token straight to
- * Runtime, scoped by the Agent's access binding — `{ productId }` for an
- * owner or `{ entitlementId }` for an acquirer, never both. Dependency-free,
+ * Runtime, scoped by the Agent's `{ productId }` binding. Dependency-free,
  * so the Factory's headless Hatch tool runs the same client in Node.
  */
 
@@ -14,11 +13,10 @@ export function runtimeHttpUrl(runtimeUrl, pathname) {
   return url.toString();
 }
 
-/** Exactly one access key: an acquirer's entitlement, else the owner's product. */
+/** The only access key is the product. */
 export function conversationScope(binding = {}) {
   const params = new URLSearchParams();
-  if (binding.entitlementId) params.set("entitlement_id", binding.entitlementId);
-  else if (binding.productId) params.set("product_id", binding.productId);
+  if (binding.productId) params.set("product_id", binding.productId);
   return params;
 }
 

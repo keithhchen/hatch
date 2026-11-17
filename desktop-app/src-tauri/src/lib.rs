@@ -2144,12 +2144,11 @@ fn normalize_product_open_url(url: &url::Url) -> Option<String> {
             .map(|(_, value)| value.into_owned())
     };
     let is_uuid = |value: &str| is_uuid_route(&format!("/{value}"), "/");
-    // product_id names the Agent; entitlement_id is present only for an
-    // acquired Agent. Either is a routing hint, never authorization.
+    // product_id names the Agent: a routing hint, never authorization.
     if !is_uuid(&query("product_id")?) {
         return None;
     }
-    for optional in ["entitlement_id", "creator_id"] {
+    for optional in ["creator_id"] {
         if query(optional).is_some_and(|value| !is_uuid(&value)) {
             return None;
         }
@@ -3478,7 +3477,7 @@ mod tests {
     #[test]
     fn product_open_deep_link_is_canonical_and_uuid_bound() {
         let valid = url::Url::parse(
-            "hatch://products/open?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002",
+            "hatch://products/open?product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002",
         )
         .unwrap();
         assert!(super::normalize_product_open_url(&valid).is_some());
@@ -3502,7 +3501,7 @@ mod tests {
         assert!(super::normalize_product_open_url(&legacy).is_none());
 
         let malformed = url::Url::parse(
-            "hatch://products/open?entitlement_id=ent_old&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
+            "hatch://products/open?creator_id=ent_old&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
         )
         .unwrap();
         assert!(super::normalize_product_open_url(&malformed).is_none());

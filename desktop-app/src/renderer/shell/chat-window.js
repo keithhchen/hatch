@@ -17,18 +17,15 @@ import { WindowController } from "./window-controller.js";
 
 const NARROW = "(max-width: 760px)";
 
-/** The Agent binding a Chat window was opened for (`?window=chat&product_id=…|entitlement_id=…`). */
+/** The Agent binding a Chat window was opened for (`?window=chat&product_id=…`). */
 export function chatWindowBinding(search = globalThis.location?.search ?? "") {
   const params = new URLSearchParams(search);
   const productId = params.get("product_id") ?? "";
-  const entitlementId = params.get("entitlement_id") ?? "";
-  if (isUuidV4(entitlementId) && !productId) return Object.freeze({ entitlementId });
-  if (isUuidV4(productId) && !entitlementId) return Object.freeze({ productId });
-  return null;
+  return isUuidV4(productId) ? Object.freeze({ productId }) : null;
 }
 
 /** Same key as AgentAccess.key. */
-export const agentKeyFor = binding => binding?.entitlementId ? `entitlement:${binding.entitlementId}` : binding?.productId ? `product:${binding.productId}` : "";
+export const agentKeyFor = binding => binding?.productId ? `product:${binding.productId}` : "";
 
 /**
  * Which conversation an Agent's window returns to: the one last used in it
@@ -185,7 +182,7 @@ export class ChatWindow extends WindowController {
     nativeWindow.setTitle(agent ? title ? `${title} — ${agent.name}` : agent.name : "Hatch");
     const conversationId = this.state.conversationId;
     if (agent && conversationId && isNative()) {
-      void nativeInvoke("patch_window_settings", { patch: { context: { conversationId, ...(agent.entitlementId ? { entitlementId: agent.entitlementId } : { entitlementId: null, productId: agent.productId }), creatorId: agent.creatorId } } }).catch(() => {});
+      void nativeInvoke("patch_window_settings", { patch: { context: { conversationId, productId: agent.productId, creatorId: agent.creatorId } } }).catch(() => {});
     }
     this.publishCommands();
   }

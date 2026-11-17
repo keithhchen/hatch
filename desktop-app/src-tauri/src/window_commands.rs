@@ -68,8 +68,7 @@ fn agent_window_manifest_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-/// Valid, sorted, deduplicated and bounded `product_id:<uuid>` /
-/// `entitlement_id:<uuid>` entries.
+/// Valid, sorted, deduplicated and bounded `product_id:<uuid>` entries.
 fn normalize_agent_window_manifest(entries: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut normalized = entries
         .into_iter()
@@ -271,55 +270,36 @@ enum ConversationOwnerPhase {
     Closing,
 }
 
-/// Non-secret routing hint for an Agent's Chat window: exactly one access
-/// scope (an owned Product or an acquired entitlement). Runtime still
-/// re-checks the signed-in account on every request.
+/// Non-secret routing hint for an Agent's Chat window: its Product. Runtime
+/// still re-checks the signed-in account on every request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AgentBinding {
-    key: &'static str,
     id: String,
 }
 
 impl AgentBinding {
-    fn new(product_id: Option<&str>, entitlement_id: Option<&str>) -> Result<Self, String> {
-        match (product_id, entitlement_id) {
-            (Some(product_id), None) => Ok(Self {
-                key: "product_id",
-                id: validate_uuid_v4(product_id, "product_id")?,
-            }),
-            (None, Some(entitlement_id)) => Ok(Self {
-                key: "entitlement_id",
-                id: validate_uuid_v4(entitlement_id, "entitlement_id")?,
-            }),
-            _ => Err(
-                "agent_window_binding_invalid: Provide exactly one of product_id or entitlement_id"
-                    .into(),
-            ),
-        }
+    fn new(product_id: &str) -> Result<Self, String> {
+        Ok(Self {
+            id: validate_uuid_v4(product_id, "product_id")?,
+        })
     }
 
     fn parse(value: &str) -> Result<Self, String> {
         match value.split_once(':') {
-            Some(("product_id", id)) => Self::new(Some(id), None),
-            Some(("entitlement_id", id)) => Self::new(None, Some(id)),
+            Some(("product_id", id)) => Self::new(id),
             _ => Err("agent_window_binding_invalid: Unknown manifest entry".into()),
         }
     }
 
     fn manifest_key(&self) -> String {
-        format!("{}:{}", self.key, self.id)
+        format!("product_id:{}", self.id)
     }
 
     /// Stable, portable, distinct per binding: a short readable slug plus a
     /// deterministic hash of the full binding.
     fn window_label(&self) -> String {
-        let scope = if self.key == "product_id" {
-            "product"
-        } else {
-            "entitlement"
-        };
         format!(
-            "{AGENT_WINDOW_PREFIX}{scope}-{}-{:016x}",
+            "{AGENT_WINDOW_PREFIX}product-{}-{:016x}",
             &self.id[..8],
             stable_hash64(self.manifest_key().as_bytes())
         )
@@ -328,7 +308,7 @@ impl AgentBinding {
     fn window_path(&self) -> PathBuf {
         let mut query = url::form_urlencoded::Serializer::new(String::new());
         query.append_pair("window", "chat");
-        query.append_pair(self.key, &self.id);
+        query.append_pair("product_id", &self.id);
         PathBuf::from(format!("index.html?{}", query.finish()))
     }
 }
@@ -956,11 +936,10 @@ pub async fn release_conversation_session(
 #[tauri::command]
 pub async fn open_agent_window(
     app: AppHandle,
-    product_id: Option<String>,
-    entitlement_id: Option<String>,
+    product_id: String,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<OpenAgentWindowResult, String> {
-    let binding = AgentBinding::new(product_id.as_deref(), entitlement_id.as_deref())?;
+    let binding = AgentBinding::new(&product_id)?;
     let result = open_agent_window_impl(&app, &binding, router.inner())?;
     if !result.reused {
         // Best effort: a manifest failure must not make the window unusable.
@@ -1291,7 +1270,7 @@ mod tests {
     };
 
     const PRODUCT: &str = "550e8400-e29b-41d4-a716-446655440000";
-    const ENTITLEMENT: &str = "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001";
+    const OTHER: &str = "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001";
 
     fn snapshot(state: NativeCommandState) -> NativeMenuSnapshot {
         NativeMenuSnapshot {
@@ -1307,14 +1286,12 @@ mod tests {
 
     #[test]
     fn agent_window_labels_are_stable_portable_and_distinct_per_binding() {
-        let owned = AgentBinding::new(Some(PRODUCT), None).unwrap();
-        let again = AgentBinding::new(Some(&PRODUCT.to_uppercase()), None).unwrap();
-        let acquired = AgentBinding::new(None, Some(ENTITLEMENT)).unwrap();
-        let same_id_other_scope = AgentBinding::new(None, Some(PRODUCT)).unwrap();
+        let owned = AgentBinding::new(PRODUCT).unwrap();
+        let again = AgentBinding::new(&PRODUCT.to_uppercase()).unwrap();
+        let other = AgentBinding::new(OTHER).unwrap();
         let label = owned.window_label();
         assert_eq!(label, again.window_label());
-        assert_ne!(label, acquired.window_label());
-        assert_ne!(label, same_id_other_scope.window_label());
+        assert_ne!(label, other.window_label());
         assert!(label.starts_with("agent-product-550e8400-"));
         assert!(label.chars().all(|character| character.is_ascii_lowercase()
             || character.is_ascii_digit()
@@ -1323,29 +1300,23 @@ mod tests {
     }
 
     #[test]
-    fn agent_window_route_carries_window_kind_and_exactly_one_access_scope() {
-        let owned = AgentBinding::new(Some(PRODUCT), None).unwrap();
+    fn agent_window_route_carries_window_kind_and_the_product() {
+        let owned = AgentBinding::new(PRODUCT).unwrap();
         assert_eq!(
             owned.window_path().to_string_lossy(),
             format!("index.html?window=chat&product_id={PRODUCT}")
         );
-        let acquired = AgentBinding::new(None, Some(ENTITLEMENT)).unwrap();
         assert_eq!(
-            acquired.window_path().to_string_lossy(),
-            format!("index.html?window=chat&entitlement_id={ENTITLEMENT}")
-        );
-        assert_eq!(
-            AgentBinding::parse(&acquired.manifest_key()).unwrap(),
-            acquired
+            AgentBinding::parse(&owned.manifest_key()).unwrap(),
+            owned
         );
     }
 
     #[test]
-    fn agent_binding_rejects_both_neither_and_controlled_input() {
-        assert!(AgentBinding::new(Some(PRODUCT), Some(ENTITLEMENT)).is_err());
-        assert!(AgentBinding::new(None, None).is_err());
-        assert!(AgentBinding::new(Some("not-a-uuid"), None).is_err());
-        assert!(AgentBinding::new(None, Some(&format!("{ENTITLEMENT}\nx"))).is_err());
+    fn agent_binding_rejects_malformed_and_controlled_input() {
+        assert!(AgentBinding::new("not-a-uuid").is_err());
+        assert!(AgentBinding::new(&format!("{PRODUCT}\nx")).is_err());
+        assert!(AgentBinding::parse(&format!("entitlement_id:{OTHER}")).is_err());
         assert!(AgentBinding::parse(&format!("creator_id:{PRODUCT}")).is_err());
     }
 
@@ -1354,7 +1325,7 @@ mod tests {
         let mut entries = vec![
             format!("product_id:{PRODUCT}"),
             format!("product_id:{PRODUCT}"),
-            format!("entitlement_id:{ENTITLEMENT}"),
+            format!("entitlement_id:{OTHER}"),
             "product_id:bad\nvalue".to_string(),
             "conv_legacy".to_string(),
             String::new(),
@@ -1374,8 +1345,8 @@ mod tests {
     #[test]
     fn router_tracks_agent_windows_and_attention_per_window() {
         let router = NativeCommandRouter::default();
-        let owned = AgentBinding::new(Some(PRODUCT), None).unwrap();
-        let acquired = AgentBinding::new(None, Some(ENTITLEMENT)).unwrap();
+        let owned = AgentBinding::new(PRODUCT).unwrap();
+        let acquired = AgentBinding::new(OTHER).unwrap();
         router.register_agent_window(&owned.window_label(), &owned);
         router.register_agent_window(&acquired.window_label(), &acquired);
         assert_eq!(router.agent_window_manifest().unwrap().len(), 2);

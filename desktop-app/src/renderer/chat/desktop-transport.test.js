@@ -32,15 +32,15 @@ describe("Desktop conversation transport", () => {
     expect(init.headers.authorization).toBe("Bearer tok");
   });
 
-  it("addresses an acquired Agent by entitlement_id only, in REST and in hello", () => {
+  it("addresses the Agent by product_id in hello", () => {
     const { fetchImpl } = recorder();
-    const transport = new DesktopConversationTransport({ token: "tok", binding: { entitlementId: "e1" }, clientVersion: "1.2.3", fetchImpl, socketUrl, WebSocketImpl: RecordingSocket });
+    const transport = new DesktopConversationTransport({ token: "tok", binding: { productId: "p1" }, clientVersion: "1.2.3", fetchImpl, socketUrl, WebSocketImpl: RecordingSocket });
     const connection = transport.connect("conv_1", { onOpen() {}, onEvent() {}, onClose() {} });
     connection.hello(["file_read"]);
     connection.send({ runId: "run_1", clientMessageId: "m1", content: "hi", localTools: ["file_read"] });
     const [hello, message] = connection.socket.sent;
-    expect(hello).toEqual({ type: "client.hello", protocol_version: "0.8", auth_token: "tok", conversation_id: "conv_1", entitlement_id: "e1", client_version: "1.2.3", local_tools: ["file_read"], time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
-    expect(hello.product_id).toBeUndefined();
+    expect(hello).toEqual({ type: "client.hello", protocol_version: "0.8", auth_token: "tok", conversation_id: "conv_1", product_id: "p1", client_version: "1.2.3", local_tools: ["file_read"], time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    expect(hello.entitlement_id).toBeUndefined();
     expect(message).toMatchObject({ type: "client.message", run_id: "run_1", conversation_id: "conv_1", time_zone: hello.time_zone, message: { role: "user", content: "hi" } });
   });
 

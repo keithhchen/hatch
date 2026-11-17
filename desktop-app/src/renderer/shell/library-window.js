@@ -6,7 +6,7 @@ import { WindowController } from "./window-controller.js";
 
 /** The Agent a `hatch://products/open` link names, if this account has it. */
 export function agentForLink(agents, link) {
-  return agents.find(agent => agent.productId === link.productId && (!link.entitlementId || agent.entitlementId === link.entitlementId)) ?? null;
+  return agents.find(agent => agent.productId === link.productId) ?? null;
 }
 
 /**

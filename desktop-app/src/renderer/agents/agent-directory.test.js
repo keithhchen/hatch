@@ -8,15 +8,15 @@ const acquired = { ...owned, entitlement_id: "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba10
 const respond = payload => async () => ({ ok: true, status: 200, json: async () => payload });
 
 describe("Agent directory", () => {
-  it("maps owned rows to product access and acquired rows to entitlement access", async () => {
+  it("binds every row by product and groups owned apart from library", async () => {
     const [mine, bought] = await fetchAgents("tok", { fetchImpl: respond({ creator_agents: [owned, acquired] }) });
-    expect(mine).toMatchObject({ kind: "owned", key: `product:${owned.product_id}`, binding: { productId: owned.product_id }, entitlementId: null, name: "Ada's Agent", creatorName: "Ada" });
+    expect(mine).toMatchObject({ kind: "owned", key: `product:${owned.product_id}`, binding: { productId: owned.product_id }, name: "Ada's Agent", creatorName: "Ada" });
     expect(mine.briefFields).toHaveLength(1);
-    expect(bought).toMatchObject({ kind: "acquired", key: `entitlement:${acquired.entitlement_id}`, binding: { entitlementId: acquired.entitlement_id } });
+    expect(bought).toMatchObject({ kind: "acquired", key: `product:${acquired.product_id}`, binding: { productId: acquired.product_id } });
   });
 
-  it("drops malformed rows and duplicates", async () => {
-    const agents = await fetchAgents("tok", { fetchImpl: respond({ creator_agents: [owned, owned, { ...acquired, entitlement_id: "ent_old" }, { product_id: "x" }] }) });
+  it("drops malformed rows and dedupes by product", async () => {
+    const agents = await fetchAgents("tok", { fetchImpl: respond({ creator_agents: [owned, owned, { ...owned, entitlement_id: acquired.entitlement_id }, { product_id: "x" }] }) });
     expect(agents.map(agent => agent.key)).toEqual([`product:${owned.product_id}`]);
   });
 
