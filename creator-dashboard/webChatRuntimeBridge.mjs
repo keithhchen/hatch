@@ -11,10 +11,9 @@ const BROWSER_REFUSALS = Object.freeze({
 export class WebChatCapabilityPolicy {
   prepare(message, helloSent, token) {
     if (!helloSent) {
-      // Access is relational: an owner opens by product_id, anyone else by
-      // entitlement_id. Runtime decides which holds; a hello never names both.
+      // A conversation is opened by product_id alone: the Runtime decides who may chat, and a guest has no entitlement.
       if (message?.type !== "client.hello" || message.auth_token || message.license_token || message.local_tools?.length
-        || Boolean(message.product_id) === Boolean(message.entitlement_id)) {
+        || !message.product_id || message.entitlement_id !== undefined) {
         throw new Error("Invalid session start");
       }
       return { ...message, auth_token: token, local_tools: [] };

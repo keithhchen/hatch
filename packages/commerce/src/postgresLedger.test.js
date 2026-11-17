@@ -285,56 +285,6 @@ test("provider inbox, aggregate events and outbox commit atomically", async () =
   assert.equal(failingPool.database.outbox.length, 0);
 });
 
-test("CommerceService payment webhook atomically commits inbox, payment, order, entitlement, outbox, and read models", async () => {
-  const pool = new FakePool();
-  const ledger = await deterministicLedger(pool);
-  const commerce = new CommerceService(ledger);
-  await commerce.createPayment({
-    payment_id: "payment_postgres_provider",
-    buyer_id: "buyer_postgres_provider",
-    creator_id: "creator_postgres_provider",
-    product_id: "product_postgres_provider",
-    amount_minor: 2500,
-    currency: "USD",
-    provider: "stripe",
-    idempotency_key: "payment:postgres:create"
-  });
-  const providerEvent = {
-    payment_id: "payment_postgres_provider",
-    provider: "stripe",
-    provider_event_id: "evt_postgres_succeeded",
-    provider_sequence: 1,
-    status: "succeeded"
-  };
-  const checkout = {
-    buyer_id: "buyer_postgres_provider",
-    creator_id: "creator_postgres_provider",
-    agent_id: "agent_postgres_provider",
-    product_id: "product_postgres_provider",
-    corpus_digest: `sha256:${"c".repeat(64)}`,
-    payment_id: "payment_postgres_provider",
-    gross_minor: 2500,
-    currency: "USD",
-    idempotency_key: "checkout:postgres:provider"
-  };
-  const first = await commerce.confirmCheckoutFromProviderEvent(providerEvent, checkout);
-  const replay = await commerce.confirmCheckoutFromProviderEvent(providerEvent, checkout);
-  assert.equal(first.payment.status, "succeeded");
-  assert.equal(first.order.order_id, replay.order.order_id);
-  assert.equal(first.entitlement.entitlement_id, replay.entitlement.entitlement_id);
-  assert.equal(replay.payment.provider_events.length, 1);
-  assert.equal(pool.database.inbox.length, 1);
-  assert.equal(pool.database.events.length, 4);
-  assert.equal(pool.database.outbox.length, 4);
-  ledger.listEvents = () => {
-    throw new Error("checkout queries should use persisted read models");
-  };
-  assert.equal(commerce.getPayment("payment_postgres_provider").status, "succeeded");
-  assert.equal(commerce.listPayments({ buyerId: "buyer_postgres_provider" }).length, 1);
-  assert.equal(commerce.getOrder(first.order.order_id).payment_status, "succeeded");
-  assert.equal(commerce.getEntitlement(first.entitlement.entitlement_id).status, "active");
-});
-
 test("a supplied Pool constructor is owned and closed by the ledger", async () => {
   let constructedWith;
   let instance;

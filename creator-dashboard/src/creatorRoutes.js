@@ -76,11 +76,7 @@ export function parseCreatorRoute(pathname) {
     if ((segments.length === 3 && PUBLISH_ALIASES.has(third)) || (segments.length === 4 && third === "releases")) return redirect(creatorProductPath(productId, "publish"), "products");
     return page("not-found", "products");
   }
-  if (head === "orders") {
-    if (segments.length === 1) return page("orders", "orders");
-    if (segments.length === 2) return page("order", "orders", { orderId: second });
-    return page("not-found", "orders");
-  }
+  if (head === "users") return segments.length === 1 ? page("users", "users") : page("not-found", "users");
   if (head === "settings" && segments.length === 1) return page("settings", "settings");
   // API keys now live in Settings.
   if (head === "api-keys" && segments.length === 1) return redirect(`${ROOT}/settings`, "settings");
@@ -93,7 +89,7 @@ export function parseCreatorRoute(pathname) {
 export function creatorRouteTitle(route) {
   const titles = {
     assistant: "Assistant", home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent",
-    orders: "Orders", order: "Order", earnings: "Earnings", settings: "Settings"
+    users: "Users", earnings: "Earnings", settings: "Settings"
   };
   return titles[route.kind] ?? "Studio";
 }

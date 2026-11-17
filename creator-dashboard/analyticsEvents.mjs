@@ -4,3 +4,4 @@ export const signupCompleted = method => ({ event: "signup_completed", propertie
 export const signedIn = method => ({ event: "signed_in", properties: { method } });
 export const agentSaved = agentId => ({ event: "agent_saved", properties: { agent_id: agentId } });
 export const agentRemoved = agentId => ({ event: "agent_removed", properties: { agent_id: agentId } });
+export const guestSignedInCarriedOver = moved => ({ event: "guest_signed_in_carried_over", properties: { moved } });

@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Provider-neutral bridge used by the Dashboard BFF. Production integrations
+ * Provider-neutral payout bridge used by the Dashboard BFF (creator payouts only). Production integrations
  * implement this small JSON contract outside the Commerce domain; tests and
  * local UAT use the deterministic sandbox adapter. No card/bank details enter
  * Hatch or its event stream.
@@ -14,8 +14,7 @@ export function createProviderAdapter(options = {}) {
       throw new Error("The sandbox payment provider cannot run in production");
     }
     return new SandboxProviderAdapter({
-      webhookSecret: options.webhookSecret ?? "hatch-local-sandbox-webhook",
-      scenario: options.sandboxScenario ?? "succeeded"
+      webhookSecret: options.webhookSecret ?? "hatch-local-sandbox-webhook"
     });
   }
   if (mode === "provider") {
@@ -35,8 +34,6 @@ export function createProviderAdapter(options = {}) {
 export class DisabledProviderAdapter {
   mode = "disabled";
   configured = false;
-  async createPayment() { throw providerError("payment_provider_unavailable", "Paid checkout is not configured.", 409); }
-  async refundPayment() { throw providerError("payment_provider_unavailable", "Paid refunds are not configured.", 409); }
   async createPayoutAccountSession() { throw providerError("payout_provider_unavailable", "Payout onboarding is not configured.", 409); }
   async createPayout() { throw providerError("payout_provider_unavailable", "Payouts are not configured.", 409); }
   async retrievePayout() { throw providerError("payout_provider_unavailable", "Payouts are not configured.", 409); }
@@ -49,31 +46,6 @@ export class SandboxProviderAdapter {
 
   constructor(options = {}) {
     this.webhookSecret = String(options.webhookSecret);
-    this.scenario = options.scenario ?? "succeeded";
-  }
-
-  async createPayment(input) {
-    const providerPaymentId = stableProviderId("sandbox_payment", input.payment_id);
-    const status = normalizeScenario(input.scenario ?? this.scenario);
-    return {
-      provider: "hatch_sandbox",
-      provider_payment_id: providerPaymentId,
-      provider_event_id: `${providerPaymentId}:create:${status}`,
-      provider_sequence: 1,
-      status,
-      redirect_url: status === "requires_action"
-        ? `/portal/checkout/${encodeURIComponent(input.checkout_session_id)}?sandbox_action=required`
-        : null
-    };
-  }
-
-  async refundPayment(input) {
-    return {
-      provider: "hatch_sandbox",
-      provider_refund_id: stableProviderId("sandbox_refund", input.refund_id ?? input.order_id),
-      provider_event_id: `${input.order_id}:refund:succeeded`,
-      status: "succeeded"
-    };
   }
 
   async createPayoutAccountSession(input) {
@@ -93,7 +65,7 @@ export class SandboxProviderAdapter {
       provider: "hatch_sandbox",
       provider_payout_id: providerPayoutId,
       provider_event_id: `${providerPayoutId}:submitted`,
-      status: input.scenario === "failed" ? "failed" : "in_transit"
+      status: "in_transit"
     };
   }
 
@@ -125,8 +97,6 @@ export class HttpProviderAdapter {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  createPayment(input) { return this.#command("/v1/payments", input); }
-  refundPayment(input) { return this.#command("/v1/refunds", input); }
   createPayoutAccountSession(input) { return this.#command("/v1/payout-account-sessions", input); }
   createPayout(input) { return this.#command("/v1/payouts", input); }
   retrievePayout(input) {
@@ -152,8 +122,8 @@ export class HttpProviderAdapter {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw providerError(
-        providerFailureCode(body.code, response.status),
-        providerFailureMessage(body.code, response.status),
+        providerFailureCode(response.status),
+        providerFailureMessage(response.status),
         response.status >= 500 ? 503 : 409
       );
     }
@@ -195,10 +165,6 @@ function stableProviderId(prefix, value) {
   return `${prefix}_${createHash("sha256").update(`${prefix}\0${value}`).digest("hex").slice(0, 24)}`;
 }
 
-function normalizeScenario(value) {
-  return ["pending", "requires_action", "succeeded", "failed", "cancelled"].includes(value) ? value : "succeeded";
-}
-
 function headerValue(headers, name) {
   if (typeof headers?.get === "function") return headers.get(name);
   const found = Object.entries(headers ?? {}).find(([key]) => key.toLowerCase() === name);
@@ -218,16 +184,12 @@ function providerError(code, message, status) {
   return error;
 }
 
-function providerFailureCode(code, status) {
-  if (["declined", "requires_action", "cancelled"].includes(code)) return `payment_${code}`;
+function providerFailureCode(status) {
   return status >= 500 ? "provider_temporarily_unavailable" : "provider_request_rejected";
 }
 
-function providerFailureMessage(code, status) {
-  if (code === "declined") return "The payment was declined. Use another payment method.";
-  if (code === "requires_action") return "The payment requires another verification step.";
-  if (code === "cancelled") return "The payment was cancelled.";
+function providerFailureMessage(status) {
   return status >= 500
-    ? "The payment provider is temporarily unavailable. Try again without placing another order."
-    : "The payment provider could not accept this request.";
+    ? "The provider is temporarily unavailable. Try again."
+    : "The provider could not accept this request.";
 }

@@ -11,6 +11,8 @@ export const reviewPageOpened = ({ formId }) => ["review_page_opened", { form_id
 export const askuserAnswered = ({ questions, skipped }) => ["askuser_answered", { questions, skipped }];
 export const shareLinkCopied = ({ agentId, link }) => ["share_link_copied", { agent_id: agentId, link }];
 export const ownAgentOpened = ({ agentId }) => ["own_agent_opened", { agent_id: agentId }];
+export const guestLimitReached = ({ agentId }) => ["guest_limit_reached", { agent_id: agentId }];
+export const guestSignedInCarriedOver = ({ moved }) => ["guest_signed_in_carried_over", { moved }];
 export const errorShown = ({ area, category }) => ["error_shown", { area, category }];
 export const agentPageViewed = ({ agentId, via }) => ["agent_page_viewed", { agent_id: agentId, via }];
 export const chatStarted = ({ agentId }) => ["chat_started", { agent_id: agentId }];

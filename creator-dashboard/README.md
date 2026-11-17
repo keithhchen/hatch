@@ -1,7 +1,7 @@
 # Hatch Creator Dashboard
 
 The Dashboard is the public web product, Creator publication workflow, and
-authoritative free-access surface.
+Open Access surface: anyone chats with any live Agent.
 Factory still constructs the Agent Corpus and Registry remains the authority
 that verifies and installs its bytes.
 
@@ -9,15 +9,16 @@ Its server composes three deliberately separate sources of truth:
 
 - TypeScript Registry: authenticated accounts, Creator/Product catalog,
   Factory runs, Agent Corpus verification/materialization, and current release;
-- Portal state: free-access sessions, server-saved Factory drafts, candidate
+- Portal state: server-saved Factory drafts, candidate
   approvals, releases, and public URLs;
-- Access ledger (the package retains its historical `commerce` name): orders,
-  delivery-unit entitlements, deliveries, and receipts.
+- Access ledger (the package retains its historical `commerce` name): My
+  library (the account's active free entitlements) and Creator earnings/payouts.
 
 Production requires `HATCH_COMMERCE_DATABASE_URL` and uses PostgreSQL as the
-single Access writer with transactional outbox/inbox. Runtime sends
-service-authenticated reserve/release/complete commands to the Dashboard BFF;
-it never opens the production Commerce store directly. JSONL is supported only
+single Access writer with transactional outbox/inbox. Runtime saves an Agent to
+My library with a service-authenticated `POST /v1/internal/library/save` and
+lists it with `GET /v1/internal/access/users/{id}/entitlements`; it never opens
+the production Commerce store directly. JSONL is supported only
 for local development and isolated tests.
 
 Browser sessions use same-origin `HttpOnly` cookies plus CSRF tokens. Runtime's
@@ -51,9 +52,10 @@ The UI is served by Vite on `http://127.0.0.1:8510`; the API defaults to
 `http://127.0.0.1:8500`. Start at `/explore` for public browsing or `/studio`
 for an authenticated Creator.
 
-Every published Product currently grants one free delivery. Production payment
-mode stays `disabled`; paid access, pricing, subscriptions, refunds, and payouts
-are outside the current product contract.
+There is no purchase step: guests and accounts chat with any live Agent, and an
+account's first Run saves the Agent to its library. The payment provider
+(`HATCH_COMMERCE_PAYMENT_MODE`, default `disabled`) is used only for Creator
+payouts.
 Public funnel ingestion is schema allowlisted and fixed-window rate limited;
 `HATCH_ANALYTICS_RATE_LIMIT_PER_MINUTE` defaults to `120` per source address.
 
@@ -65,9 +67,8 @@ npm run build
 ```
 
 The internal Access service token is shared only by Dashboard and Runtime.
-User bearers can read their own access but cannot mint entitlements. Registry
+User bearers can read and remove their own library but cannot mint entitlements. Registry
 does not store or project ownership.
 
-The API test covers Registry-backed Creator products, fail-closed Access
-authentication, and idempotent zero-value checkout with an entitlement pinned
-to the current Agent Corpus digest.
+The API tests cover Registry-backed Creator products, fail-closed internal
+authentication, and the idempotent library save/remove.

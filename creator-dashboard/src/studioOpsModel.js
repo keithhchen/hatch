@@ -1,16 +1,7 @@
-// Pure helpers for the Studio orders, earnings and settings pages.
+// Pure helpers for the Studio users, earnings and settings pages.
 // No React here so node --test can exercise them directly.
 
 export const INTL_LOCALE = { zh: "zh-CN", en: "en-US", ja: "ja-JP" };
-
-export const ORDER_FILTER_KEYS = ["product", "order", "payment", "delivery", "refund", "from", "to"];
-
-export const ORDER_FILTER_OPTIONS = {
-  order: ["paid", "fulfilled", "delivered", "partially_refunded", "refunded", "cancelled"],
-  payment: ["succeeded", "paid", "processing", "failed", "not_required", "partially_refunded", "refunded"],
-  delivery: ["completed", "not_started"],
-  refund: ["none", "refunded"]
-};
 
 export function intlLocale(locale) {
   return INTL_LOCALE[locale] ?? INTL_LOCALE.en;
@@ -50,50 +41,28 @@ export function formatDate(value, locale = "en") {
   return new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium" }).format(time);
 }
 
-/** A YYYY-MM-DD date input value → ISO timestamp at the start or end of that local day. */
-export function dayBoundary(day, edge) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) return "";
-  const date = new Date(`${day}T${edge === "end" ? "23:59:59.999" : "00:00:00.000"}`);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : "";
+const USER_LABEL_KEYS = { account: "userAccount", guest: "userGuest", im: "userIm" };
+
+export function userLabelKey(kind) {
+  return USER_LABEL_KEYS[kind] ?? USER_LABEL_KEYS.account;
 }
 
-/** Filter state (date inputs as YYYY-MM-DD) → query string for /v1/creator/orders(/export). */
-export function ordersQuery(filters = {}, paging = {}) {
-  const params = new URLSearchParams();
-  for (const key of ORDER_FILTER_KEYS) {
-    const raw = String(filters[key] ?? "").trim();
-    if (!raw) continue;
-    const value = key === "from" ? dayBoundary(raw, "start") : key === "to" ? dayBoundary(raw, "end") : raw;
-    if (value) params.set(key, value);
-  }
-  if (paging.limit) params.set("limit", String(Math.min(100, Math.max(1, paging.limit))));
-  if (paging.cursor) params.set("cursor", paging.cursor);
-  const query = params.toString();
-  return query ? `?${query}` : "";
+/** Rows from GET /v1/creator/users, most recently active first. */
+export function userRows(users) {
+  return [...(Array.isArray(users) ? users : [])].sort((a, b) => Date.parse(b.last_at ?? "") - Date.parse(a.last_at ?? "") || 0);
 }
 
-export function activeFilterCount(filters = {}) {
-  return ORDER_FILTER_KEYS.filter((key) => String(filters[key] ?? "").trim()).length;
-}
-
-/** Creator and Hatch shares recognized on an order (reversed revenue excluded). */
-export function orderShares(order) {
-  const revenue = Array.isArray(order?.revenue) ? order.revenue.filter((entry) => entry.status === "recognized") : [];
-  if (!revenue.length) {
-    if (Number.isFinite(order?.creator_share_minor)) {
-      return { recognized: true, creator: order.creator_share_minor, hatch: order.hatch_share_minor ?? 0 };
-    }
-    return { recognized: false, creator: null, hatch: null };
-  }
+export function userTotals(rows) {
   return {
-    recognized: true,
-    creator: revenue.reduce((sum, entry) => sum + Number(entry.creator_share_minor ?? 0), 0),
-    hatch: revenue.reduce((sum, entry) => sum + Number(entry.hatch_share_minor ?? 0), 0)
+    users: rows.length,
+    agents: new Set(rows.map((row) => row.product_id)).size,
+    conversations: rows.reduce((sum, row) => sum + Number(row.conversations ?? 0), 0),
+    messages: rows.reduce((sum, row) => sum + Number(row.messages ?? 0), 0)
   };
 }
 
-export function orderProductName(order, productNames = {}) {
-  return order?.product_name ?? order?.product_snapshot?.name ?? productNames[order?.product_id] ?? order?.product_id ?? "";
+export function usersQuery(productId) {
+  return productId ? `?product_id=${encodeURIComponent(productId)}` : "";
 }
 
 export function payoutSetupState(payouts) {

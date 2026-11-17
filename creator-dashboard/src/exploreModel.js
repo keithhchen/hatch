@@ -1,12 +1,12 @@
 import { isProductLive } from "./studioPath.js";
 import { WebChatRoute } from "./webChatRoute.js";
 
-// /explore is a projection of three real sources: the public catalog, the
-// account's own Products (Studio) and the Agents it acquired (entitlements).
-// "My Agents" lists only what can be chatted with now, in two groups: Agents
-// acquired from others and my own published Agents. Products still being
-// built are only counted, and live in Studio. Discover shows the whole
-// catalog, including my own and acquired Agents.
+// /explore and /library are projections of three real sources: the public
+// catalog, the account's own Products (Studio) and the Agents it saved to its
+// library by chatting with them. "My library" lists what can be chatted with
+// now, in two groups: saved Agents (which can be removed) and my own published
+// Agents. Products still being built are only counted, and live in Studio.
+// Discover shows the whole catalog, including my own and saved Agents.
 
 const idOf = (value) => String(value ?? "");
 const timeOf = (...values) => {
@@ -17,7 +17,7 @@ const timeOf = (...values) => {
   return 0;
 };
 
-/** One of my published Products: the owner chats without acquiring it. */
+/** One of my published Products: the owner chats without saving it. */
 export function ownedAgentRow(product) {
   const productId = idOf(product.product_id ?? product.id);
   return {
@@ -31,33 +31,36 @@ export function ownedAgentRow(product) {
   };
 }
 
-/** An Agent this account acquired from someone else. */
-export function acquiredAgentRow(entitlement) {
-  const product = entitlement.product ?? {};
-  const productId = idOf(entitlement.product_id ?? product.product_id ?? product.id);
+/** An Agent this account saved to its library: one library entry. */
+export function savedAgentRow(entry) {
+  const product = entry.product ?? {};
+  const productId = idOf(entry.product_id ?? product.product_id ?? product.id);
   return {
-    key: `acquired:${idOf(entitlement.entitlement_id)}`,
-    kind: "acquired",
+    key: `saved:${productId}`,
+    kind: "saved",
     productId,
-    name: product.name ?? entitlement.product_name ?? "",
-    creator: entitlement.creator ?? null,
-    at: timeOf(entitlement.granted_at, entitlement.valid_from, entitlement.created_at),
+    name: product.name ?? entry.product_name ?? "",
+    creator: entry.creator ?? null,
+    at: timeOf(entry.granted_at, entry.valid_from, entry.created_at),
     href: WebChatRoute.productPath(productId)
   };
 }
 
-export function exploreModel({ accountId, ownedProducts = [], acquired = [], catalog = [] }) {
+/** Takes an Agent out of the library. The conversations stay; chatting again saves it again. */
+export const removeFromLibrary = (request, productId) => request(`/v1/library/${encodeURIComponent(productId)}`, { method: "DELETE" });
+
+export function exploreModel({ accountId, ownedProducts = [], saved = [], catalog = [] }) {
   const me = idOf(accountId);
   const seen = new Set();
   const unique = (rows) => rows
     .sort((left, right) => right.at - left.at)
     .filter((row) => row.productId && !seen.has(row.productId) && seen.add(row.productId));
   const published = unique(ownedProducts.filter(isProductLive).map(ownedAgentRow));
-  const acquiredRows = unique(acquired
-    .filter((entry) => entry.entitlement_id && idOf(entry.creator_id) !== me)
-    .map(acquiredAgentRow));
+  const savedRows = unique(saved
+    .filter((entry) => idOf(entry.creator_id) !== me)
+    .map(savedAgentRow));
   return {
-    acquired: acquiredRows,
+    saved: savedRows,
     published,
     draftCount: ownedProducts.filter((product) => !isProductLive(product) && product.status !== "withdrawn").length,
     discover: catalog

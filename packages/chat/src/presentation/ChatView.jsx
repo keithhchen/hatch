@@ -222,6 +222,8 @@ export function Composer({ controller, state, snapshotPending = false, agentName
  * @param {React.ReactNode} [props.attachControl] replaces the default image picker
  * @param {React.ReactNode} [props.composerAccessory] extra composer controls
  * @param {boolean} [props.composerDisabled] the host does not take a message now
+ * @param {(error: object) => React.ReactNode} [props.errorAction]
+ *   what the error notice offers in place of Retry for an error the host can answer (a login wall); nothing falls back to Retry
  * @param {(event) => void} [props.onComposerPaste]
  * @param {string} [props.accept] file types the picker offers; images only by default
  * @param {React.ReactNode} [props.empty] replaces the welcome shown for a conversation with no messages
@@ -234,7 +236,7 @@ export function Composer({ controller, state, snapshotPending = false, agentName
  * @param {import("../domain/scroll-positions.js").ScrollPositions} [props.scrollPositions]
  *   where each conversation was left; defaults to one in-memory store per page.
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, composerDisabled, onComposerPaste, onApprovalDecision, dictate, accept, empty, mergeSteps = false, scrollPositions = sharedScrollPositions }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, composerDisabled, onComposerPaste, onApprovalDecision, errorAction, dictate, accept, empty, mergeSteps = false, scrollPositions = sharedScrollPositions }) {
   const state = useChatState(controller);
   const meter = controller.freeChat ?? OPEN_FREE_CHAT;
   const freeChat = useSyncExternalStore(meter.subscribe, meter.getSnapshot);
@@ -340,7 +342,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
       </div>
     </div>
     <div className="web-chat__dock" ref={dockRef}>
-      {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span>{state.failedRun && !controller.canRetryRun ? null : <button type="button" onClick={() => state.failedRun ? controller.retryRun() : controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button>}</div> : null}
+      {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span>{errorAction?.(error) ?? (state.failedRun && !controller.canRetryRun ? null : <button type="button" onClick={() => state.failedRun ? controller.retryRun() : controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button>)}</div> : null}
       {dockAccessory}
       {state.compacting && state.runState !== "compacting" ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : null}
       {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />

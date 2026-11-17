@@ -10,8 +10,6 @@
     "test": "npm run test:unit",
     "test:unit": "node --test src/*.test.js",
     "test:smoke": "playwright test -c playwright.smoke.config.js",
-    "test:e2e": "playwright test",
-    "test:e2e:update": "playwright test --update-snapshots",
     "test:postgres": "node --test e2e/postgres-commerce.integration.test.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"

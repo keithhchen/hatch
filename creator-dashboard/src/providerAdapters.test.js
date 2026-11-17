@@ -6,13 +6,11 @@ import {
   signSandboxWebhook
 } from "../providerAdapters.mjs";
 
-test("sandbox provider is deterministic and supports requires-action without granting access", async () => {
-  const provider = new SandboxProviderAdapter({ webhookSecret: "sandbox-secret", scenario: "requires_action" });
-  const first = await provider.createPayment({ payment_id: "payment_1", checkout_session_id: "checkout_1" });
-  const replay = await provider.createPayment({ payment_id: "payment_1", checkout_session_id: "checkout_1" });
-  assert.deepEqual(replay, first);
-  assert.equal(first.status, "requires_action");
-  assert.match(first.redirect_url, /checkout_1/);
+test("sandbox payout provider is deterministic", async () => {
+  const provider = new SandboxProviderAdapter({ webhookSecret: "sandbox-secret" });
+  const input = { payout_id: "payout_1", attempt: 1 };
+  assert.deepEqual(await provider.createPayout(input), await provider.createPayout(input));
+  assert.equal((await provider.createPayout(input)).status, "in_transit");
 });
 
 test("signed provider webhook verifies raw bytes and rejects tampering", () => {
@@ -43,7 +41,7 @@ test("provider selection fails closed in production and when disabled", async ()
   );
   assert.equal(createProviderAdapter({ ...providerOptions, paidLaunchApproved: true }).mode, "provider");
   await assert.rejects(
-    createProviderAdapter({ mode: "disabled" }).createPayment({}),
-    (error) => error.code === "payment_provider_unavailable"
+    createProviderAdapter({ mode: "disabled" }).createPayout({}),
+    (error) => error.code === "payout_provider_unavailable"
   );
 });

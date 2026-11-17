@@ -80,9 +80,12 @@ test("old Product URLs redirect to the matching Agent workspace tab", () => {
   }
 });
 
-test("orders, earnings and settings are Studio sections", () => {
-  assert.deepEqual(parseCreatorRoute("/studio/orders"), { kind: "orders", section: "orders" });
-  assert.deepEqual(parseCreatorRoute("/studio/orders/HAT-1"), { kind: "order", section: "orders", orderId: "HAT-1" });
+test("users, earnings and settings are Studio sections", () => {
+  assert.deepEqual(parseCreatorRoute("/studio/users"), { kind: "users", section: "users" });
+  assert.equal(parseCreatorRoute("/studio/users/u1").kind, "not-found");
+  // Orders are gone: the old paths are unknown, not redirected.
+  assert.equal(parseCreatorRoute("/studio/orders").kind, "not-found");
+  assert.equal(parseCreatorRoute("/studio/orders/HAT-1").kind, "not-found");
   assert.deepEqual(parseCreatorRoute("/studio/earnings"), { kind: "earnings", section: "earnings" });
   assert.deepEqual(parseCreatorRoute("/studio/settings"), { kind: "settings", section: "settings" });
   // The payout provider returns to /studio/payouts after onboarding.

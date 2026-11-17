@@ -112,7 +112,6 @@
 .cpv2-path-dots .is-running span { background: linear-gradient(90deg, var(--web-yolk), var(--web-yolk-soft), var(--web-yolk)); background-size: 200% 100%; animation: cpv2-flow 1.6s linear infinite; }
 .cpv2-path-dots .is-next span { background: var(--web-yolk); }
 .cpv2-path-dots .is-next small { color: var(--web-ink); font-weight: 700; }
-.sx-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .sx-mini-list { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; list-style: none; }
 .sx-mini-list li { min-width: 0; }
 .sx-mini-list li + li { border-top: 1px solid var(--web-rule); }
@@ -315,7 +314,6 @@
   .sx-agent__bar h1 { flex: 1 1 0; }
   .sx-tabs { order: 5; flex: 1 0 100%; margin: 0; }
   .sx-help-btn span { display: none; }
-  .sx-overview-grid { grid-template-columns: 1fr; }
   .sx-continue { grid-template-columns: 1fr; }
   .sx-continue > .hui-button { grid-column: 1; grid-row: auto; justify-self: start; }
   .cpv2-path-dots small { display: none; }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, Menu, Plus, X } from "lucide-react";
 import { CreatorHeading } from "@hatch/chat/react";
 import { WebBrand } from "./WebBrand.jsx";
-import { WebChatAccountControls } from "./productAccess.jsx";
+import { WebChatAccountControls, libraryLink } from "./productAgent.jsx";
 import { documentLanguage } from "./locale.jsx";
 import "./webChat.css";
 
@@ -44,7 +44,7 @@ const isMobileLayout = () => window.matchMedia("(max-width: 760px)").matches;
  * Product's heading, and the main region. `children(header)` renders that main region, which owns where the header goes.
  * A chat fills it with a thread; an artifact fills it with a form or a report.
  */
-export function WebChatShell({ identity, agentName, conversations, selectedId, hasMore, onLoadMore, onSelect, onNew, newLabel, headerExtra, inert, overlay, profile, onSignOut, t, locale, children }) {
+export function WebChatShell({ identity, agentName, conversations, selectedId, hasMore, onLoadMore, onSelect, onNew, newLabel, headerExtra, inert, overlay, profile, onSignOut, navigate, t, locale, children }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const mobileSidebarTriggerRef = useRef(null);
   const mobileSidebarRef = useRef(null);
@@ -69,6 +69,7 @@ export function WebChatShell({ identity, agentName, conversations, selectedId, h
     return () => mobileLayout.removeEventListener("change", closeOnDesktop);
   }, []);
 
+  const back = libraryLink(profile, t);
   const select = id => { setMobileSidebarOpen(false); onSelect(id); };
   const create = event => {
     // Where focus returns when what "new" opens closes again.
@@ -90,7 +91,7 @@ export function WebChatShell({ identity, agentName, conversations, selectedId, h
         <WebBrand href="/" className="web-chat__brand" />
         {mobileSidebarOpen ? <button type="button" className="web-chat__icon-button" aria-label={t("closeMenu")} onClick={closeSidebar}><X aria-hidden="true" /></button> : null}
       </div>
-      <a href="/studio" className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{t("backToMyAgents")}</span></a>
+      <a href={back.href} className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{back.label}</span></a>
       <button type="button" className="web-chat__new" onClick={create}>
         <Plus aria-hidden="true" /><span>{newLabel}</span>
       </button>
@@ -105,7 +106,7 @@ export function WebChatShell({ identity, agentName, conversations, selectedId, h
         {conversations.length === 0 ? <p className="web-chat__list-empty">{t("conversationsEmpty")}</p> : null}
         {hasMore ? <button type="button" className="web-chat__load-more" onClick={onLoadMore}><span>{t("loadEarlierConversations")}</span><ChevronDown aria-hidden="true" /></button> : null}
       </nav>
-      <WebChatAccountControls profile={profile} onSignOut={onSignOut} />
+      <WebChatAccountControls profile={profile} onSignOut={onSignOut} navigate={navigate} t={t} />
     </aside>
     {children(header)}
     {overlay}

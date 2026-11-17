@@ -1,23 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Dialog, DialogContent } from "@hatch/ui";
-import { ArrowLeft, ChevronRight, Download, Landmark,  ReceiptText, SlidersHorizontal, Wallet } from "lucide-react";
-import { eventLabel, statusLabel, studioOpsCopy } from "./studioOpsCopy.js";
+import { Landmark, Users, Wallet } from "lucide-react";
+import { statusLabel, studioOpsCopy } from "./studioOpsCopy.js";
 import {
-  ORDER_FILTER_OPTIONS,
-  activeFilterCount,
-  formatDate,
   formatDateTime,
   formatMinor,
   newIdempotencyKey,
-  orderProductName,
-  orderShares,
-  ordersQuery,
   payoutSetupState,
-  statusTone
+  statusTone,
+  userLabelKey,
+  userRows,
+  userTotals,
+  usersQuery
 } from "./studioOpsModel.js";
 import "./studioOps.css";
-
-const PAGE_SIZE = 25;
 
 /* ---------- shared pieces ---------- */
 
@@ -104,21 +100,15 @@ function ReasonDialog({ open, onOpenChange, title, body, label, hint, placeholde
   </Dialog>;
 }
 
-/* ---------- Orders ---------- */
+/* ---------- Users ---------- */
 
-const EMPTY_FILTERS = { product: "", order: "", payment: "", delivery: "", refund: "", from: "", to: "" };
-
-export function StudioOrdersPage({ request, navigate, locale }) {
+export function StudioUsersPage({ request, navigate, locale }) {
   const copy = studioOpsCopy(locale);
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [productId, setProductId] = useState("");
   const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [cursor, setCursor] = useState(null);
+  const [users, setUsers] = useState([]);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState(null);
-  const [moreBusy, setMoreBusy] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
-  const filterCount = activeFilterCount(filters);
 
   useEffect(() => {
     let live = true;
@@ -128,19 +118,13 @@ export function StudioOrdersPage({ request, navigate, locale }) {
 
   const productNames = useMemo(() => Object.fromEntries(products.map((product) => [product.product_id, product.name])), [products]);
 
-  const load = useCallback(async (nextCursor) => {
-    const path = `/v1/creator/orders${ordersQuery(filters, { limit: PAGE_SIZE, cursor: nextCursor })}`;
-    return request(path);
-  }, [request, filters]);
-
   const reload = useCallback(() => {
     let live = true;
     setStatus("loading");
     setError(null);
-    load(null).then((payload) => {
+    request(`/v1/creator/users${usersQuery(productId)}`).then((payload) => {
       if (!live) return;
-      setOrders(payload.orders ?? []);
-      setCursor(payload.next_cursor ?? null);
+      setUsers(userRows(payload.users));
       setStatus("ready");
     }).catch((cause) => {
       if (!live) return;
@@ -148,251 +132,54 @@ export function StudioOrdersPage({ request, navigate, locale }) {
       setStatus("error");
     });
     return () => { live = false; };
-  }, [load]);
+  }, [request, productId]);
 
   useEffect(() => reload(), [reload]);
 
-  async function loadMore() {
-    if (!cursor || moreBusy) return;
-    setMoreBusy(true);
-    try {
-      const payload = await load(cursor);
-      setOrders((current) => [...current, ...(payload.orders ?? [])]);
-      setCursor(payload.next_cursor ?? null);
-    } catch (cause) {
-      setError(cause);
-    } finally {
-      setMoreBusy(false);
-    }
-  }
-
-  const setFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
-  const exportHref = `/v1/creator/orders/export${ordersQuery(filters)}`;
-  const openOrder = (order) => navigate(`/studio/orders/${encodeURIComponent(order.order_number ?? order.order_id)}`);
-
-  const select = (key, label, options, render) => <label className="sops-filter">
-    <span>{label}</span>
-    <select value={filters[key]} onChange={setFilter(key)}>
-      <option value="">{copy.filterAll}</option>
-      {options.map((value) => <option key={value} value={value}>{render ? render(value) : statusLabel(copy, value)}</option>)}
-    </select>
-  </label>;
-
-  // Filters and export only make sense once there is at least one order.
-  const noOrdersYet = !orders.length && !filterCount;
+  const noUsersYet = !users.length && !productId;
   return <div className="sops-page">
     <PageHead
-      title={copy.ordersTitle}
-      body={copy.ordersBody}
-      actions={noOrdersYet ? null : <>
-        <Button className="sops-only-mobile" variant="secondary" size="compact" leading={<SlidersHorizontal aria-hidden="true" />} aria-expanded={showFilters} onClick={() => setShowFilters((value) => !value)}>
-          {copy.filters}{filterCount ? ` · ${filterCount}` : ""}
-        </Button>
-        {orders.length
-          ? <Button asChild variant="secondary" size="compact" leading={<Download aria-hidden="true" />}><a href={exportHref} download>{copy.exportCsv}</a></Button>
-          : <Button variant="secondary" size="compact" leading={<Download aria-hidden="true" />} disabled>{copy.exportCsv}</Button>}
-      </>}
+      title={copy.usersTitle}
+      actions={noUsersYet ? null : <label className="sops-filter">
+        <span>{copy.filterAgent}</span>
+        <select value={productId} onChange={(event) => setProductId(event.target.value)}>
+          <option value="">{copy.filterAll}</option>
+          {products.map((product) => <option key={product.product_id} value={product.product_id}>{product.name}</option>)}
+        </select>
+      </label>}
     />
-
-    {noOrdersYet ? null : <section className={`sops-filters ${showFilters ? "is-open" : ""}`} aria-label={copy.filters}>
-      {select("product", copy.filterAgent, products.map((product) => product.product_id), (id) => productNames[id] ?? id)}
-      {select("order", copy.filterOrder, ORDER_FILTER_OPTIONS.order)}
-      {select("payment", copy.filterPayment, ORDER_FILTER_OPTIONS.payment)}
-      {select("delivery", copy.filterDelivery, ORDER_FILTER_OPTIONS.delivery)}
-      {select("refund", copy.filterRefund, ORDER_FILTER_OPTIONS.refund)}
-      <label className="sops-filter"><span>{copy.filterFrom}</span><input type="date" value={filters.from} max={filters.to || undefined} onChange={setFilter("from")} /></label>
-      <label className="sops-filter"><span>{copy.filterTo}</span><input type="date" value={filters.to} min={filters.from || undefined} onChange={setFilter("to")} /></label>
-      {filterCount ? <button type="button" className="sops-link sops-filters__clear" onClick={() => setFilters(EMPTY_FILTERS)}>{copy.clearFilters}</button> : null}
-    </section>}
 
     {status === "loading" ? <Loading copy={copy} /> : null}
     {status === "error" ? <ErrorCard error={error} copy={copy} onRetry={reload} /> : null}
-    {status === "ready" && !orders.length ? (filterCount
-      ? <EmptyCard icon={SlidersHorizontal} title={copy.ordersNoMatchTitle} body={copy.ordersNoMatchBody}
-          action={<Button variant="secondary" size="compact" onClick={() => setFilters(EMPTY_FILTERS)}>{copy.clearFilters}</Button>} />
-      : <EmptyCard icon={ReceiptText} title={copy.ordersEmptyTitle} body={copy.ordersEmptyBody}
-          action={<Button variant="secondary" size="compact" onClick={() => navigate("/studio/products")}>{copy.ordersEmptyAction}</Button>} />) : null}
+    {status === "ready" && !users.length ? (productId
+      ? <EmptyCard icon={Users} title={copy.usersNoMatchTitle} body={copy.usersNoMatchBody}
+          action={<Button variant="secondary" size="compact" onClick={() => setProductId("")}>{copy.clearFilters}</Button>} />
+      : <EmptyCard icon={Users} title={copy.usersEmptyTitle} body={copy.usersEmptyBody}
+          action={<Button variant="secondary" size="compact" onClick={() => navigate("/studio/products")}>{copy.usersEmptyAction}</Button>} />) : null}
 
-    {status === "ready" && orders.length ? <>
+    {status === "ready" && users.length ? <>
       <div className="sops-card sops-table-wrap">
         <table className="sops-table">
           <thead><tr>
-            <th>{copy.colOrder}</th><th>{copy.colAgent}</th><th>{copy.colBuyer}</th>
-            <th className="is-num">{copy.colAmount}</th><th className="is-num">{copy.colShare}</th>
-            <th>{copy.colStatus}</th><th>{copy.colDate}</th><th aria-hidden="true" />
+            <th>{copy.colUser}</th><th>{copy.colAgent}</th>
+            <th className="is-num">{copy.colConversations}</th><th className="is-num">{copy.colMessages}</th>
+            <th>{copy.colLastActive}</th>
           </tr></thead>
           <tbody>
-            {orders.map((order) => {
-              const shares = orderShares(order);
-              return <tr key={order.order_id} tabIndex={0} onClick={() => openOrder(order)} onKeyDown={(event) => event.key === "Enter" && openOrder(order)}>
-                <td className="sops-strong">{order.order_number}</td>
-                <td>{orderProductName(order, productNames)}</td>
-                <td>{order.buyer_display_name ?? ""}</td>
-                <td className="is-num">{formatMinor(order.gross_minor, order.currency, locale)}</td>
-                <td className="is-num">{shares.recognized ? formatMinor(shares.creator, order.currency, locale) : <span className="sops-faint">{copy.sharePending}</span>}</td>
-                <td><Pill value={order.status} copy={copy} /></td>
-                <td className="sops-faint">{formatDateTime(order.placed_at ?? order.created_at, locale)}</td>
-                <td className="sops-chevron"><ChevronRight aria-hidden="true" /></td>
-              </tr>;
-            })}
+            {users.map((user, index) => <tr key={index}>
+              <td className="sops-strong">{user.display_name || copy[userLabelKey(user.kind)]}</td>
+              <td>{productNames[user.product_id] ?? user.product_id}</td>
+              <td className="is-num">{user.conversations}</td>
+              <td className="is-num">{user.messages}</td>
+              <td className="sops-faint">{formatDateTime(user.last_at, locale)}</td>
+            </tr>)}
           </tbody>
         </table>
       </div>
-      <ul className="sops-cards">
-        {orders.map((order) => {
-          const shares = orderShares(order);
-          return <li key={order.order_id}>
-            <button type="button" className="sops-card sops-order-card" onClick={() => openOrder(order)}>
-              <span className="sops-order-card__top"><span className="sops-strong">{orderProductName(order, productNames)}</span><Pill value={order.status} copy={copy} /></span>
-              <span className="sops-order-card__amount">{formatMinor(order.gross_minor, order.currency, locale)}</span>
-              <span className="sops-faint">{copy.colShare} {shares.recognized ? formatMinor(shares.creator, order.currency, locale) : copy.sharePending}</span>
-              <span className="sops-faint">{order.order_number} · {order.buyer_display_name ?? ""} · {formatDate(order.placed_at ?? order.created_at, locale)}</span>
-            </button>
-          </li>;
-        })}
-      </ul>
       <footer className="sops-list-foot">
-        <span className="sops-faint">{copy.shownCount(orders.length)}</span>
-        {cursor ? <Button variant="secondary" size="compact" loading={moreBusy} onClick={() => void loadMore()}>{moreBusy ? copy.loadingMore : copy.loadMore}</Button> : null}
+        <span className="sops-faint">{copy.usersSummary(userTotals(users))}</span>
       </footer>
-      {error && status === "ready" ? <p className="sops-inline-error" role="alert">{error.message}</p> : null}
     </> : null}
-  </div>;
-}
-
-/* ---------- Order detail ---------- */
-
-export function StudioOrderDetailPage({ request, navigate, locale, orderId }) {
-  const copy = studioOpsCopy(locale);
-  const [order, setOrder] = useState(null);
-  const [status, setStatus] = useState("loading");
-  const [error, setError] = useState(null);
-  const [refundOpen, setRefundOpen] = useState(false);
-  const [notice, setNotice] = useState("");
-
-  const reload = useCallback(() => {
-    let live = true;
-    setStatus("loading");
-    request(`/v1/creator/orders/${encodeURIComponent(orderId ?? "")}`).then((payload) => {
-      if (!live) return;
-      setOrder(payload.order);
-      setStatus("ready");
-    }).catch((cause) => {
-      if (!live) return;
-      setError(cause);
-      setStatus("error");
-    });
-    return () => { live = false; };
-  }, [request, orderId]);
-  useEffect(() => reload(), [reload]);
-
-  async function submitRefund(reason, key) {
-    const payload = await request(`/v1/creator/orders/${encodeURIComponent(order.order_id)}/refund-requests`, {
-      method: "POST",
-      headers: { "idempotency-key": key },
-      body: JSON.stringify({ reason })
-    });
-    if (payload?.order) setOrder(payload.order);
-    setNotice(copy.refundDone);
-  }
-
-  const back = <button type="button" className="sops-back" onClick={() => navigate("/studio/orders")}><ArrowLeft aria-hidden="true" />{copy.backToOrders}</button>;
-
-  if (status === "loading") return <div className="sops-page"><PageHead back={back} title={copy.ordersTitle} /><Loading copy={copy} /></div>;
-  if (status === "error") {
-    const missing = error?.status === 404;
-    return <div className="sops-page"><PageHead back={back} title={orderId} />
-      <ErrorCard error={missing ? { message: copy.orderNotFoundBody, request_id: error.request_id } : error} title={missing ? copy.orderNotFound : undefined} copy={copy} onRetry={missing ? undefined : reload} />
-    </div>;
-  }
-
-  const shares = orderShares(order);
-  const currency = order.currency;
-  const placed = order.placed_at ?? order.created_at;
-  const deliveries = Array.isArray(order.deliveries) ? order.deliveries : [];
-  const timeline = Array.isArray(order.timeline) ? order.timeline : [];
-  const refund = order.refund;
-  const details = [
-    [copy.detailAgent, orderProductName(order)],
-    [copy.detailBuyer, order.buyer_display_name],
-    [copy.detailPayment, <Pill key="p" value={order.payment_status} copy={copy} />],
-    [copy.detailAccess, <Pill key="a" value={order.entitlement_status} copy={copy} />],
-    order.delivery_status ? [copy.detailDelivery, <Pill key="d" value={order.delivery_status} copy={copy} />] : null,
-    [copy.detailRefund, <Pill key="r" value={order.refund_status} copy={copy} />],
-    order.access_mode ? [copy.detailMode, copy.mode[order.access_mode] ?? order.access_mode] : null,
-    [copy.detailPlacedAt, formatDateTime(placed, locale)],
-    [copy.detailOrderId, <span key="id" className="sops-break">{order.order_id}</span>]
-  ].filter((row) => row && row[1]);
-
-  return <div className="sops-page">
-    <PageHead
-      back={back}
-      title={order.order_number}
-      body={<span className="sops-head__meta"><Pill value={order.status} copy={copy} />{copy.orderPlaced(formatDateTime(placed, locale))}</span>}
-      actions={order.actions?.can_request_refund
-        ? <Button variant="secondary" size="compact" onClick={() => setRefundOpen(true)}>{copy.requestRefund}</Button>
-        : null}
-    />
-    {notice ? <p className="sops-notice" role="status">{notice}</p> : null}
-
-    <section className="sops-amounts">
-      <div className="sops-card sops-amount"><span>{copy.amountGross}</span><strong>{formatMinor(order.total_minor ?? order.gross_minor, currency, locale)}</strong></div>
-      <div className="sops-card sops-amount is-accent"><span>{copy.amountCreator}</span><strong>{shares.recognized ? formatMinor(shares.creator, currency, locale) : copy.sharePending}</strong></div>
-      <div className="sops-card sops-amount"><span>{copy.amountHatch}</span><strong>{shares.recognized ? formatMinor(shares.hatch, currency, locale) : copy.sharePending}</strong></div>
-    </section>
-    {!shares.recognized && order.gross_minor > 0 ? <p className="sops-faint sops-note">{copy.amountPendingNote}</p> : null}
-
-    <div className="sops-split">
-      <div className="sops-stack">
-        <section className="sops-card sops-section">
-          <h2>{copy.detailsTitle}</h2>
-          <dl className="sops-dl">{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        </section>
-        {refund ? <section className="sops-card sops-section">
-          <h2>{copy.refundTitle}</h2>
-          <dl className="sops-dl">
-            {refund.gross_minor !== undefined ? <div><dt>{copy.colAmount}</dt><dd>{formatMinor(refund.gross_minor, currency, locale)}</dd></div> : null}
-            {refund.reason ? <div><dt>{copy.refundReason}</dt><dd>{refund.reason}</dd></div> : null}
-            {refund.occurred_at ? <div><dt>{copy.refundAt}</dt><dd>{formatDateTime(refund.occurred_at, locale)}</dd></div> : null}
-          </dl>
-        </section> : null}
-        {order.access_mode !== "unmetered" ? <section className="sops-card sops-section">
-          <h2>{copy.deliveriesTitle}</h2>
-          {deliveries.length ? <ul className="sops-rows">
-            {deliveries.map((delivery, index) => <li key={delivery.delivery_id ?? index}>
-              <div><span className="sops-strong">{copy.deliveryItem(deliveries.length - index)}</span>{delivery.artifact_type ? <span className="sops-faint"> · {delivery.artifact_type}</span> : null}</div>
-              <div className="sops-rows__meta">
-                {delivery.revenue_status ? <Pill value={delivery.revenue_status} copy={copy} /> : null}
-                <span className="sops-faint">{formatDateTime(delivery.completed_at, locale)}</span>
-              </div>
-            </li>)}
-          </ul> : <p className="sops-faint">{copy.deliveriesEmpty}</p>}
-        </section> : null}
-      </div>
-      <section className="sops-card sops-section">
-        <h2>{copy.timelineTitle}</h2>
-        {timeline.length ? <ol className="sops-timeline">
-          {timeline.map((entry, index) => <li key={entry.event_id ?? index}>
-            <span className="sops-strong">{eventLabel(copy, entry.type)}</span>
-            <span className="sops-faint">{formatDateTime(entry.occurred_at, locale)}</span>
-          </li>)}
-        </ol> : <p className="sops-faint">{copy.timelineEmpty}</p>}
-      </section>
-    </div>
-
-    <ReasonDialog
-      open={refundOpen}
-      onOpenChange={setRefundOpen}
-      title={copy.refundDialogTitle}
-      body={copy.refundDialogBody}
-      label={copy.refundReasonLabel}
-      hint={copy.refundReasonHint}
-      placeholder={copy.refundReasonPlaceholder}
-      submitLabel={copy.refundSubmit}
-      onSubmit={submitRefund}
-      copy={copy}
-      destructive
-    />
   </div>;
 }
 

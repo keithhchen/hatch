@@ -11,8 +11,8 @@ export function WebChatEgg({ size = 40, className = "" }) {
 }
 
 /**
- * A full-screen chat state (loading, unavailable, not subscribed, wrong
- * account): brand bar, one pill, one sentence, one visual, its real actions.
+ * A full-screen chat state (loading, unavailable, a link's outcome): brand bar,
+ * one pill, one sentence, one visual, its real actions.
  */
 export function WebChatGate({ pill, title, body, visual, actions, account, busy = false, alert = false }) {
   return <div className="web-chat-gate" aria-busy={busy || undefined}>

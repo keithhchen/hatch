@@ -604,7 +604,7 @@ test("non-UUID product paths are rejected without redirects", async (context) =>
   assert.equal(apiResponse.status, 404);
 });
 
-test("retired routes 301 to /studio and /explore/orders at the routing boundary", async (context) => {
+test("the retired /home route 301s to /studio at the routing boundary", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-retired-routes-"));
   const registry = registryFixture({ signedIn: "buyer" });
   await listen(registry);
@@ -618,12 +618,7 @@ test("retired routes 301 to /studio and /explore/orders at the routing boundary"
   context.after(() => api.close());
 
   for (const [from, to] of [
-    ["/home", "/studio"],
-    ["/library", "/studio"],
-    ["/library/ent-1", "/studio"],
-    ["/orders?status=pending", "/explore/orders?status=pending"],
-    ["/orders/HAT-1", "/explore/orders/HAT-1"],
-    ["/orders/HAT-1/success", "/explore/orders/HAT-1/success"]
+    ["/home", "/studio"]
   ]) {
     const response = await fetch(`${serverUrl(api)}${from}`, { redirect: "manual" });
     assert.equal(response.status, 301, from);
@@ -631,7 +626,24 @@ test("retired routes 301 to /studio and /explore/orders at the routing boundary"
   }
 });
 
-test("an owner reaches their published Agent by product_id and cannot acquire it", async (context) => {
+test("/library is served as the portal, not redirected", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-library-route-"));
+  const registry = registryFixture({ signedIn: "buyer" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(directory, "ledger.jsonl"), registryUrl: serverUrl(registry) });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const [library, explore] = await Promise.all(["/library", "/explore"].map((route) => fetch(`${serverUrl(api)}${route}`, { redirect: "manual" })));
+  assert.notEqual(library.status, 301);
+  assert.notEqual(library.status, 404);
+  assert.equal(library.status, explore.status, "served by the same SPA fallback as the other portal routes");
+  assert.equal(library.headers.get("content-type"), explore.headers.get("content-type"));
+  await Promise.all([library.text(), explore.text()]);
+});
+
+test("an owner reaches their published Agent by product_id", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-owner-access-"));
   const registry = registryFixture({ signedIn: "owner" });
   await listen(registry);
@@ -661,92 +673,7 @@ test("an owner reaches their published Agent by product_id and cannot acquire it
   assert.deepEqual(agents[0].brief_spec, catalogAgent.brief_spec);
   assert.deepEqual(agents[0].product.brief_spec, catalogAgent.brief_spec);
 
-  for (const [pathname, body] of [
-    ["/v1/checkout-sessions", { product_id: catalogAgent.product_id }],
-    ["/v1/user/checkout", { creator_id: catalogAgent.creator_id, product_id: catalogAgent.product_id }]
-  ]) {
-    const response = await fetch(`${serverUrl(api)}${pathname}`, {
-      method: "POST",
-      headers: { ...headers, "idempotency-key": `self-${pathname}` },
-      body: JSON.stringify(body)
-    });
-    assert.equal(response.status, 409, pathname);
-    assert.equal((await response.json()).error.code, "self_purchase_not_allowed");
-  }
   assert.equal(dashboard.ledger.listEvents().length, 0);
-});
-
-test("zero-value checkout creates an idempotent Agent Corpus order and entitlement", async (context) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-checkout-"));
-  const accessBodies = [];
-  const captured = [];
-  const registry = registryFixture({ signedIn: "buyer", accessBodies });
-  await listen(registry);
-  context.after(() => registry.close());
-  const dashboard = await createDashboardApp({
-    ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryAccessServiceToken: "test-access-service",
-    registryDeploymentServiceToken: "test-deployment-service",
-    registryUrl: serverUrl(registry),
-    analytics: { capture: (distinctId, event) => captured.push({ distinctId, ...event }) },
-    exposeBearerTokens: true
-  });
-  const api = createServer(dashboard.handler);
-  await listen(api);
-  context.after(() => api.close());
-
-  const token = await login(api);
-  const checkout = (intentKey = "legacy-free-checkout-one") => fetch(`${serverUrl(api)}/v1/user/checkout`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": intentKey
-    },
-    body: JSON.stringify({ creator_id: catalogAgent.creator_id, product_id: catalogAgent.product_id })
-  });
-
-  const first = await checkout();
-  const firstBody = await first.json();
-  assert.equal(first.status, 201);
-  assert.equal(firstBody.order.agent_id, catalogAgent.agent_id);
-  assert.equal(firstBody.order.corpus_digest, catalogAgent.corpus_digest);
-  assert.equal(firstBody.order.gross_minor, 0);
-  assert.match(firstBody.entitlement.entitlement_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  assert.equal(accessBodies.length, 0);
-  assert.deepEqual(dashboard.ledger.listEvents().map((event) => event.event_type), [
-    "order.placed",
-    "entitlement.granted"
-  ]);
-
-  const replay = await checkout();
-  assert.equal(replay.status, 200);
-  assert.equal(dashboard.ledger.listEvents().length, 2);
-  // Subscribing is recorded once, for the buyer's account id; a replay records nothing.
-  assert.deepEqual(captured.filter((entry) => entry.event === "agent_saved"), [{ distinctId: "buyer-zero", event: "agent_saved", properties: { agent_id: catalogAgent.product_id } }]);
-
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  const secondPurchase = await checkout("legacy-free-checkout-two");
-  const secondBody = await secondPurchase.json();
-  assert.equal(secondPurchase.status, 201);
-  assert.notEqual(secondBody.order.order_id, firstBody.order.order_id);
-  assert.notEqual(secondBody.entitlement.entitlement_id, firstBody.entitlement.entitlement_id);
-  assert.ok(Date.parse(secondBody.entitlement.granted_at) > Date.parse(firstBody.entitlement.granted_at));
-  assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "order.placed").length, 2);
-  assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "entitlement.granted").length, 2);
-
-  const newestPageResponse = await fetch(`${serverUrl(api)}/v1/library?status=active&limit=1`, {
-    headers: { authorization: `Bearer ${token}` }
-  });
-  const newestPage = await newestPageResponse.json();
-  assert.equal(newestPageResponse.status, 200);
-  assert.equal(newestPage.entitlements[0].entitlement_id, secondBody.entitlement.entitlement_id);
-  const olderPageResponse = await fetch(`${serverUrl(api)}/v1/library?status=active&limit=1&cursor=${encodeURIComponent(newestPage.next_cursor)}`, {
-    headers: { authorization: `Bearer ${token}` }
-  });
-  const olderPage = await olderPageResponse.json();
-  assert.equal(olderPageResponse.status, 200);
-  assert.equal(olderPage.entitlements[0].entitlement_id, firstBody.entitlement.entitlement_id);
 });
 
 test("library save is internal and service-token authed; remove is a session DELETE", async (context) => {
@@ -798,7 +725,7 @@ test("library save is internal and service-token authed; remove is a session DEL
   assert.deepEqual(captured.map((entry) => entry.event).filter((event) => event !== "signed_in"), ["agent_saved", "agent_removed", "agent_saved"]);
 });
 
-test("buyer list APIs omit records whose Creator account is missing and return the remaining records", async (context) => {
+test("library and access lists omit records whose Creator account is missing and return the remaining records", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-missing-creator-"));
   const missingCreatorAgent = {
     ...catalogAgent,
@@ -819,6 +746,7 @@ test("buyer list APIs omit records whose Creator account is missing and return t
     ledgerPath: path.join(directory, "ledger.jsonl"),
     registryAccessServiceToken: "test-access-service",
     registryDeploymentServiceToken: "test-deployment-service",
+    commerceRuntimeServiceToken: "test-runtime-service",
     registryUrl: serverUrl(registry),
     exposeBearerTokens: true
   });
@@ -828,17 +756,17 @@ test("buyer list APIs omit records whose Creator account is missing and return t
 
   const token = await login(api);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-  const purchase = async (agent, key) => {
-    const response = await fetch(`${serverUrl(api)}/v1/user/checkout`, {
+  const save = async (agent) => {
+    const response = await fetch(`${serverUrl(api)}/v1/internal/library/save`, {
       method: "POST",
-      headers: { ...headers, "idempotency-key": key },
-      body: JSON.stringify({ creator_id: agent.creator_id, product_id: agent.product_id })
+      headers: { authorization: "Bearer test-runtime-service", "content-type": "application/json" },
+      body: JSON.stringify({ account_id: "buyer-zero", product_id: agent.product_id })
     });
-    assert.equal(response.status, 201);
-    return response.json();
+    assert.equal(response.status, 200);
+    return dashboard.commerce.listBuyerEntitlements("buyer-zero").find((entry) => entry.product_id === agent.product_id);
   };
-  const validPurchase = await purchase(catalogAgent, "missing-creator-valid-purchase");
-  const orphanedPurchase = await purchase(missingCreatorAgent, "missing-creator-orphaned-purchase");
+  const validPurchase = { entitlement: await save(catalogAgent) };
+  await save(missingCreatorAgent);
   missingCreatorAccountIds.add(missingCreatorAgent.creator_id);
 
   const accessResponse = await fetch(`${serverUrl(api)}/v1/user/product-access`, { headers });
@@ -852,167 +780,9 @@ test("buyer list APIs omit records whose Creator account is missing and return t
   assert.deepEqual(library.entitlements.map((entry) => entry.entitlement_id), [validPurchase.entitlement.entitlement_id]);
   assert.equal(library.next_cursor, null);
 
-  const ordersResponse = await fetch(`${serverUrl(api)}/v1/orders?limit=1`, { headers });
-  assert.equal(ordersResponse.status, 200);
-  const orders = await ordersResponse.json();
-  assert.deepEqual(orders.orders.map((entry) => entry.order_id), [validPurchase.order.order_id]);
-  assert.equal(orders.next_cursor, null);
-
   const publicProductsResponse = await fetch(`${serverUrl(api)}/v1/public/products`, { headers });
   assert.equal(publicProductsResponse.status, 200);
   assert.equal((await publicProductsResponse.json()).length, 2);
-
-  const orphanedLibraryResponse = await fetch(`${serverUrl(api)}/v1/library/${orphanedPurchase.entitlement.entitlement_id}`, { headers });
-  assert.equal(orphanedLibraryResponse.status, 404);
-  const orphanedOrderResponse = await fetch(`${serverUrl(api)}/v1/orders/${orphanedPurchase.order.order_id}`, { headers });
-  assert.equal(orphanedOrderResponse.status, 404);
-});
-
-test("V2 checkout session persists a free receipt and entitlement detail", async (context) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-v2-checkout-"));
-  const accessBodies = [];
-  const revokedEntitlements = [];
-  const creatorAvatar = "https://media.example/creator-avatar.webp";
-  const registry = registryFixture({ signedIn: "buyer", agent: { ...catalogAgent, creator_name: "Old Corpus Name", creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
-  await listen(registry);
-  context.after(() => registry.close());
-  const dashboard = await createDashboardApp({
-    ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryAccessServiceToken: "test-access-service",
-    registryDeploymentServiceToken: "test-deployment-service",
-    registryUrl: serverUrl(registry),
-    exposeBearerTokens: true
-  });
-  const api = createServer(dashboard.handler);
-  await listen(api);
-  context.after(() => api.close());
-  const token = await login(api);
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "checkout-session-free" };
-
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
-  const detail = await detailResponse.json();
-  assert.equal(detailResponse.status, 200);
-  assert.equal(detail.product.available, true);
-  assert.equal(detail.product.availability, "published");
-  assert.equal(detail.product.creator.avatar_url, creatorAvatar);
-  assert.equal("offer" in detail.product, false);
-  const canonicalDetailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
-  const canonicalDetail = await canonicalDetailResponse.json();
-  assert.equal(canonicalDetailResponse.status, 200);
-  assert.equal(canonicalDetail.product.availability, "published");
-  assert.equal("offer" in canonicalDetail.product, false);
-
-  const createSession = () => fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      product_id: catalogAgent.product_id
-    })
-  });
-  const firstSessionResponse = await createSession();
-  const firstSession = (await firstSessionResponse.json()).checkout_session;
-  assert.equal(firstSessionResponse.status, 201);
-  assert.equal(firstSession.totals.total_minor, 0);
-  const storedSession = dashboard.portalState.getCheckoutSession(firstSession.checkout_session_id);
-  assert.deepEqual(Object.keys(firstSession).sort(), Object.keys(storedSession).sort());
-  assert.deepEqual(Object.keys(firstSession.product).sort(), Object.keys(storedSession.product).sort());
-  assert.equal(firstSession.product.creator_name, "Maya Chen");
-  const replaySessionResponse = await createSession();
-  assert.equal(replaySessionResponse.status, 200);
-  assert.equal((await replaySessionResponse.json()).checkout_session.checkout_session_id, firstSession.checkout_session_id);
-
-  const confirm = () => fetch(`${serverUrl(api)}/v1/checkout-sessions/${firstSession.checkout_session_id}/confirm`, {
-    method: "POST",
-    headers,
-    body: "{}"
-  });
-  const confirmedResponse = await confirm();
-  const confirmed = await confirmedResponse.json();
-  assert.equal(confirmedResponse.status, 201);
-  assert.equal(confirmed.payment.status, "not_required");
-  assert.equal(confirmed.order.status, "fulfilled");
-  const storedOrder = dashboard.commerce.getOrder(confirmed.order_id);
-  assert.deepEqual(Object.keys(confirmed.order).sort(), Object.keys(storedOrder).sort());
-  assert.equal(confirmed.order.creator_snapshot.name, "Maya Chen");
-  assert.equal("creator" in confirmed.order, false);
-  assert.equal(confirmed.entitlement.access_mode, "unmetered");
-  assert.equal("remaining_units" in confirmed.entitlement, false);
-  assert.equal(accessBodies.length, 0);
-
-  const replayConfirmResponse = await confirm();
-  assert.equal(replayConfirmResponse.status, 200);
-  assert.equal((await replayConfirmResponse.json()).order_id, confirmed.order_id);
-
-  const orderResponse = await fetch(`${serverUrl(api)}/v1/user/orders/${confirmed.order_id}`, { headers });
-  const order = (await orderResponse.json()).order;
-  assert.equal(orderResponse.status, 200);
-  assert.equal(order.payment_status, "not_required");
-  assert.equal(order.subtotal_minor, 0);
-  assert.equal(order.discount_minor, 0);
-  assert.equal(order.tax_minor, null);
-  assert.equal(order.total_minor, 0);
-  assert.equal(order.entitlement_status, "active");
-  assert.equal(order.access_mode, "unmetered");
-  assert.equal(order.creator.name, "Maya Chen");
-  assert.equal("delivery_status" in order, false);
-  assert.equal(order.actions.can_request_refund, false);
-  assert.equal(order.actions.can_cancel_access, false);
-
-  const canonicalOrdersResponse = await fetch(`${serverUrl(api)}/v1/orders`, { headers });
-  const canonicalOrders = await canonicalOrdersResponse.json();
-  assert.equal(canonicalOrdersResponse.status, 200);
-  assert.equal(canonicalOrders.orders.length, 1);
-  const canonicalOrderResponse = await fetch(`${serverUrl(api)}/v1/orders/${encodeURIComponent(order.order_number ?? confirmed.order_id)}`, { headers });
-  assert.equal(canonicalOrderResponse.status, 200);
-  assert.equal((await canonicalOrderResponse.json()).order.order_id, confirmed.order_id);
-  const canonicalLibraryResponse = await fetch(`${serverUrl(api)}/v1/library`, { headers });
-  const canonicalLibrary = await canonicalLibraryResponse.json();
-  assert.equal(canonicalLibraryResponse.status, 200);
-  assert.equal(canonicalLibrary.entitlements.length, 1);
-  assert.equal(canonicalLibrary.entitlements[0].creator.avatar_url, creatorAvatar);
-  assert.equal(canonicalLibrary.entitlements[0].creator.name, "Maya Chen");
-
-  // A withdrawn Agent leaves the web Library; desktop entitlement routes keep it.
-  const getCreatorProduct = dashboard.portalState.getCreatorProduct.bind(dashboard.portalState);
-  dashboard.portalState.getCreatorProduct = (creatorId, productId) => ({ ...getCreatorProduct(creatorId, productId), status: "withdrawn" });
-  assert.equal((await (await fetch(`${serverUrl(api)}/v1/library`, { headers })).json()).entitlements.length, 0);
-  assert.equal((await (await fetch(`${serverUrl(api)}/v1/user/entitlements`, { headers })).json()).entitlements.length, 1);
-  dashboard.portalState.getCreatorProduct = getCreatorProduct;
-
-  const entitlementResponse = await fetch(`${serverUrl(api)}/v1/user/entitlements/${confirmed.entitlement_id}`, { headers });
-  const entitlement = (await entitlementResponse.json()).entitlement;
-  assert.equal(entitlementResponse.status, 200);
-  assert.equal(entitlement.product.name, catalogAgent.product_name);
-  assert.equal(entitlement.access_mode, "unmetered");
-  assert.equal("remaining_units" in entitlement, false);
-  assert.equal("deliveries" in entitlement, false);
-  const canonicalEntitlementResponse = await fetch(`${serverUrl(api)}/v1/library/${confirmed.entitlement_id}`, { headers });
-  assert.equal(canonicalEntitlementResponse.status, 200);
-  assert.equal((await canonicalEntitlementResponse.json()).entitlement.entitlement_id, confirmed.entitlement_id);
-
-  const desktopPreflight = await fetch(`${serverUrl(api)}/v1/user/product-access`, {
-    method: "OPTIONS",
-    headers: { origin: "tauri://localhost", "access-control-request-headers": "authorization" }
-  });
-  assert.equal(desktopPreflight.status, 204);
-  assert.equal(desktopPreflight.headers.get("access-control-allow-origin"), "*");
-  assert.match(desktopPreflight.headers.get("access-control-allow-headers"), /authorization/);
-  const desktopAccessResponse = await fetch(`${serverUrl(api)}/v1/user/product-access`, { headers });
-  const desktopAccess = await desktopAccessResponse.json();
-  assert.equal(desktopAccessResponse.status, 200);
-  assert.equal(desktopAccessResponse.headers.get("access-control-allow-origin"), "*");
-  assert.equal(desktopAccess.creator_agents.length, 1);
-  assert.equal(desktopAccess.creator_agents[0].entitlement_id, confirmed.entitlement_id);
-  assert.equal(desktopAccess.creator_agents[0].user_id, "buyer-zero");
-  assert.equal(desktopAccess.creator_agents[0].product.id, catalogAgent.product_id);
-  assert.equal(desktopAccess.creator_agents[0].creator.avatar_url, creatorAvatar);
-  assert.equal(desktopAccess.creator_agents[0].access_mode, "unmetered");
-  assert.equal("remaining_units" in desktopAccess.creator_agents[0], false);
-
-  const secondTurnAuthorization = dashboard.commerce.getEntitlement(confirmed.entitlement_id);
-  assert.equal(secondTurnAuthorization.access_mode, "unmetered");
-  assert.equal(secondTurnAuthorization.status, "active");
-  assert.deepEqual(revokedEntitlements, []);
 });
 
 test("public Creator and Product profiles expose the Registry account avatar", async (context) => {
@@ -1043,185 +813,6 @@ test("public Creator and Product profiles expose the Registry account avatar", a
   assert.equal(creator.creator.avatar_url, avatar);
   assert.equal(creator.products[0].creator_avatar_url, avatar);
 });
-
-test("a zero-price purchase is permanent and has no buyer cancellation action", async (context) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-free-cancel-"));
-  const revokedEntitlements = [];
-  const registry = registryFixture({ signedIn: "buyer", revokedEntitlements });
-  await listen(registry);
-  context.after(() => registry.close());
-  const dashboard = await createDashboardApp({
-    ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryAccessServiceToken: "test-access-service",
-    registryDeploymentServiceToken: "test-deployment-service",
-    registryUrl: serverUrl(registry),
-    exposeBearerTokens: true
-  });
-  const api = createServer(dashboard.handler);
-  await listen(api);
-  context.after(() => api.close());
-  const token = await login(api);
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "free-cancel" };
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
-  const sessionResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ product_id: catalogAgent.product_id })
-  });
-  const session = (await sessionResponse.json()).checkout_session;
-  const confirmationResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions/${session.checkout_session_id}/confirm`, {
-    method: "POST",
-    headers,
-    body: "{}"
-  });
-  const confirmation = await confirmationResponse.json();
-  assert.equal(confirmationResponse.status, 201, JSON.stringify(confirmation));
-
-  const cancellationResponse = await fetch(`${serverUrl(api)}/v1/orders/${confirmation.order_id}/cancel`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ reason: "buyer_removed_free_access" })
-  });
-  const cancellation = await cancellationResponse.json();
-  assert.equal(cancellationResponse.status, 409);
-  assert.equal(cancellation.error.code, "unmetered_purchase_not_reversible");
-  assert.deepEqual(revokedEntitlements, []);
-
-  const refundRequestResponse = await fetch(`${serverUrl(api)}/v1/orders/${confirmation.order_id}/refund-requests`, {
-    method: "POST",
-    headers: { ...headers, "idempotency-key": "free-refund-request" },
-    body: JSON.stringify({ reason: "buyer_requested" })
-  });
-  const refundRequest = await refundRequestResponse.json();
-  assert.equal(refundRequestResponse.status, 409);
-  assert.equal(refundRequest.error.code, "unmetered_purchase_not_reversible");
-  assert.deepEqual(revokedEntitlements, []);
-
-  const orderResponse = await fetch(`${serverUrl(api)}/v1/orders/${confirmation.order_id}`, { headers });
-  const order = (await orderResponse.json()).order;
-  assert.equal(order.entitlement_status, "active");
-  assert.equal(order.actions.can_cancel_access, false);
-});
-
-test("Creator fulfilled filter includes delivered orders and disconnected payouts do not invent balances", async (context) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-creator-delivery-"));
-  const registry = registryFixture({ signedIn: "owner" });
-  await listen(registry);
-  context.after(() => registry.close());
-  const dashboard = await createDashboardApp({
-    ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryUrl: serverUrl(registry),
-    exposeBearerTokens: true
-  });
-  await dashboard.commerce.createPayment({
-    payment_id: "pay-creator-filter",
-    buyer_id: "buyer-creator-filter",
-    creator_id: catalogAgent.creator_id,
-    product_id: catalogAgent.product_id,
-    amount_minor: 3900,
-    currency: "USD",
-    provider: "test-provider",
-    idempotency_key: "payment:creator-filter"
-  });
-  await dashboard.commerce.recordPaymentProviderEvent({
-    payment_id: "pay-creator-filter",
-    provider: "test-provider",
-    provider_event_id: "payment-event-creator-filter",
-    provider_payment_id: "provider-pay-creator-filter",
-    status: "succeeded"
-  });
-  const checkout = await dashboard.commerce.confirmCheckout({
-    buyer_id: "buyer-creator-filter",
-    buyer_display_name: "Delivery Buyer",
-    creator_id: catalogAgent.creator_id,
-    creator_display_name: catalogAgent.creator_name,
-    agent_id: catalogAgent.agent_id,
-    product_id: catalogAgent.product_id,
-    product_name: catalogAgent.product_name,
-    corpus_digest: catalogAgent.corpus_digest,
-    release_id: catalogAgent.corpus_digest,
-    gross_minor: 3900,
-    currency: "USD",
-    payment_status: "paid",
-    payment_id: "pay-creator-filter",
-    included_units: 1,
-    idempotency_key: "checkout:creator-filter"
-  });
-  await recordDelivery(dashboard, checkout, { prefix: "creator-filter", artifactType: "pdf" });
-  const api = createServer(dashboard.handler);
-  await listen(api);
-  context.after(() => api.close());
-  const token = await login(api);
-  const headers = { authorization: `Bearer ${token}` };
-
-  const ordersResponse = await fetch(`${serverUrl(api)}/v1/creator/orders?order=fulfilled`, { headers });
-  const orders = (await ordersResponse.json()).orders;
-  assert.equal(ordersResponse.status, 200);
-  assert.equal(orders.length, 1);
-  assert.equal(orders[0].status, "delivered");
-  assert.equal(orders[0].delivery_status, "completed");
-
-  const exportResponse = await fetch(`${serverUrl(api)}/v1/creator/orders/export?order=fulfilled`, { headers });
-  const exported = await exportResponse.text();
-  assert.equal(exportResponse.status, 200);
-  assert.match(exportResponse.headers.get("content-type"), /^text\/csv/);
-  assert.match(exportResponse.headers.get("content-disposition"), /hatch-creator-orders\.csv/);
-  assert.match(exported, /order_reference,buyer_display_name,product_id/);
-  assert.match(exported, /Delivery Buyer/);
-  assert.match(exported, /pdf/);
-  for (const privateField of ["prompt", "workspace", "artifact_path", "conversation", "tool_arguments", "file_content"]) {
-    assert.doesNotMatch(exported.toLowerCase(), new RegExp(privateField));
-  }
-
-  const payoutsResponse = await fetch(`${serverUrl(api)}/v1/creator/payouts`, { headers });
-  const payouts = await payoutsResponse.json();
-  assert.equal(payoutsResponse.status, 200);
-  assert.equal(payouts.account_status, "not_connected");
-  assert.equal(payouts.balance_status, "unavailable");
-  assert.equal(payouts.setup_available, false);
-  assert.equal(payouts.available_minor, null);
-  assert.equal(payouts.pending_minor, null);
-  assert.deepEqual(payouts.payouts, []);
-});
-
-async function recordDelivery(app, checkout, { prefix, artifactType }) {
-  const taskId = `task-${prefix}`;
-  const artifactId = `artifact-${prefix}`;
-  const deliveryId = `delivery-${prefix}`;
-  const reservation = await app.commerce.authorizeAndReserve({
-    entitlement_id: checkout.entitlement.entitlement_id,
-    run_id: taskId,
-    task_id: taskId,
-    idempotency_key: `reserve:${prefix}`
-  });
-  const identity = {
-    order_id: checkout.order.order_id,
-    buyer_id: checkout.order.buyer_id,
-    creator_id: checkout.order.creator_id,
-    agent_id: checkout.order.agent_id,
-    product_id: checkout.order.product_id,
-    corpus_digest: checkout.order.corpus_digest
-  };
-  await app.ledger.append("task.started", {
-    ...identity,
-    entitlement_id: checkout.entitlement.entitlement_id,
-    task_id: taskId
-  }, { idempotencyKey: `task:${prefix}` });
-  await app.ledger.append("artifact.created", {
-    ...identity,
-    task_id: taskId,
-    artifact_id: artifactId,
-    artifact_digest: `sha256:${"d".repeat(64)}`
-  }, { idempotencyKey: `artifact:${prefix}` });
-  return app.commerce.completeDelivery({
-    reservation_id: reservation.reservation.reservation_id,
-    task_id: taskId,
-    artifact_id: artifactId,
-    artifact_type: artifactType,
-    delivery_id: deliveryId,
-    idempotency_key: `delivery:${prefix}`
-  });
-}
 
 function registryFixture({
   signedIn,

@@ -21,7 +21,7 @@ on:
       - "compose*.yml"
       - "Caddyfile"
       - "scripts/create-agent-zip.mjs"
-      - "scripts/commerce-v2-smoke.mjs"
+      - "scripts/production-smoke.mjs"
       - ".github/workflows/ci.yml"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:

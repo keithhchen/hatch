@@ -39,7 +39,7 @@ export class WebChatClientError extends Error {
 /**
  * Web ConversationTransport: cookie-authenticated requests through the
  * Dashboard proxy (/v1/web-chat/*). `scope` is the access binding sent with
- * every request and the hello frame (e.g. { entitlement_id }); its shape is
+ * every request and the hello frame (e.g. { product_id }); its shape is
  * owned by the caller, not by this adapter.
  */
 export class WebConversationTransport extends ConversationTransport {

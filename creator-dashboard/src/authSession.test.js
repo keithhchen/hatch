@@ -66,11 +66,11 @@ test("Browser auth uses an HttpOnly session cookie and rejects missing CSRF", as
   assert.equal((await expired.json()).error.code, "unauthorized");
   dashboard.portalState.clock = () => new Date();
 
-  const listBuyerOrders = dashboard.commerce.listBuyerOrders.bind(dashboard.commerce);
-  dashboard.commerce.listBuyerOrders = () => {
+  const getCreatorDashboard = dashboard.commerce.getCreatorDashboard.bind(dashboard.commerce);
+  dashboard.commerce.getCreatorDashboard = () => {
     throw new Error("database failed at /Users/private/workspace with token=secret-value");
   };
-  const failedRequest = await fetch(`${serverUrl(api)}/v1/user/orders`, {
+  const failedRequest = await fetch(`${serverUrl(api)}/v1/creator/me`, {
     headers: { cookie, "x-request-id": "request-safe-error-contract" }
   });
   const failedBody = await failedRequest.json();
@@ -79,7 +79,7 @@ test("Browser auth uses an HttpOnly session cookie and rejects missing CSRF", as
   assert.equal(failedBody.request_id, "request-safe-error-contract");
   assert.match(failedBody.error.message, /same request ID/);
   assert.doesNotMatch(JSON.stringify(failedBody), /private|workspace|secret-value|database failed/i);
-  dashboard.commerce.listBuyerOrders = listBuyerOrders;
+  dashboard.commerce.getCreatorDashboard = getCreatorDashboard;
 
   const rejectedLogout = await fetch(`${serverUrl(api)}/v1/auth/logout`, {
     method: "POST",

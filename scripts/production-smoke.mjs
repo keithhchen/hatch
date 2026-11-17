@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-export async function runCommerceV2Smoke(options = {}) {
+export async function runProductionSmoke(options = {}) {
   const origin = requiredUrl(options.origin ?? process.env.HATCH_SMOKE_ORIGIN, "HATCH_SMOKE_ORIGIN");
   const creatorId = options.creatorId ?? process.env.HATCH_SMOKE_CREATOR_ID ?? "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
   const productId = options.productId ?? process.env.HATCH_SMOKE_PRODUCT_ID ?? "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
@@ -24,9 +23,6 @@ export async function runCommerceV2Smoke(options = {}) {
   if (!product?.available || product.availability !== "published") {
     throw new Error("Access smoke requires a published Product.");
   }
-  if (!product.release_id || !product.corpus_digest) {
-    throw new Error("Commerce smoke product is missing an immutable release binding.");
-  }
   if (!email && !password) {
     return { mode: "public", creator_id: creatorId, product_id: productId };
   }
@@ -48,83 +44,15 @@ export async function runCommerceV2Smoke(options = {}) {
 
   const me = await smokeRequest(fetchImpl, origin, "/v1/auth/me", { headers: { cookie } });
   assertStatus(me, 200, "authenticated profile");
-  if (!me.json?.id || me.json.id === creatorId) throw new Error("Commerce smoke account must be signed in and must not own the smoke Product.");
+  if (!me.json?.id || me.json.id === creatorId) throw new Error("Smoke account must be signed in and must not own the smoke Product.");
 
-  // Application redeploys must replay the same smoke purchase. A new order is
-  // justified only when the immutable Product release changes.
-  const intentKey = smokeIntentKey({ creatorId, productId, product });
-  const checkout = await smokeRequest(fetchImpl, origin, "/v1/checkout-sessions", {
-    method: "POST",
-    headers: { ...authenticatedHeaders, "idempotency-key": `${intentKey}:create` },
-    body: { product_id: productId }
-  });
-  assertOneOf(checkout, [200, 201], "checkout session");
-  const session = checkout.json?.checkout_session;
-  if (!session?.checkout_session_id || Number(session.totals?.total_minor) !== 0) {
-    throw new Error("Commerce smoke checkout is not a durable zero-value session.");
-  }
-
-  const confirmation = await smokeRequest(
-    fetchImpl,
-    origin,
-    `/v1/checkout-sessions/${encodeURIComponent(session.checkout_session_id)}/confirm`,
-    {
-      method: "POST",
-      headers: { ...authenticatedHeaders, "idempotency-key": `${intentKey}:confirm` },
-      body: {}
-    }
-  );
-  assertOneOf(confirmation, [200, 201], "checkout confirmation");
-  const orderId = confirmation.json?.order_id ?? confirmation.json?.order?.order_id;
-  const entitlementId = confirmation.json?.entitlement_id ?? confirmation.json?.entitlement?.entitlement_id;
-  if (!orderId || !entitlementId) throw new Error("Commerce smoke confirmation did not return an order and entitlement.");
-  if (confirmation.json?.payment?.status !== "not_required") {
-    throw new Error("Zero-value Commerce smoke must record Payment Not required.");
-  }
-
-  const order = await smokeRequest(fetchImpl, origin, `/v1/user/orders/${encodeURIComponent(orderId)}`, {
-    headers: { cookie }
-  });
-  assertStatus(order, 200, "durable order detail");
-  const receipt = order.json?.order ?? order.json;
-  if (receipt.release_id !== product.release_id
-    || receipt.corpus_digest !== product.corpus_digest) {
-    throw new Error("Order detail did not preserve the published Product release snapshot.");
-  }
-  if (Number(receipt.gross_minor) !== 0
-    || Number(receipt.subtotal_minor) !== 0
-    || Number(receipt.discount_minor) !== 0
-    || receipt.tax_minor !== null
-    || Number(receipt.total_minor) !== 0
-    || receipt.payment_status !== "not_required"
-    || receipt.payment_id !== null
-    || receipt.currency !== "USD") {
-    throw new Error("Order detail did not preserve zero-value Payment Not required semantics.");
-  }
-  const entitlement = await smokeRequest(fetchImpl, origin, `/v1/user/entitlements/${encodeURIComponent(entitlementId)}`, {
-    headers: { cookie }
-  });
-  assertStatus(entitlement, 200, "durable entitlement detail");
-  const access = entitlement.json?.entitlement ?? entitlement.json;
-  if (access.entitlement_id !== entitlementId || access.order_id !== orderId) {
-    throw new Error("Entitlement detail is not bound to the confirmed order.");
-  }
-  if (access.creator_id !== creatorId
-    || access.product_id !== productId
-    || access.purchased_corpus_digest !== product.corpus_digest
-    || access.effective_corpus_digest !== product.corpus_digest
-    || access.status !== "active"
-    || Number(access.remaining_units) < 1) {
-    throw new Error("Entitlement detail did not preserve active release-pinned access.");
-  }
-
-  const success = await smokeRequest(fetchImpl, origin, `/explore/orders/${encodeURIComponent(orderId)}/success`, {
-    headers: { cookie }
-  });
-  assertStatus(success, 200, "durable success route");
+  // Open access: a signed-in account can read its library (the Agents it has chatted with).
+  const library = await smokeRequest(fetchImpl, origin, "/v1/library?status=active", { headers: { cookie } });
+  assertStatus(library, 200, "library listing");
+  if (!Array.isArray(library.json?.entitlements)) throw new Error("Library listing did not return an entitlements list.");
   const download = await smokeRequest(fetchImpl, origin, "/download");
   assertStatus(download, 200, "Desktop download route");
-  return { mode: "authenticated", creator_id: creatorId, product_id: productId, order_id: orderId, entitlement_id: entitlementId };
+  return { mode: "authenticated", creator_id: creatorId, product_id: productId };
 }
 
 function sameOriginHeaders(origin) {
@@ -174,22 +102,8 @@ function assertWebCookiePolicy(cookies, { secure }) {
   }
 }
 
-function smokeIntentKey({ creatorId, productId, product }) {
-  const digest = createHash("sha256").update(JSON.stringify({
-    creator_id: creatorId,
-    product_id: productId,
-    release_id: product.release_id,
-    corpus_digest: product.corpus_digest
-  })).digest("hex");
-  return `production-smoke:${digest}`;
-}
-
 function assertStatus(result, expected, label) {
   if (result.status !== expected) throw smokeError(label, result);
-}
-
-function assertOneOf(result, expected, label) {
-  if (!expected.includes(result.status)) throw smokeError(label, result);
 }
 
 function smokeError(label, result) {
@@ -210,10 +124,10 @@ function requiredUrl(value, name) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runCommerceV2Smoke()
-    .then((result) => console.log(`Commerce V2 ${result.mode} smoke passed for ${result.creator_id}/${result.product_id}.`))
+  runProductionSmoke()
+    .then((result) => console.log(`Production ${result.mode} smoke passed for ${result.creator_id}/${result.product_id}.`))
     .catch((error) => {
-      console.error(error instanceof Error ? error.message : "Commerce V2 smoke failed.");
+      console.error(error instanceof Error ? error.message : "Production smoke failed.");
       process.exitCode = 1;
     });
 }

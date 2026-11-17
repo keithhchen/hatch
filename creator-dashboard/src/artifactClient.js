@@ -2,9 +2,6 @@ import { WebConversationTransport } from "./webChatClient.js";
 
 const SEND_TIMEOUT_MS = 30_000;
 
-/** The scope every artifact call carries, like chat: an entitlement for buyers, the product for its owner. */
-export const accessScope = (access, productId) => access.entitlement_id ? { entitlement_id: access.entitlement_id } : { product_id: productId };
-
 /**
  * Artifact-mode calls through the Dashboard proxy. `request` is the page's cookie-authenticated request;
  * conversations are created and listed by the same transport chat uses.
@@ -111,8 +108,8 @@ export class ArtifactApi {
  * `onReport(api)` is called as soon as the routed report has answered (found or not), without waiting for the rest;
  * the report page then takes that same answer from `api.report`.
  */
-export async function loadArtifact(request, access, productId, conversationId = null, onReport = () => {}) {
-  const api = new ArtifactApi(request, accessScope(access, productId));
+export async function loadArtifact(request, productId, conversationId = null, onReport = () => {}) {
+  const api = new ArtifactApi(request, { product_id: productId });
   if (conversationId) {
     api.prefetchReport(conversationId);
     api.early.promise.then(() => onReport(api), () => onReport(api));

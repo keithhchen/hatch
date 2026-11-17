@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { resolveCreatorIdentity } from "@hatch/chat";
-import { ProductAccessGate, useProductAccess } from "./productAccess.jsx";
+import { ProductAgentGate, useProductAgent } from "./productAgent.jsx";
 import { WebChatShell } from "./WebChatShell.jsx";
 import { Download } from "lucide-react";
 import { ArtifactIntakePage } from "./ArtifactIntakePage.jsx";
@@ -23,8 +23,8 @@ const STATUS_KEYS = Object.freeze({ draft: "artifactStatusDraft", queued: "artif
 export default function ArtifactPage({ productId, conversationId: routedConversationId, search = "", request, navigate, profile, onSignOut }) {
   const { locale } = useLocale();
   const t = useCallback((key, values) => webChatT(locale, key, values), [locale]);
-  const accessState = useProductAccess(productId, request);
-  const access = accessState.access;
+  const agentState = useProductAgent(productId, request);
+  const agent = agentState.agent;
   const [mode, setMode] = useState(null);
   const [earlyApi, setEarlyApi] = useState(null); // set once the routed report has answered, before the definition and the list
   const [error, setError] = useState(null);
@@ -32,23 +32,22 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
   const params = new URLSearchParams(search);
 
   useEffect(() => {
-    if (!access) return undefined;
+    if (!agent) return undefined;
     let live = true;
     setMode(null);
     setEarlyApi(null);
     setError(null);
-    loadArtifact(request, access, productId, routedConversationId, api => { if (live) setEarlyApi(api); })
+    loadArtifact(request, productId, routedConversationId, api => { if (live) setEarlyApi(api); })
       .then(loaded => { if (!live) return; if (loaded) setMode(loaded); else setError({ key: "artifactNoReport" }); })
       .catch(cause => { if (live) setError(cause); });
     return () => { live = false; };
-  }, [access, productId, request]); // the routed id is only the first report to fetch early; later routes are fetched by the report page
+  }, [agent, productId, request]); // the routed id is only the first report to fetch early; later routes are fetched by the report page
 
   const toIntake = useCallback(() => navigate(ArtifactRoute.productPath(productId), { replace: true }), [navigate, productId]);
 
-  const gate = { navigate, profile, onSignOut, productId, t, locale };
-  if (!mode && (error || !earlyApi)) return <ProductAccessGate {...gate} state={error ? { status: "error", error } : accessState} />;
+  if (!mode && (error || !earlyApi)) return <ProductAgentGate navigate={navigate} profile={profile} onSignOut={onSignOut} t={t} locale={locale} state={error ? { status: "error", error } : agentState} />;
 
-  const identity = resolveCreatorIdentity({ access });
+  const identity = resolveCreatorIdentity({ access: agent });
   const agentName = t("expertAi", { name: identity.creatorName });
   const api = mode?.api ?? earlyApi;
   const conversations = mode?.conversations ?? [];
@@ -59,7 +58,7 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
   const headerExtra = download ? <a className="web-chat__button web-chat__button--yolk artifact__header-download" href={download.href} download onClick={download.track}><Download aria-hidden="true" />{t("artifactDownload")}</a> : null;
 
   return <WebChatShell identity={identity} agentName={agentName} conversations={sidebar} selectedId={shown.conversationId ?? shown.draftConversationId} hasMore={false} headerExtra={headerExtra}
-    onSelect={select} onNew={() => navigate(`${ArtifactRoute.productPath(productId)}?new=1`)} newLabel={t("artifactNew")} profile={profile} onSignOut={onSignOut} t={t} locale={locale}>
+    onSelect={select} onNew={() => navigate(`${ArtifactRoute.productPath(productId)}?new=1`)} newLabel={t("artifactNew")} profile={profile} onSignOut={onSignOut} navigate={navigate} t={t} locale={locale}>
     {header => <main className="web-chat__main">
       {header}
       {shown.view === "report"

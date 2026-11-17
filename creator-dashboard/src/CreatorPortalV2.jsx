@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shareLinkCopied } from "./analytics/events.js";
-import { ArrowLeft, Bot, Check, ChevronsUpDown, CircleHelp, Copy, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronsUpDown, CircleHelp, Copy, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, Search, Settings, Users, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
@@ -15,7 +15,7 @@ import { StudioPathCards } from "./studioPathCards.jsx";
 import { useLocale } from "./locale.jsx";
 import {
   EmptyState, InlineError, LoadingState, PageBoundary, PageHeader, RegionBoundary, RouteProblem, SectionHead, StatusPill, STUDIO_ROOT as ROOT,
-  arrayOf, dateOnly, dateTime, friendlyError, humanStatus, idOf, money, mutationKey, productName, publicPathOf, unwrap, useAgentPath, useCopy, useRemote,
+  arrayOf, dateOnly, friendlyError, idOf, mutationKey, productName, publicPathOf, unwrap, useAgentPath, useCopy, useRemote,
   StepProgress,
 } from "./studioShellKit.jsx";
 import "./creatorPortalV2.css";
@@ -27,8 +27,7 @@ const SettingsPage = lazyWithReload(() => import("./SettingsPage.jsx").then(({ S
 const StudioAssistant = lazyWithReload(() => import("./StudioAssistant.jsx").then(({ StudioAssistant: Component }) => ({ default: Component })));
 const StudioAgentWorkspace = lazyWithReload(() => import("./studioAgentWorkspace.jsx").then(({ StudioAgentWorkspace: Component }) => ({ default: Component })));
 const opsPage = (name) => lazyWithReload(() => import("./studioOps.jsx").then((module) => ({ default: module[name] })));
-const StudioOrdersPage = opsPage("StudioOrdersPage");
-const StudioOrderDetailPage = opsPage("StudioOrderDetailPage");
+const StudioUsersPage = opsPage("StudioUsersPage");
 const StudioEarningsPage = opsPage("StudioEarningsPage");
 
 const creatorMuiTheme = createTheme(hatchMuiThemeOptions);
@@ -37,7 +36,7 @@ const NAV_ITEMS = [
   { section: "assistant", href: `${ROOT}/assistant`, label: "sxNavAssistant", Icon: MessageCircle },
   { section: "home", href: ROOT, label: "sxNavOverview", Icon: LayoutDashboard },
   { section: "products", href: `${ROOT}/products`, label: "sxNavAgents", Icon: Bot },
-  { section: "orders", href: `${ROOT}/orders`, label: "sxNavOrders", Icon: ReceiptText },
+  { section: "users", href: `${ROOT}/users`, label: "sxNavUsers", Icon: Users },
   { section: "settings", href: `${ROOT}/settings`, label: "sxNavSettings", Icon: Settings }
 ];
 
@@ -180,8 +179,7 @@ function CreatorRoute({ route, request, navigate, locale, t, profile, onProfileC
   if (route.kind === "products") return <ProductsPage request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "product-create") return lazy(<CreatorProductFiles request={request} profile={profile} navigate={navigate} locale={locale} />);
   if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product, tab) => <FactoryAgents productId={route.productId} tab={tab} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
-  if (route.kind === "orders") return lazy(<StudioOrdersPage {...ops} />);
-  if (route.kind === "order") return lazy(<StudioOrderDetailPage {...ops} orderId={route.orderId} />);
+  if (route.kind === "users") return lazy(<StudioUsersPage {...ops} />);
   if (route.kind === "settings") return lazy(<SettingsPage request={request} t={t} locale={locale} profile={profile} onProfileChange={onProfileChange} />);
   if (route.kind === "earnings") return lazy(<StudioEarningsPage {...ops} />);
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
@@ -196,43 +194,31 @@ function Redirect({ to, navigate }) {
 
 function CreatorHome({ request, navigate, t, locale }) {
   const resource = useRemote(request, "/v1/creator/overview");
+  const userCount = arrayOf(useRemote(request, "/v1/creator/users").data?.users).length;
   return (
     <PageBoundary resource={resource} title={t("workspaceLoadError")} t={t}>
       {(payload) => {
         const overview = unwrap(payload, "overview");
         const products = arrayOf(overview?.products);
-        const orders = arrayOf(overview?.recent_orders);
         if (products.length === 0) return <CreatorZeroProductIntro navigate={navigate} t={t} />;
-        const metrics = overview?.metrics ?? {};
         const live = products.filter(isProductLive);
         const next = products.find((product) => !isProductLive(product));
         const recent = [...products].sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""))).slice(0, 5);
         return <>
           <PageHeader title={t("sxOverviewTitle")} actions={<Button className={next ? undefined : "web-btn-yolk"} variant={next ? "secondary" : "primary"} type="button" leading={<Plus aria-hidden="true" />} onClick={() => navigate(`${ROOT}/products/new`)}>{t("newAgent")}</Button>} />
-          {Number(metrics.orders) > 0 ? <dl className="sx-kpis">
-            <Kpi label={t("sxKpiOrders")} value={Number(metrics.orders) || 0} />
+          {userCount > 0 ? <dl className="sx-kpis">
+            <Kpi label={t("sxKpiUsers")} value={userCount} />
           </dl> : null}
           {next ? <NextAgentCard product={next} request={request} navigate={navigate} t={t} /> : null}
-          <div className="sx-overview-grid">
-            <section className="sx-card" aria-labelledby="sx-home-agents">
-              <SectionHead title={<span id="sx-home-agents">{t("sxNavAgents")} <small>{t("sxAgentsCount", products.length, live.length)}</small></span>} action={t("sxViewAll")} onAction={() => navigate(`${ROOT}/products`)} />
-              <ul className="sx-mini-list">{recent.map((product) => <li key={idOf(product, "product")}>
-                <button type="button" onClick={() => navigate(creatorProductPath(idOf(product, "product")))}>
-                  <span className="sx-mini-list__main"><strong>{productName(product, t)}</strong><small>{t("sxUpdated", dateOnly(product.updated_at, locale))}</small></span>
-                  <StatusPill live={isProductLive(product)} t={t} />
-                </button>
-              </li>)}</ul>
-            </section>
-            <section className="sx-card" aria-labelledby="sx-home-orders">
-              <SectionHead title={<span id="sx-home-orders">{t("homeRecentOrders")}</span>} action={orders.length ? t("sxViewAll") : undefined} onAction={() => navigate(`${ROOT}/orders`)} />
-              {orders.length ? <ul className="sx-mini-list">{orders.map((order) => <li key={idOf(order, "order")}>
-                <button type="button" onClick={() => navigate(`${ROOT}/orders/${encodeURIComponent(order.order_number ?? idOf(order, "order"))}`)}>
-                  <span className="sx-mini-list__main"><strong>{order.product_name ?? order.product?.name ?? t("productAccess")}</strong><small>{order.buyer_display_name ?? t("buyer")} · {dateTime(order.created_at ?? order.placed_at, locale)}</small></span>
-                  <span className="sx-mini-list__end"><b>{money(order.gross_minor, order.currency)}</b><small>{humanStatus(order.status ?? order.order_status, t)}</small></span>
-                </button>
-              </li>)}</ul> : <p className="sx-quiet">{t("homeNoOrders")}</p>}
-            </section>
-          </div>
+          <section className="sx-card" aria-labelledby="sx-home-agents">
+            <SectionHead title={<span id="sx-home-agents">{t("sxNavAgents")} <small>{t("sxAgentsCount", products.length, live.length)}</small></span>} action={t("sxViewAll")} onAction={() => navigate(`${ROOT}/products`)} />
+            <ul className="sx-mini-list">{recent.map((product) => <li key={idOf(product, "product")}>
+              <button type="button" onClick={() => navigate(creatorProductPath(idOf(product, "product")))}>
+                <span className="sx-mini-list__main"><strong>{productName(product, t)}</strong><small>{t("sxUpdated", dateOnly(product.updated_at, locale))}</small></span>
+                <StatusPill live={isProductLive(product)} t={t} />
+              </button>
+            </li>)}</ul>
+          </section>
         </>;
       }}
     </PageBoundary>
@@ -368,6 +354,6 @@ function defaultNavigate(path) {
 }
 
 function localizedRouteTitle(route, t) {
-  const keys = { assistant: "sxNavAssistant", home: "sxNavOverview", products: "sxNavAgents", agent: "sxNavAgents", "product-create": "newAgent", orders: "sxNavOrders", order: "orderDetail", earnings: "sxNavEarnings", settings: "sxNavSettings" };
+  const keys = { assistant: "sxNavAssistant", home: "sxNavOverview", products: "sxNavAgents", agent: "sxNavAgents", "product-create": "newAgent", users: "sxNavUsers", earnings: "sxNavEarnings", settings: "sxNavSettings" };
   return keys[route.kind] ? t(keys[route.kind]) : t("studio");
 }

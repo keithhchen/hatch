@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/theme.css";
 import { HatchUIProvider, UnavailableState } from "@hatch/ui";
@@ -12,7 +12,9 @@ import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
 import { captureRenderError, initSentry } from "./sentry.js";
-import { AnalyticsProvider, useAccountIdentity } from "./analytics/AnalyticsProvider.jsx";
+import { AnalyticsProvider, useAccountIdentity, useAnalytics } from "./analytics/AnalyticsProvider.jsx";
+import { guestSignedInCarriedOver } from "./analytics/events.js";
+import { IM_LINK_PATH } from "./imLink.js";
 import { createAnalytics } from "./analytics/createAnalytics.js";
 import { lazyWithReload, reloadOnStaleBuild } from "./staleBuild.js";
 import { startEarlyLoad, takeEarlyMe } from "./earlyLoad.js";
@@ -32,6 +34,7 @@ const WebPage = lazyWithReload(() => import("./web/WebPage.jsx"));
 const WebChatPage = lazyWithReload(() => import("./WebChatPage.jsx"));
 const ArtifactPage = lazyWithReload(() => import("./ArtifactPage.jsx"));
 const DesktopSignInPage = lazyWithReload(() => import("./DesktopSignInPage.jsx"));
+const ImLinkPage = lazyWithReload(() => import("./ImLinkPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -71,6 +74,7 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
   useAccountIdentity(profile?.id);
+  const carriedOver = useGuestCarryOver(sessionStatus);
 
   const clearSession = useCallback(() => {
     setProfile(null);
@@ -191,22 +195,26 @@ function App() {
     return <Suspense fallback={<AppLoading />}><DesktopSignInPage search={location.search} profile={profile} request={dashboardRequest} /></Suspense>;
   }
 
-  const chatRoute = WebChatRoute.parse(location.pathname);
-  if (chatRoute) {
+  if (location.pathname === IM_LINK_PATH) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
-    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+    return <Suspense fallback={<AppLoading />}><ImLinkPage search={location.search} request={chatRequest} navigate={location.navigate} /></Suspense>;
+  }
+
+  // Anyone can chat: a signed-out visitor opens the page as a guest, and the server asks them to sign in when the guest limit is reached.
+  // `profile` is null for a guest. After a guest's conversations move to the account, the page is mounted again to read them.
+  const chatRoute = WebChatRoute.parse(location.pathname);
+  if (chatRoute) {
+    if (sessionStatus === "loading") return <AppLoading />;
+    return <Suspense fallback={<AppLoading />}><WebChatPage key={carriedOver} productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   const artifactRoute = ArtifactRoute.parse(location.pathname);
   if (artifactRoute) {
     if (sessionStatus === "loading") return <AppLoading />;
-    if (sessionStatus !== "authenticated") {
-      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
-    }
-    return <Suspense fallback={<AppLoading />}><ArtifactPage productId={artifactRoute.productId} conversationId={artifactRoute.conversationId} search={location.search} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+    return <Suspense fallback={<AppLoading />}><ArtifactPage key={carriedOver} productId={artifactRoute.productId} conversationId={artifactRoute.conversationId} search={location.search} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT
@@ -235,6 +243,7 @@ function App() {
   return (
     <Suspense fallback={<AppLoading />}>
       <BuyerPortalV2
+        key={carriedOver}
         pathname={location.pathname}
         search={location.search}
         navigate={location.navigate}
@@ -243,6 +252,29 @@ function App() {
       />
     </Suspense>
   );
+}
+
+/**
+ * Once per page load, as soon as the session is authenticated: the visitor's guest conversations become the account's.
+ * Returns a number that changes when some moved, so the pages that list them read again. A failure is not shown:
+ * the server keeps the guest until it succeeds, and the next page load asks again.
+ */
+function useGuestCarryOver(sessionStatus) {
+  const analytics = useAnalytics();
+  const asked = useRef(false);
+  const [movedTimes, setMovedTimes] = useState(0);
+  useEffect(() => {
+    if (sessionStatus !== "authenticated" || asked.current) return;
+    asked.current = true;
+    dashboardRequest("/v1/web-chat/guest/carry-over", { method: "POST", body: "{}" })
+      .then(({ moved }) => {
+        if (!(moved > 0)) return;
+        analytics.track(guestSignedInCarriedOver({ moved }));
+        setMovedTimes(count => count + 1);
+      })
+      .catch(() => {});
+  }, [analytics, sessionStatus]);
+  return movedTimes;
 }
 
 function useBrowserLocation() {

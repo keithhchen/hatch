@@ -17,6 +17,8 @@ test("catalog functions return [name, props] tuples", () => {
   assert.deepEqual(events.shareLinkCopied({ agentId: "a1", link: "chat" }), ["share_link_copied", { agent_id: "a1", link: "chat" }]);
   assert.deepEqual(events.errorShown({ area: "buyer", category: "500" }), ["error_shown", { area: "buyer", category: "500" }]);
   assert.deepEqual(events.chatStarted({ agentId: "a1" }), ["chat_started", { agent_id: "a1" }]);
+  assert.deepEqual(events.guestLimitReached({ agentId: "a1" }), ["guest_limit_reached", { agent_id: "a1" }]);
+  assert.deepEqual(events.guestSignedInCarriedOver({ moved: 2 }), ["guest_signed_in_carried_over", { moved: 2 }]);
 });
 
 test("viaFromReferrer", () => {

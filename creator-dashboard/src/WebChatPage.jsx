@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
-import { ownAgentOpened } from "./analytics/events.js";
+import { guestLimitReached, ownAgentOpened } from "./analytics/events.js";
 import { ArrowUp, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
-import { ChatError, ConversationController, FreeChatMeter, resolveCreatorIdentity } from "@hatch/chat";
+import { ChatError, ConversationController, MemoryDraftStore, resolveCreatorIdentity } from "@hatch/chat";
 import { ChatView, TaskBriefDropdown, useChatState } from "@hatch/chat/react";
 import { WebChatEgg } from "./webChatGate.jsx";
-import { ProductAccessGate, useProductAccess } from "./productAccess.jsx";
+import { GuestAuthButtons, ProductAgentGate, useProductAgent } from "./productAgent.jsx";
 import { WebChatShell, useFocusTrap } from "./WebChatShell.jsx";
 import { useLocale } from "./locale.jsx";
 import { BrowserImageAttachments, UnavailableToolExecutor, WebConversationTransport, browserDictation } from "./webChatClient.js";
@@ -17,8 +17,13 @@ import "./webChat.css";
 // Web shows thinking and tool activity; skill activity stays Desktop-only for now.
 const WEB_ACTIVITY_KINDS = Object.freeze(["thinking", "tool"]);
 const attachments = new BrowserImageAttachments();
+// One store for the page's life: a message the login wall sent back is still in the composer after signing in.
+const drafts = new MemoryDraftStore();
 
-function WebChatWorkspace({ controller, dictate, access, productId, navigate, profile, onSignOut, t, locale }) {
+/** What the login wall offers in place of Retry: signing in or up would let the message through. */
+const loginWallAction = (navigate, t) => error => error?.code === "login_required" ? <GuestAuthButtons navigate={navigate} t={t} /> : null;
+
+function WebChatWorkspace({ controller, dictate, agent, productId, navigate, profile, onSignOut, t, locale }) {
   const state = useChatState(controller);
   const { conversations, conversationCursor, conversationId, error } = state;
   const [briefOpen, setBriefOpen] = useState(false);
@@ -26,7 +31,9 @@ function WebChatWorkspace({ controller, dictate, access, productId, navigate, pr
   const briefTriggerRef = useRef(null);
   const briefDialogRef = useRef(null);
   const errorText = useCallback(cause => webChatErrorText(cause, locale), [locale]);
-  const identity = resolveCreatorIdentity({ access });
+  const identity = resolveCreatorIdentity({ access: agent });
+  const analytics = useAnalytics();
+  useEffect(() => { if (error?.code === "login_required") analytics.track(guestLimitReached({ agentId: productId })); }, [analytics, error, productId]);
   const agentName = t("expertAi", { name: identity.creatorName });
   const briefFields = identity.briefSpec?.fields ?? [];
   const selectedConversation = conversations.find(item => item.id === conversationId);
@@ -55,8 +62,6 @@ function WebChatWorkspace({ controller, dictate, access, productId, navigate, pr
   };
 
   const newConversation = (event, trigger = event?.currentTarget ?? null) => {
-    // Once free messages are used up the dock shows the paywall instead.
-    if (controller.freeChat.getSnapshot().locked) return;
     if (briefFields.length) {
       briefTriggerRef.current = trigger;
       setBriefAnswers({});
@@ -92,10 +97,10 @@ function WebChatWorkspace({ controller, dictate, access, productId, navigate, pr
   return <WebChatShell identity={identity} agentName={agentName} conversations={conversations} selectedId={conversationId} hasMore={Boolean(conversationCursor)}
     onLoadMore={() => void controller.loadMoreConversations().catch(controller.fail)} onSelect={selectConversation} onNew={newConversation} newLabel={t("newChat")}
     headerExtra={selectedConversation?.brief_snapshot ? <TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /> : null}
-    inert={briefOpen} profile={profile} onSignOut={onSignOut} t={t} locale={locale} overlay={brief}>
+    inert={briefOpen} profile={profile} onSignOut={onSignOut} navigate={navigate} t={t} locale={locale} overlay={brief}>
     {header => <ChatView controller={controller} identity={identity} agentName={agentName} t={t} errorText={errorText} attachments={attachments}
       header={header} loadingIndicator={<WebChatEgg size={34} className="web-chat-egg--bob" />} onNewConversation={newConversation}
-      activityKinds={WEB_ACTIVITY_KINDS} dictate={dictate} inert={briefOpen} />}
+      activityKinds={WEB_ACTIVITY_KINDS} dictate={dictate} inert={briefOpen} errorAction={loginWallAction(navigate, t)} />}
   </WebChatShell>;
 }
 
@@ -106,38 +111,36 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   localeRef.current = locale;
   const routedConversationRef = useRef(routedConversationId);
   routedConversationRef.current = routedConversationId;
-  const accessState = useProductAccess(productId, request);
-  const access = accessState.access;
+  const agentState = useProductAgent(productId, request);
+  const agent = agentState.agent;
   const [workspace, setWorkspace] = useState(null);
   const [chatError, setChatError] = useState(null);
 
   useEffect(() => {
-    if (!access) return undefined;
+    if (!agent) return undefined;
     let live = true;
     setWorkspace(null);
     setChatError(null);
     const controller = new ConversationController({
-      // Owned Agents have no entitlement: the Runtime authorizes the owner by product_id.
-      transport: new WebConversationTransport(request, access.entitlement_id ? { entitlement_id: access.entitlement_id } : { product_id: productId }),
+      transport: new WebConversationTransport(request, { product_id: productId }),
       attachments,
       tools: new UnavailableToolExecutor(),
+      drafts,
       draftScope: productId,
-      // Owners chat with their own Agent freely; customers meet the expert's free-chat limit.
-      freeChat: new FreeChatMeter(access.entitlement_id ? access.product?.pricing ?? null : null),
       describeError: cause => webChatErrorText(cause, localeRef.current)
     });
     controller.open(routedConversationRef.current ?? "");
     controller.loadLibrary()
-      .then(() => { if (live) setWorkspace({ controller, access, dictate: browserDictation(request) }); })
+      .then(() => { if (live) setWorkspace({ controller, agent, dictate: browserDictation(request) }); })
       .catch(cause => { if (live) setChatError(cause); });
     return () => {
       live = false;
       controller.dispose();
     };
-  }, [access, productId, request]);
+  }, [agent, productId, request]);
 
   const analytics = useAnalytics();
-  const ownerChat = Boolean(workspace) && !workspace.access.entitlement_id;
+  const ownerChat = Boolean(workspace) && Boolean(profile?.id) && profile.id === agent.creator_id;
   useEffect(() => { if (ownerChat) analytics.track(ownAgentOpened({ agentId: productId })); }, [analytics, ownerChat, productId]);
 
   useEffect(() => {
@@ -145,5 +148,5 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   }, [workspace, routedConversationId]);
 
   if (workspace) return <WebChatWorkspace {...workspace} productId={productId} navigate={navigate} profile={profile} onSignOut={onSignOut} t={t} locale={locale} />;
-  return <ProductAccessGate state={chatError ? { status: "error", error: chatError } : accessState} productId={productId} navigate={navigate} profile={profile} onSignOut={onSignOut} t={t} locale={locale} />;
+  return <ProductAgentGate state={chatError ? { status: "error", error: chatError } : agentState} navigate={navigate} profile={profile} onSignOut={onSignOut} t={t} locale={locale} />;
 }

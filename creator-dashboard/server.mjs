@@ -21,6 +21,7 @@ import {
 } from "../packages/commerce/src/index.js";
 import { PortalStateStore, stateError } from "./portalState.mjs";
 import { createLibrary } from "./library.mjs";
+import { createGuestTokens } from "./guest.mjs";
 import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
@@ -34,17 +35,13 @@ import {
 } from "./publicMetadata.mjs";
 import { helpPage, injectHelpPage, robotsTxt, sitemapXml } from "./helpSeo.mjs";
 import { createServerAnalytics } from "./analytics.mjs";
-import { agentRemoved, agentSaved, signedIn, signupCompleted } from "./analyticsEvents.mjs";
+import { agentRemoved, agentSaved, guestSignedInCarriedOver, signedIn, signupCompleted } from "./analyticsEvents.mjs";
 import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 import { bindAccount, currentContext, logEvent, observed, propagatingFetch, requestIdFrom } from "./observability.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
 const ACCOUNT_AVATAR_BODY_MAX_BYTES = 5 * 1024 * 1024;
-const CORPUS_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
-const SELF_PURCHASE_ERROR = Object.freeze({
-  error: { code: "self_purchase_not_allowed", message: "You own this Agent. Open it to chat; there is nothing to acquire." }
-});
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 /** Ingest bodies carry upload ids and links, never file bytes: files go straight to object storage. */
@@ -136,10 +133,6 @@ export async function createDashboardApp(options = {}) {
   const track = (distinctId, { event, properties }) => {
     try { if (distinctId) analytics.capture(distinctId, { event, properties }); } catch { /* analytics must never fail a request */ }
   };
-  const trackCheckout = (outcome, session) => {
-    if (!outcome?.entitlement_id || outcome?.entitlement?.status === "revoked") return;
-    track(session?.buyer?.id, agentSaved(session?.product?.product_id));
-  };
   const startWebSession = async (request, response, auth, method, created = false) => {
     const profile = publicProfile(auth.account);
     const webSession = await portalState.createWebSession(auth.token, profile, {
@@ -162,10 +155,8 @@ export async function createDashboardApp(options = {}) {
     baseUrl: options.providerBaseUrl ?? process.env.HATCH_PAYMENT_PROVIDER_BASE_URL,
     apiToken: options.providerApiToken ?? process.env.HATCH_PAYMENT_PROVIDER_API_TOKEN,
     webhookSecret: options.providerWebhookSecret ?? process.env.HATCH_PAYMENT_PROVIDER_WEBHOOK_SECRET,
-    sandboxScenario: options.paymentSandboxScenario,
     fetchImpl
   });
-  const paymentMode = paymentProvider.mode;
   const payoutSchedule = String(options.payoutSchedule
     ?? process.env.HATCH_PAYOUT_SCHEDULE
     ?? "disabled").trim().toLowerCase();
@@ -192,11 +183,7 @@ export async function createDashboardApp(options = {}) {
       const [agent] = candidates;
       return agent && publicCatalogAgent(agent, portalState.getCreatorProduct(agent.creator_id, agent.product_id));
     },
-    grantInput: (product, accountId) => checkoutCommerceInput({
-      product,
-      creator: { id: product.creator_id, name: product.creator_name },
-      release: { release_id: product.release_id ?? product.corpus_digest, corpus_digest: product.corpus_digest }
-    }, { profile: { id: accountId } })
+    grantInput: libraryGrantInput
   });
   const exposeBearerTokens = options.exposeBearerTokens === true;
   const registryDeploymentServiceToken = options.registryDeploymentServiceToken
@@ -205,12 +192,21 @@ export async function createDashboardApp(options = {}) {
   const commerceRuntimeServiceToken = options.commerceRuntimeServiceToken
     ?? process.env.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN
     ?? "";
-  const fulfillmentSlaMs = Math.max(0, Number(options.fulfillmentSlaMs
-    ?? process.env.HATCH_FULFILLMENT_SLA_MS
-    ?? 5 * 60_000));
-  const fulfillmentMaxAttempts = Math.max(1, Number(options.fulfillmentMaxAttempts
-    ?? process.env.HATCH_FULFILLMENT_MAX_ATTEMPTS
-    ?? 12));
+  // Guest chat needs the Runtime's shared secret; without it there is no guest, and the answer says so.
+  const guestTokens = commerceRuntimeServiceToken ? createGuestTokens(commerceRuntimeServiceToken) : undefined;
+  const guestCookie = (request, token, maxAge = 365 * 24 * 3600) =>
+    `hatch_guest=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
+  // Chat identity: a web session wins; otherwise the browser's guest token, minted on first need (a bad cookie counts as none).
+  const chatAuthentication = async (request) => {
+    const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+    if (!authentication.error || authentication.error.status !== 401 || bearerTokenFromAuthorization(request)) return authentication;
+    if (!guestTokens) return { error: { status: 503, body: { error: { code: "guest_unavailable", message: "Guest chat is unavailable." } } } };
+    const existing = requestCookies(request).hatch_guest;
+    if (guestTokens.verify(existing)) return { guest: true, token: existing };
+    const token = guestTokens.mint();
+    return { guest: true, token, setCookie: guestCookie(request, token) };
+  };
+
   const payoutReconcileAfterMs = Math.max(0, Number(options.payoutReconcileAfterMs
     ?? process.env.HATCH_PAYOUT_RECONCILE_AFTER_MS
     ?? 60_000));
@@ -238,96 +234,6 @@ export async function createDashboardApp(options = {}) {
       return [account.id, account.display_name];
     }));
     return names;
-  };
-
-  const compensateFailedCheckout = async (session) => {
-    const amountMinor = Number(session.totals?.total_minor ?? 0);
-    const startedAt = Date.parse(session.fulfillment_started_at ?? session.created_at ?? "");
-    const ageMs = Number.isFinite(startedAt) ? Math.max(0, Date.now() - startedAt) : 0;
-    if (session.status !== "fulfillment_pending"
-      || amountMinor <= 0
-      || Number(session.reconcile_attempts ?? 0) < fulfillmentMaxAttempts
-      || ageMs < fulfillmentSlaMs) return null;
-    const order = commerce.getOrder(session.order_id);
-    if (!order || order.status === "refunded" || order.deliveries.length > 0) return null;
-    const idempotencyKey = `fulfillment-compensation:${session.checkout_session_id}`;
-    const providerRefund = await confirmedProviderRefund(paymentProvider, order, {
-      actor_id: "fulfillment-reconciler",
-      reason: "fulfillment_sla_exceeded",
-      idempotency_key: idempotencyKey
-    });
-    const refunded = await commerce.refundOrder({
-      order_id: order.order_id,
-      buyer_id: order.buyer_id,
-      actor_id: "fulfillment-reconciler",
-      service_name: "dashboard-bff",
-      reason: "fulfillment_sla_exceeded",
-      ...providerRefund
-    }, { idempotencyKey });
-    const entitlementId = refunded.entitlement?.entitlement_id ?? session.entitlement_id;
-    const compensated = await portalState.markCheckoutCompensated(session.checkout_session_id, {
-      order_id: refunded.order_id,
-      entitlement_id: entitlementId,
-      refund_id: refunded.refunds.at(-1)?.refund_id ?? null
-    });
-    return {
-      checkout_session_id: session.checkout_session_id,
-      order_id: refunded.order_id,
-      refund_id: compensated.refund_id,
-      status: "refunded",
-      reason: "fulfillment_sla_exceeded"
-    };
-  };
-
-  const reconcilePendingCheckouts = async () => {
-    await portalState.refresh?.();
-    const results = [];
-    for (const original of portalState.listCheckoutSessions()) {
-      let session = original;
-      if (!new Set(["open", "payment_pending", "requires_action", "fulfillment_pending"]).has(session.status)) {
-        continue;
-      }
-      try {
-        if (session.status === "open") {
-          const orderEvent = ledger.findByIdempotencyKey(`checkout:${session.checkout_session_id}:confirm:order`);
-          const entitlementEvent = ledger.findByIdempotencyKey(`checkout:${session.checkout_session_id}:confirm:entitlement`);
-          if (!orderEvent || !entitlementEvent) continue;
-          session = await portalState.markCheckoutFulfillmentPending(session.checkout_session_id, {
-            order_id: orderEvent.order_id,
-            entitlement_id: entitlementEvent.entitlement_id,
-            payment_status: orderEvent.payment_status
-          });
-        }
-        if (session.status !== "fulfillment_pending") continue;
-        const order = commerce.getOrder(session.order_id);
-        const entitlement = commerce.getEntitlement(session.entitlement_id);
-        if (!order || !entitlement) continue;
-        await completeCheckoutAccess({ session, order, entitlement, portalState });
-        results.push({ checkout_session_id: session.checkout_session_id, status: "completed" });
-      } catch (error) {
-        const failedSession = await portalState.noteCheckoutReconcileFailure?.(session.checkout_session_id, error).catch(() => null);
-        if (failedSession) {
-          try {
-            const compensation = await compensateFailedCheckout(failedSession);
-            if (compensation) {
-              results.push(compensation);
-              continue;
-            }
-          } catch (compensationError) {
-            await portalState.noteCheckoutReconcileFailure?.(
-              session.checkout_session_id,
-              compensationError
-            ).catch(() => undefined);
-          }
-        }
-        results.push({
-          checkout_session_id: session.checkout_session_id,
-          status: "pending",
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-    return results;
   };
 
   const dispatchCommerceOutbox = async () => {
@@ -397,7 +303,7 @@ export async function createDashboardApp(options = {}) {
         status: result.status,
         provider_occurred_at: result.provider_occurred_at,
         failure_code: result.failure_code,
-        failure_message: providerFailureMessage(result.failure_code, result.status, "payout"),
+        failure_message: providerFailureMessage(result.failure_code, result.status),
         actor_id: payout.provider,
         service_name: "payout-provider"
       });
@@ -469,16 +375,20 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
       }
-      if (url.pathname === "/v1/web-chat/conversations" || url.pathname.startsWith("/v1/web-chat/conversations/") || ARTIFACT_DEFINITION_PATH.test(url.pathname)) {
+      if (url.pathname === "/v1/web-chat/conversations" || url.pathname.startsWith("/v1/web-chat/conversations/") || ARTIFACT_DEFINITION_PATH.test(url.pathname) || PRODUCT_AGENT_PATH.test(url.pathname)) {
         if (!["GET", "POST", "PATCH"].includes(request.method)) {
           return send(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
         }
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await chatAuthentication(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         if (request.method !== "GET") {
-          const csrfError = cookieCsrfError(request);
+          // A guest has no CSRF cookie, so its writes must come from one of our own pages.
+          const csrfError = authentication.guest
+            ? (allowedPublicOrigins.has(String(request.headers.origin ?? "")) ? undefined : { status: 403, body: { error: { code: "origin_not_allowed", message: "Open Hatch directly and try again." } } })
+            : cookieCsrfError(request);
           if (csrfError) return send(response, csrfError.status, csrfError.body);
         }
+        if (authentication.setCookie) response.setHeader("set-cookie", authentication.setCookie);
         const suffix = url.pathname.slice("/v1/web-chat".length);
         const upstreamUrl = new URL(`/v1${suffix}${url.search}`, runtimeUrl);
         // An asset upload is raw bytes streamed through, never parsed as JSON.
@@ -513,6 +423,46 @@ export async function createDashboardApp(options = {}) {
         else response.end();
         return;
       }
+      if (request.method === "POST" && url.pathname === "/v1/web-chat/guest/carry-over") {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const guestToken = requestCookies(request).hatch_guest;
+        if (!guestTokens?.verify(guestToken)) return send(response, 200, { moved: 0 });
+        const upstream = await fetchImpl(new URL("/v1/guest/carry-over", runtimeUrl), {
+          method: "POST",
+          headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ guest_token: guestToken })
+        });
+        const payload = await upstream.json().catch(() => ({}));
+        // Only a completed carry-over lets go of the cookie, so a failed one can be retried.
+        if (!upstream.ok) return send(response, upstream.status, payload?.error ? payload : { error: { code: "carry_over_failed", message: "The conversations could not be moved." } });
+        const moved = Number(payload.moved) || 0;
+        response.setHeader("set-cookie", guestCookie(request, "", 0));
+        if (moved > 0) track(authentication.profile.id, guestSignedInCarriedOver(moved));
+        return send(response, 200, { moved });
+      }
+      if (request.method === "POST" && url.pathname === "/v1/im-link/claim") {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const token = String((await readJson(request)).token ?? "").trim();
+        if (!token) return send(response, 400, { error: { code: "im_link_invalid", message: "A link token is required." } });
+        const claimed = await registryRequest(registryUrl, "/v1/channels/im-link/claim", {
+          method: "POST",
+          fetchImpl,
+          headers: { authorization: `Bearer ${authentication.token}` },
+          body: JSON.stringify({ token })
+        });
+        // The claim is idempotent, so a failed save is answered as a failure and the client calls again.
+        try {
+          const saved = await library.saveToLibrary({ accountId: authentication.profile.id, productId: claimed.product_id });
+          if (saved.created) track(authentication.profile.id, agentSaved(claimed.product_id));
+        } catch (error) {
+          if (!["agent_unavailable", "product_unavailable"].includes(error?.code)) {
+            throw stateError("library_unavailable", "The Agent could not be added to your library. Try again.", 502);
+          }
+        }
+        return send(response, 200, { product_id: claimed.product_id });
+      }
       if (request.method === "GET" && url.pathname === "/readyz") {
         try {
           if (draining) throw new Error("Dashboard is shutting down");
@@ -544,69 +494,12 @@ export async function createDashboardApp(options = {}) {
         return send(response, result.status, result.body);
       }
       if (url.pathname.startsWith("/v1/")) await portalState.refresh?.();
-      const providerWebhookMatch = url.pathname.match(/^\/v1\/provider-webhooks\/(payment|payout)$/);
-      if (request.method === "POST" && providerWebhookMatch) {
+      if (request.method === "POST" && url.pathname === "/v1/provider-webhooks/payout") {
         if (!paymentProvider.configured) {
           return send(response, 404, { error: { code: "not_found", message: "Provider webhook route is not configured." } });
         }
         const rawBody = await readRawBody(request, DEFAULT_JSON_BODY_MAX_BYTES);
         const event = paymentProvider.verifyWebhook(rawBody, request.headers);
-        if (providerWebhookMatch[1] === "payment") {
-          const current = commerce.getPayment(String(event.payment_id ?? ""));
-          if (!current) return send(response, 404, { error: { code: "payment_not_found", message: "Payment was not found." } });
-          const session = portalState.findCheckoutSessionByPaymentId(current.payment_id);
-          const providerCommand = {
-            payment_id: current.payment_id,
-            provider: current.provider,
-            provider_event_id: String(event.provider_event_id),
-            provider_payment_id: event.provider_payment_id,
-            provider_sequence: event.provider_sequence,
-            provider_occurred_at: event.provider_occurred_at,
-            status: event.status,
-            next_action: event.next_action,
-            failure_code: event.failure_code,
-            failure_message: providerFailureMessage(event.failure_code, event.status, "payment"),
-            actor_id: current.provider,
-            service_name: "payment-provider"
-          };
-          let transaction = null;
-          const recorded = event.status === "succeeded" && session
-            ? (transaction = await commerce.confirmCheckoutFromProviderEvent(
-              providerCommand,
-              checkoutCommerceInput(session, { profile: session.buyer }, current)
-            ))
-            : await commerce.recordPaymentProviderEvent(providerCommand);
-          let checkoutStatus = session?.status ?? null;
-          if (session) {
-            const updated = await portalState.markCheckoutPayment(session.checkout_session_id, {
-              payment_id: current.payment_id,
-              provider: current.provider,
-              status: recorded.payment.status,
-              redirect_url: recorded.payment.next_action?.redirect_url
-            });
-            checkoutStatus = updated.status;
-            if (recorded.payment.status === "succeeded" && !["completed", "fulfillment_pending"].includes(updated.status)) {
-              const outcome = await finalizeCheckoutOrder({
-                session: updated,
-                authentication: { profile: updated.buyer },
-                registryUrl,
-                fetchImpl,
-                commerce,
-                portalState,
-                payment: recorded.payment,
-                transaction
-              });
-              checkoutStatus = outcome.body.status;
-              trackCheckout(outcome.body, updated);
-            }
-          }
-          return send(response, 200, {
-            received: true,
-            applied: recorded.applied,
-            payment_status: recorded.payment.status,
-            checkout_status: checkoutStatus
-          });
-        }
         const current = commerce.getPayout(String(event.payout_id ?? ""));
         if (!current) return send(response, 404, { error: { code: "payout_not_found", message: "Payout was not found." } });
         const payout = await commerce.recordPayoutProviderEvent({
@@ -617,13 +510,13 @@ export async function createDashboardApp(options = {}) {
           provider_occurred_at: event.provider_occurred_at,
           status: event.status,
           failure_code: event.failure_code,
-          failure_message: providerFailureMessage(event.failure_code, event.status, "payout"),
+          failure_message: providerFailureMessage(event.failure_code, event.status),
           actor_id: current.provider,
           service_name: "payout-provider"
         });
         return send(response, 200, { received: true, payout });
       }
-      if (url.pathname.startsWith("/v1/internal/commerce/") || url.pathname.startsWith("/v1/internal/library/") || url.pathname.startsWith("/v1/internal/access/")) {
+      if (url.pathname.startsWith("/v1/internal/library/") || url.pathname.startsWith("/v1/internal/access/")) {
         if (!commerceRuntimeServiceToken) {
           return send(response, 503, { error: { code: "commerce_service_unavailable", message: "Internal Commerce commands are not configured." } });
         }
@@ -649,125 +542,6 @@ export async function createDashboardApp(options = {}) {
             .filter((entitlement) => entitlement.status === "active")
             .map((entitlement) => runtimeEntitlementBinding(entitlement, portalState));
           return send(response, 200, { entitlements });
-        }
-        const entitlementAccessMatch = url.pathname.match(/^\/v1\/internal\/access\/entitlements\/([^/]+)$/);
-        if (request.method === "GET" && entitlementAccessMatch) {
-          const entitlement = commerce.getEntitlement(decodeURIComponent(entitlementAccessMatch[1]));
-          const userId = url.searchParams.get("user_id");
-          if (!entitlement || entitlement.status !== "active" || !userId || entitlement.buyer_id !== userId) {
-            return send(response, 404, { error: { code: "entitlement_not_found", message: "Entitlement was not found." } });
-          }
-          return send(response, 200, { entitlement: runtimeEntitlementBinding(entitlement, portalState) });
-        }
-        const idempotencyMatch = url.pathname.match(/^\/v1\/internal\/commerce\/idempotency\/(.+)$/);
-        if (request.method === "GET" && idempotencyMatch) {
-          const event = ledger.findByIdempotencyKey(decodeURIComponent(idempotencyMatch[1]));
-          return event
-            ? send(response, 200, { event })
-            : send(response, 404, { error: { code: "event_not_found", message: "Commerce event was not found." } });
-        }
-        if (request.method === "POST" && url.pathname === "/v1/internal/commerce/events") {
-          const body = await readJson(request);
-          if (!["task.started", "artifact.created"].includes(body.type)) {
-            return send(response, 400, { error: { code: "unsupported_event", message: "Runtime may append only task and artifact facts through this endpoint." } });
-          }
-          assertNoPrivateCommerceFields(body.payload);
-          const event = await ledger.append(body.type, body.payload ?? {}, {
-            idempotencyKey: requireCommandKey(request, body)
-          });
-          return send(response, 201, { event });
-        }
-      if (request.method === "POST" && new Set([
-        "/v1/internal/commerce/reservations",
-        "/v1/internal/commerce/authorize-and-reserve"
-      ]).has(url.pathname)) {
-          const body = await readJson(request);
-          assertNoPrivateCommerceFields(body);
-          const result = await commerce.authorizeAndReserve(body, {
-            idempotencyKey: requireCommandKey(request, body)
-          });
-          return send(response, 201, result);
-        }
-        const entitlementAuthorizationMatch = url.pathname.match(/^\/v1\/internal\/commerce\/entitlements\/([^/]+)\/authorization$/);
-        if (request.method === "GET" && entitlementAuthorizationMatch) {
-          const entitlement = commerce.getEntitlement(decodeURIComponent(entitlementAuthorizationMatch[1]));
-          return entitlement
-            ? send(response, 200, { authorization: entitlementAuthorization(entitlement) })
-            : send(response, 404, { error: { code: "entitlement_not_found", message: "Entitlement was not found." } });
-        }
-        const internalEntitlementMatch = url.pathname.match(/^\/v1\/internal\/commerce\/entitlements\/([^/]+)$/);
-        if (request.method === "GET" && internalEntitlementMatch) {
-          const entitlement = commerce.getEntitlement(decodeURIComponent(internalEntitlementMatch[1]));
-          return entitlement
-            ? send(response, 200, { entitlement })
-            : send(response, 404, { error: { code: "entitlement_not_found", message: "Entitlement was not found." } });
-        }
-        const authorizeReservationMatch = url.pathname.match(/^\/v1\/internal\/commerce\/entitlements\/([^/]+)\/authorize-and-reserve$/);
-        if (request.method === "POST" && authorizeReservationMatch) {
-          const body = await readJson(request);
-          assertNoPrivateCommerceFields(body);
-          return send(response, 201, await commerce.authorizeAndReserve({
-            ...body,
-            entitlement_id: decodeURIComponent(authorizeReservationMatch[1])
-          }, { idempotencyKey: requireCommandKey(request, body) }));
-        }
-        const advanceEntitlementMatch = url.pathname.match(/^\/v1\/internal\/commerce\/entitlements\/([^/]+)\/advance-version$/);
-        if (request.method === "POST" && advanceEntitlementMatch) {
-          const body = await readJson(request);
-          assertNoPrivateCommerceFields(body);
-          const entitlementId = decodeURIComponent(advanceEntitlementMatch[1]);
-          const current = commerce.getEntitlement(entitlementId);
-          if (!current) {
-            throw stateError("entitlement_not_found", "Entitlement was not found.", 404);
-          }
-          const commandKey = requireCommandKey(request, body);
-          const authority = await verifyEntitlementVersionAuthority({
-            entitlement: current,
-            body,
-            commandKey,
-            ledger,
-            registryUrl,
-            fetchImpl,
-            registryDeploymentServiceToken
-          });
-          const entitlement = await commerce.advanceEntitlementVersion({
-            entitlement_id: entitlementId,
-            from_digest: authority.from_digest,
-            to_digest: authority.to_digest,
-            from_release_id: authority.from_release_id,
-            to_release_id: authority.to_release_id,
-            compatibility_declaration_id: authority.compatibility_declaration_id,
-            reason: "compatible_release_published"
-          }, { idempotencyKey: commandKey });
-          return send(response, 200, { entitlement });
-        }
-        const releaseReservationMatch = url.pathname.match(/^\/v1\/internal\/commerce\/reservations\/([^/]+)\/release$/);
-        if (request.method === "POST" && releaseReservationMatch) {
-          const body = await readJson(request);
-          return send(response, 200, await commerce.releaseReservation({
-            ...body,
-            reservation_id: decodeURIComponent(releaseReservationMatch[1])
-          }, { idempotencyKey: requireCommandKey(request, body) }));
-        }
-        if (request.method === "POST" && url.pathname === "/v1/internal/commerce/deliveries") {
-          const body = await readJson(request);
-          assertNoPrivateCommerceFields(body);
-          const result = await commerce.completeDelivery(body, {
-            idempotencyKey: requireCommandKey(request, body)
-          });
-          return send(response, 201, result);
-        }
-        if (request.method === "POST" && url.pathname === "/v1/internal/commerce/reconcile-reservations") {
-          const body = await readJson(request);
-          return send(response, 200, {
-            reservations: await commerce.reconcileExpiredReservations(body.now ? new Date(body.now) : new Date())
-          });
-        }
-        if (request.method === "POST" && url.pathname === "/v1/internal/commerce/reconcile-revenue") {
-          return send(response, 200, await commerce.reconcilePendingRevenue());
-        }
-        if (request.method === "GET" && url.pathname === "/v1/internal/commerce/operations") {
-          return send(response, 200, await commerceOperationsSnapshot({ ledger, commerce, portalState }));
         }
         return send(response, 404, { error: { code: "not_found", message: "Internal Commerce route not found." } });
       }
@@ -1206,100 +980,6 @@ export async function createDashboardApp(options = {}) {
         });
       }
 
-      if (request.method === "POST" && url.pathname === "/v1/checkout-sessions") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const body = await readJson(request);
-        const commandKey = requireCommandKey(request, body);
-        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const requestedProductId = String(body.product_id ?? "").trim();
-        if (!UUID_V4_PATTERN.test(requestedProductId)) return send(response, 400, { error: { code: "invalid_product_id", message: "product_id must be a UUID v4." } });
-        const candidates = catalog.filter((entry) => (
-          entry.product_id === requestedProductId
-        ));
-        if (candidates.length > 1) {
-          return send(response, 409, { error: { code: "ambiguous_product", message: "This product id is not globally unique. Use the current public product link." } });
-        }
-        const agent = candidates[0];
-        if (!agent) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-        const creatorState = portalState.getCreatorProduct(agent.creator_id, agent.product_id);
-        const product = publicCatalogAgent(agent, creatorState);
-        if (product.availability !== "published") {
-          return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
-        }
-        if (product.creator_id === authentication.profile.id) return send(response, 409, SELF_PURCHASE_ERROR);
-        const requestKey = commandKey;
-        const existing = portalState.findCheckoutSessionByRequest(authentication.profile.id, requestKey);
-        const sessionCreatorId = existing?.product.creator_id ?? product.creator_id;
-        const creatorName = (await resolveCreatorNames([sessionCreatorId])).get(sessionCreatorId);
-        if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-        const session = existing ?? await portalState.createCheckoutSession({
-          request_key: requestKey,
-          buyer_id: authentication.profile.id,
-          buyer: authentication.profile,
-          product,
-          creator: { id: product.creator_id, name: product.creator_name },
-          release: {
-            release_id: product.release_id ?? product.corpus_digest,
-            corpus_digest: product.corpus_digest
-          },
-          totals: {
-            subtotal_minor: 0,
-            discount_minor: 0,
-            tax_minor: null,
-            total_minor: 0,
-            currency: "USD"
-          },
-          entitlement_scope: {
-            access_mode: "unmetered",
-            version_policy: "pinned"
-          }
-        });
-        return send(response, existing ? 200 : 201, { checkout_session: checkoutSessionPublic(session, creatorName) });
-      }
-
-      const checkoutSessionMatch = url.pathname.match(/^\/v1\/checkout-sessions\/([^/]+)$/);
-      if (request.method === "GET" && checkoutSessionMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const session = portalState.getCheckoutSession(decodeURIComponent(checkoutSessionMatch[1]));
-        if (!session || session.buyer_id !== authentication.profile.id) {
-          return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
-        }
-        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
-        if (!creatorName) return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
-        return send(response, 200, { checkout_session: checkoutSessionPublic(session, creatorName) });
-      }
-
-      const checkoutConfirmMatch = url.pathname.match(/^\/v1\/checkout-sessions\/([^/]+)\/confirm$/);
-      if (request.method === "POST" && checkoutConfirmMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const body = await readJson(request);
-        const commandKey = requireCommandKey(request, body);
-        const session = portalState.getCheckoutSession(decodeURIComponent(checkoutConfirmMatch[1]));
-        if (!session || session.buyer_id !== authentication.profile.id) {
-          return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
-        }
-        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
-        if (!creatorName) return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
-        const outcome = await confirmCheckoutSession({
-          session,
-          authentication,
-          request,
-          registryUrl,
-          fetchImpl,
-          commerce,
-          portalState,
-          paymentMode,
-          paymentProvider,
-          commandKey,
-          paymentScenario: body.sandbox_scenario
-        });
-        if (!outcome.replayed) trackCheckout(outcome.body, session);
-        return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
-      }
-
       if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
@@ -1353,171 +1033,6 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, { creator_agents: [...ownedAgents, ...creatorAgents] });
       }
 
-      if (request.method === "GET" && ["/v1/user/orders", "/v1/orders"].includes(url.pathname)) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const status = url.searchParams.get("status");
-        const sourceOrders = commerce.listBuyerOrders(authentication.profile.id);
-        const creatorNames = await resolveCreatorNames(sourceOrders.map((order) => order.creator_id));
-        const orders = sourceOrders
-          .filter((order) => creatorNames.has(order.creator_id))
-          .map((order) => orderDetail(order, [], creatorNames.get(order.creator_id)))
-          .filter((order) => !status || status === "all" || order.status === status);
-        const page = paginate(orders, url);
-        return send(response, 200, { orders: page.items, next_cursor: page.next_cursor });
-      }
-
-      const buyerOrderMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)$/);
-      if (request.method === "GET" && buyerOrderMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const order = resolveOrderIdentifier(commerce, decodeURIComponent(buyerOrderMatch[1]), authentication.profile.id);
-        if (order && order.buyer_id && order.buyer_id !== authentication.profile.id) {
-          return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-        }
-        if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-        const creatorName = (await resolveCreatorNames([order.creator_id])).get(order.creator_id);
-        if (!creatorName) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-        return send(response, 200, { order: orderDetail(order, [], creatorName) });
-      }
-
-      const buyerRefundMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)\/(refund-requests|cancel)$/);
-      if (request.method === "POST" && buyerRefundMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const requestedOrder = decodeURIComponent(buyerRefundMatch[1]);
-        const current = resolveOrderIdentifier(commerce, requestedOrder, authentication.profile.id);
-        if (!current || (current.buyer_id && current.buyer_id !== authentication.profile.id)) {
-          return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-        }
-        const creatorName = (await resolveCreatorNames([current.creator_id])).get(current.creator_id);
-        if (!creatorName) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-        const orderId = current.order_id;
-        const isCancel = buyerRefundMatch[2] === "cancel";
-        const unmetered = current.access_mode === "unmetered" || Number(current.gross_minor ?? 0) === 0;
-        if (unmetered) {
-          return send(response, 409, {
-            error: {
-              code: "unmetered_purchase_not_reversible",
-              message: "A zero-price purchase is permanent and cannot be cancelled or refunded from the buyer portal."
-            }
-          });
-        }
-        if (isCancel && current.gross_minor !== 0) {
-          return send(response, 409, {
-            error: {
-              code: "paid_cancel_not_supported",
-              message: "Paid cancellation is not available yet."
-            }
-          });
-        }
-        const body = await readJson(request);
-        const commandKey = requireCommandKey(request, body);
-        const providerRefund = await confirmedProviderRefund(paymentProvider, current, {
-          actor_id: authentication.profile.id,
-          reason: String(body.reason ?? "buyer_request"),
-          idempotency_key: commandKey
-        });
-        const order = await commerce.refundOrder({
-          order_id: orderId,
-          buyer_id: authentication.profile.id,
-          actor_id: authentication.profile.id,
-          reason: String(body.reason ?? "buyer_request"),
-          ...providerRefund
-        }, { idempotencyKey: commandKey });
-        track(authentication.profile.id, agentRemoved(current.product_id));
-        return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], creatorName), access_status: "revoked" });
-      }
-
-      if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const body = await readJson(request);
-        const commandKey = requireCommandKey(request, body);
-        const creatorId = String(body.creator_id ?? "").trim();
-        const productId = String(body.product_id ?? "").trim();
-        if (!creatorId || !productId) {
-          return send(response, 400, { error: { code: "invalid_checkout", message: "creator_id and product_id are required." } });
-        }
-        // A completed intent must remain replayable even if the Product is
-        // later withdrawn. Resolve the durable intent before
-        // consulting today's catalog; only a fresh intent is quoted anew.
-        const requestKey = `legacy-checkout:${commandKey}`;
-        const existing = portalState.findCheckoutSessionByRequest(authentication.profile.id, requestKey);
-        if (existing) {
-          if (!checkoutSessionMatchesSelector(existing, creatorId, productId)) {
-            throw stateError("idempotency_conflict", "This Idempotency-Key was already used for a different checkout intent.", 409);
-          }
-          const creatorName = (await resolveCreatorNames([existing.product.creator_id])).get(existing.product.creator_id);
-          if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-          const outcome = await confirmCheckoutSession({
-            session: existing,
-            authentication,
-            registryUrl,
-            fetchImpl,
-            commerce,
-            portalState,
-            paymentMode,
-            paymentProvider,
-            commandKey
-          });
-          return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, existing, creatorName));
-        }
-        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const agent = catalog.find((entry) => entry.creator_id === creatorId && entry.product_id === productId);
-        if (!agent) {
-          return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-        }
-        const product = publicCatalogAgent(
-          agent,
-          portalState.getCreatorProduct(agent.creator_id, agent.product_id)
-        );
-        if (product.availability !== "published") {
-          return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
-        }
-        if (product.creator_id === authentication.profile.id) return send(response, 409, SELF_PURCHASE_ERROR);
-        const creatorName = (await resolveCreatorNames([product.creator_id])).get(product.creator_id);
-        if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-        // The key identifies one Buyer intent, not a permanent
-        // Buyer/product pair. Replaying the same intent is idempotent while a
-        // fresh key creates a fresh checkout and a separate purchase record.
-        const session = await portalState.createCheckoutSession({
-          request_key: requestKey,
-          buyer_id: authentication.profile.id,
-          buyer: authentication.profile,
-          product,
-          creator: { id: product.creator_id, name: product.creator_name },
-          release: { release_id: product.release_id ?? product.corpus_digest, corpus_digest: product.corpus_digest },
-          totals: {
-            subtotal_minor: 0,
-            discount_minor: 0,
-            tax_minor: null,
-            total_minor: 0,
-            currency: "USD"
-          },
-          entitlement_scope: {
-            access_mode: "unmetered",
-            version_policy: "pinned"
-          }
-        });
-        if (!checkoutSessionMatchesSelector(session, creatorId, productId)) {
-          throw stateError("idempotency_conflict", "This Idempotency-Key was already used for a different checkout intent.", 409);
-        }
-        const outcome = await confirmCheckoutSession({
-          session,
-          authentication,
-          registryUrl,
-          fetchImpl,
-          commerce,
-          portalState,
-          paymentMode,
-          paymentProvider,
-          commandKey
-        });
-        if (!outcome.replayed) trackCheckout(outcome.body, session);
-        return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
-      }
-
       // Local development object store: the browser PUTs the file here and it streams on to the Registry, never buffered.
       if (request.method === "PUT" && url.pathname.startsWith("/v1/local-objects/")) {
         const upstream = await fetchImpl(new URL(`${url.pathname}${url.search}`, registryUrl), {
@@ -1528,11 +1043,6 @@ export async function createDashboardApp(options = {}) {
         });
         response.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
         return response.end(Buffer.from(await upstream.arrayBuffer()));
-      }
-
-      const accessMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
-      if (request.method === "POST" && accessMatch) {
-        return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
       const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/ingest(?:\/[^/]+)?|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing)?)?$/);
@@ -1642,7 +1152,6 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const profile = authentication.profile;
         const projection = commerce.getCreatorDashboard(profile.id);
-        const creatorOrders = commerce.listCreatorOrders(profile.id).map((order) => orderDetail(order, [], profile.display_name));
         let creatorAgentsPromise;
         const creatorAgents = async () => {
           creatorAgentsPromise ??= registryRequest(registryUrl, "/v1/creator/products", {
@@ -1663,8 +1172,26 @@ export async function createDashboardApp(options = {}) {
         if (request.method === "GET" && url.pathname === "/v1/creator/overview") {
           return send(response, 200, {
             metrics: projection.metrics,
-            products: await creatorProducts(),
-            recent_orders: creatorOrders.slice(0, 5)
+            products: await creatorProducts()
+          });
+        }
+        if (request.method === "GET" && url.pathname === "/v1/creator/users") {
+          const query = new URLSearchParams([...url.searchParams].filter(([name]) => name === "product_id" || name === "limit"));
+          const upstream = await fetchImpl(new URL(`/v1/creator/audience?${query}`, runtimeUrl), { headers: { authorization: `Bearer ${bearerToken(request)}` } });
+          const payload = await upstream.json().catch(() => ({}));
+          if (!upstream.ok) return send(response, upstream.status, payload?.error ? payload : { error: { code: "audience_unavailable", message: "Users could not be loaded." } });
+          const audience = Array.isArray(payload.audience) ? payload.audience : [];
+          const names = await resolveCreatorNames(audience.map((entry) => entry.account_id));
+          return send(response, 200, {
+            users: audience.map((entry) => ({
+              kind: entry.kind,
+              ...(entry.kind === "account" && names.get(entry.account_id) ? { display_name: names.get(entry.account_id) } : {}),
+              product_id: entry.product_id,
+              conversations: entry.conversations,
+              messages: entry.messages,
+              first_at: entry.first_at,
+              last_at: entry.last_at
+            }))
           });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/products") {
@@ -1709,48 +1236,6 @@ export async function createDashboardApp(options = {}) {
           return send(response, 200, storefrontPreview(product, profile, state));
         }
 
-        if (request.method === "GET" && url.pathname === "/v1/creator/orders") {
-          const filtered = filterCreatorOrders(creatorOrders, url);
-          const page = paginate(filtered, url);
-          return send(response, 200, { orders: page.items, next_cursor: page.next_cursor });
-        }
-        if (request.method === "GET" && url.pathname === "/v1/creator/orders/export") {
-          const rows = filterCreatorOrders(creatorOrders, url).map(creatorOrderExportRow);
-          return sendCsv(response, "hatch-creator-orders.csv", rows);
-        }
-        const creatorOrderMatch = url.pathname.match(/^\/v1\/creator\/orders\/([^/]+)$/);
-        if (request.method === "GET" && creatorOrderMatch) {
-          const identifier = decodeURIComponent(creatorOrderMatch[1]);
-          const order = creatorOrders.find((entry) => entry.order_id === identifier || entry.order_number === identifier);
-          if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-          return send(response, 200, { order });
-        }
-        const creatorRefundMatch = url.pathname.match(/^\/v1\/creator\/orders\/([^/]+)\/(?:refund-requests|refund)$/);
-        if (request.method === "POST" && creatorRefundMatch) {
-          const body = await readJson(request);
-          const commandKey = requireCommandKey(request, body);
-          const identifier = decodeURIComponent(creatorRefundMatch[1]);
-          const current = creatorOrders.find((entry) => entry.order_id === identifier || entry.order_number === identifier);
-          if (!current || current.creator_id !== profile.id) {
-            return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-          }
-          const orderId = current.order_id;
-          const reason = String(body.reason ?? "").trim();
-          if (!reason) throw stateError("audit_reason_required", "Explain why this order is being refunded.", 422);
-          const providerRefund = await confirmedProviderRefund(paymentProvider, current, {
-            actor_id: profile.id,
-            reason,
-            idempotency_key: commandKey
-          });
-          const order = await commerce.refundOrder({
-            order_id: orderId,
-            actor_id: profile.id,
-            reason,
-            ...providerRefund
-          }, { idempotencyKey: commandKey });
-          dispatchCommerceOutbox().catch(() => undefined);
-          return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], profile.display_name), access_status: "syncing" });
-        }
         if (request.method === "GET" && url.pathname === "/v1/creator/payouts") {
           const currency = normalizedCurrency(url.searchParams.get("currency") ?? "USD");
           return send(response, 200, creatorPayoutView(commerce, profile.id, currency, paymentProvider, payoutSchedule));
@@ -1848,38 +1333,6 @@ export async function createDashboardApp(options = {}) {
         if (result.removed) track(authentication.profile.id, agentRemoved(productId));
         return send(response, 200, result);
       }
-      if (request.method === "GET" && libraryIdMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
-        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
-        const entitlement = enrichEntitlements(
-          sourceEntitlements,
-          catalog,
-          commerce.listDeliveries({ buyerId: authentication.profile.id }),
-          creatorNames
-        ).find((entry) => entry.entitlement_id === decodeURIComponent(libraryIdMatch[1]));
-        if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
-        return send(response, 200, { entitlement });
-      }
-
-      const buyerEntitlementMatch = url.pathname.match(/^\/v1\/(?:buyer|user)\/entitlements\/([^/]+)$/);
-      if (request.method === "GET" && buyerEntitlementMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
-        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
-        const entitlement = enrichEntitlements(
-          sourceEntitlements,
-          catalog,
-          commerce.listDeliveries({ buyerId: authentication.profile.id }),
-          creatorNames
-        ).find((entry) => entry.entitlement_id === decodeURIComponent(buyerEntitlementMatch[1]));
-        if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
-        return send(response, 200, { entitlement });
-      }
       return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
     } catch (error) {
       const failure = publicRequestError(error);
@@ -1897,8 +1350,10 @@ export async function createDashboardApp(options = {}) {
       if (!allowedPublicOrigins.has(origin)) {
         throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
       }
-      const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+      const authentication = await chatAuthentication(request);
       if (authentication.error) throw Object.assign(new Error("Sign in to continue."), { status: authentication.error.status });
+      // A guest that arrives without a cookie keeps the one minted for it here.
+      if (authentication.setCookie) chatWss.once("headers", headers => headers.push(`Set-Cookie: ${authentication.setCookie}`));
       chatWss.handleUpgrade(request, socket, head, browser => {
         new WebChatRuntimeBridge({ browser, runtimeUrl, token: authentication.token, requestId: requestIdFrom(request.headers["x-request-id"]) }).connect();
       });
@@ -1979,7 +1434,6 @@ export async function createDashboardApp(options = {}) {
     commerce,
     portalState,
     analytics,
-    reconcilePendingCheckouts,
     dispatchCommerceOutbox,
     reconcilePayouts,
     reconcileFinance
@@ -2004,10 +1458,6 @@ export async function startDashboardServer(options = {}) {
     });
   });
   await new Promise((resolve) => server.listen(port, host, resolve));
-  const reconcileTimer = setInterval(() => {
-    app.reconcilePendingCheckouts().catch(() => undefined);
-  }, 5_000);
-  reconcileTimer.unref?.();
   const outboxTimer = setInterval(() => {
     app.dispatchCommerceOutbox().catch(() => undefined);
   }, 2_000);
@@ -2016,7 +1466,7 @@ export async function startDashboardServer(options = {}) {
     app.reconcileFinance().catch(() => undefined);
   }, 30_000);
   financeTimer.unref?.();
-  const stopTimers = () => [reconcileTimer, outboxTimer, financeTimer].forEach(clearInterval);
+  const stopTimers = () => [outboxTimer, financeTimer].forEach(clearInterval);
   let released;
   const release = () => released ??= (async () => {
     stopTimers();
@@ -2038,7 +1488,6 @@ export async function startDashboardServer(options = {}) {
     closeStorage: async () => { server.closeAllConnections(); await serverClosed; await release(); },
     onError: (step, error) => logEvent("error", "shutdown_step_failed", { message: `${step}: ${error instanceof Error ? error.message : String(error)}` })
   });
-  app.reconcilePendingCheckouts().catch(() => undefined);
   app.dispatchCommerceOutbox().catch(() => undefined);
   app.reconcileFinance().catch(() => undefined);
   return { ...app, server, port, host, shutdown };
@@ -2063,144 +1512,6 @@ async function registryRequest(registryUrl, pathname, options = {}) {
   return payload;
 }
 
-async function verifyEntitlementVersionAuthority({
-  entitlement,
-  body,
-  commandKey,
-  ledger,
-  registryUrl,
-  fetchImpl,
-  registryDeploymentServiceToken
-}) {
-  if (!registryDeploymentServiceToken) {
-    throw stateError(
-      "version_authority_unavailable",
-      "Registry version authority is not configured.",
-      503
-    );
-  }
-  if (entitlement.version_policy !== "track_current_compatible") {
-    throw stateError("version_policy_pinned", "Pinned entitlements cannot advance versions.", 409);
-  }
-  const fromDigest = requiredVersionAuthorityString(body.from_digest, "from_digest");
-  const toDigest = requiredVersionAuthorityString(body.to_digest, "to_digest");
-  const fromReleaseId = requiredVersionAuthorityString(body.from_release_id, "from_release_id");
-  const toReleaseId = requiredVersionAuthorityString(body.to_release_id, "to_release_id");
-  const declarationId = requiredVersionAuthorityString(
-    body.compatibility_declaration_id,
-    "compatibility_declaration_id"
-  );
-  if (!CORPUS_DIGEST_PATTERN.test(fromDigest) || !CORPUS_DIGEST_PATTERN.test(toDigest)) {
-    throw stateError("invalid_version_digest", "Version digests must be canonical sha256 digests.", 400);
-  }
-  if (fromDigest === toDigest) {
-    throw stateError("version_unchanged", "A version advance requires a different target digest.", 409);
-  }
-  // Runtime currently identifies immutable releases by their Corpus digests.
-  // Requiring the same values prevents a caller from attaching a false human-
-  // readable release identity to an otherwise valid compatibility event.
-  if (fromReleaseId !== fromDigest || toReleaseId !== toDigest) {
-    throw stateError(
-      "version_release_identity_invalid",
-      "Version release ids must identify the exact immutable Corpus releases.",
-      409
-    );
-  }
-  const expectedDeclarationId = `corpus-compatibility:${entitlement.creator_id}:${entitlement.agent_id}:${toDigest}`;
-  if (declarationId !== expectedDeclarationId) {
-    throw stateError(
-      "compatibility_declaration_invalid",
-      "The compatibility declaration does not identify the authoritative target release.",
-      409
-    );
-  }
-  if (body.reason !== undefined && body.reason !== "compatible_release_published") {
-    throw stateError(
-      "version_reason_invalid",
-      "Only an authoritative compatible-release publication may advance an entitlement version.",
-      409
-    );
-  }
-
-  // Commerce checks the effective digest again while appending. The one
-  // exception here is a byte-for-byte replay of an event already committed
-  // under this key: Commerce intentionally returns its later projection for
-  // that replay, which Runtime uses when another compatible hop won the race.
-  const replay = ledger.findByIdempotencyKey(`${commandKey}:version-advance`);
-  const sameReplay = replay?.event_type === "entitlement.version_advanced"
-    && replay.entitlement_id === entitlement.entitlement_id
-    && replay.from_digest === fromDigest
-    && replay.to_digest === toDigest
-    && replay.from_release_id === fromReleaseId
-    && replay.to_release_id === toReleaseId
-    && replay.compatibility_declaration_id === declarationId
-    && replay.reason === "compatible_release_published";
-  if (fromDigest !== entitlement.effective_corpus_digest && !sameReplay) {
-    throw stateError(
-      "version_chain_broken",
-      `from_digest must equal current effective digest ${entitlement.effective_corpus_digest}.`,
-      409
-    );
-  }
-
-  let release;
-  try {
-    release = await registryRequest(
-      registryUrl,
-      `/v1/internal/deployments/agent-corpora/${encodeURIComponent(entitlement.creator_id)}/${encodeURIComponent(entitlement.agent_id)}/releases/${encodeURIComponent(toDigest)}`,
-      {
-        method: "GET",
-        fetchImpl,
-        headers: { authorization: `Bearer ${registryDeploymentServiceToken}` }
-      }
-    );
-  } catch (error) {
-    if (error.status === 404 || error.status === 400) {
-      throw stateError(
-        "version_release_unavailable",
-        "The target Agent Corpus release is not available from Registry authority.",
-        409
-      );
-    }
-    throw stateError(
-      "version_authority_unavailable",
-      "Registry version authority could not verify the target release.",
-      503
-    );
-  }
-  if (release.creator_id !== entitlement.creator_id
-    || release.agent_id !== entitlement.agent_id
-    || release.product_id !== entitlement.product_id
-    || release.corpus_digest !== toDigest
-    || release.status !== "published") {
-    throw stateError(
-      "version_release_binding_mismatch",
-      "The target release is not bound to this entitlement's Expert, Agent, and product.",
-      409
-    );
-  }
-  if (release.backward_compatible_with !== fromDigest) {
-    throw stateError(
-      "version_lineage_unverified",
-      "Registry does not declare the target release directly compatible with the effective release.",
-      409
-    );
-  }
-  return {
-    from_digest: fromDigest,
-    to_digest: toDigest,
-    from_release_id: fromReleaseId,
-    to_release_id: toReleaseId,
-    compatibility_declaration_id: declarationId
-  };
-}
-
-function requiredVersionAuthorityString(value, field) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw stateError("invalid_version_authority_request", `${field} is required.`, 400);
-  }
-  return value.trim();
-}
 
 function oauthClientAllowed(clientId) {
   const configured = String(process.env.HATCH_OAUTH_CLIENT_IDS ?? "")
@@ -2509,124 +1820,28 @@ function requireOAuthScope(request, scope, path) {
   }
 }
 
-function mergeRegistryAgents(access, catalog) {
-  if (!Array.isArray(access) || !Array.isArray(catalog)) return [];
-  const catalogByAgent = new Map(catalog.map((entry) => [
-    `${entry?.creator_id}:${entry?.product_id ?? entry?.agent_id}`,
-    entry
-  ]));
-  return access.flatMap((grant) => {
-    const entry = catalogByAgent.get(`${grant?.creator_id}:${grant?.product_id ?? grant?.agent_id}`);
-    if (!entry) return [];
-    const {
-      agent_id: _agentId,
-      creator_slug: _creatorSlug,
-      product_slug: _productSlug,
-      creator_slug_aliases: _creatorAliases,
-      product_slug_aliases: _productAliases,
-      ...publicGrant
-    } = grant;
-    return [{
-      ...publicGrant,
-      product_id: grant.product_id ?? grant.agent_id,
-      creator: { id: entry.creator_id, name: entry.creator_name },
-      product: {
-        id: entry.product_id,
-        name: entry.product_name,
-        description: entry.product_description || "Work with this Expert Agent in your own files and context.",
-        promise: entry.product_promise || entry.product_description || ""
-      },
-      presentation: entry.presentation ?? {}
-    }];
-  });
-}
 
-async function confirmCheckoutSession({ session, authentication, registryUrl, fetchImpl, commerce, portalState }) {
-  if (session.status === "completed" && session.order_id) {
-    const order = commerce.getOrder(session.order_id);
-    return { replayed: true, body: checkoutOutcomeBody(session, order, order?.entitlement) };
-  }
-  if (session.status === "fulfillment_pending" && session.order_id) {
-    const order = commerce.getOrder(session.order_id);
-    const entitlement = order?.entitlement ?? (session.entitlement_id ? commerce.getEntitlement(session.entitlement_id) : null);
-    if (!order || !entitlement) {
-      throw stateError("checkout_recovery_failed", "The confirmed order could not be recovered.", 503);
-    }
-    const completed = await completeCheckoutAccess({ session, order, entitlement, portalState });
-    return { replayed: true, body: checkoutOutcomeBody(completed, order, entitlement) };
-  }
-  if (session.status === "expired" || session.status === "release_changed" || Date.parse(session.expires_at) <= Date.now()) {
-    throw stateError("checkout_expired", "This access request expired. Return to the Product and try again.", 409);
-  }
-  if (session.status !== "open") {
-    throw stateError("checkout_not_confirmable", "Checkout session cannot be confirmed in its current state.", 409);
-  }
-  const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-  const currentAgent = findCatalogAgent(catalog, session.product.creator_id, session.product.product_id);
-  const currentState = currentAgent
-    ? portalState.getCreatorProduct(currentAgent.creator_id, currentAgent.product_id)
-    : undefined;
-  const currentProduct = currentAgent
-    ? publicCatalogAgent(currentAgent, currentState)
-    : null;
-  if (!checkoutReleaseIsCurrent(session, currentProduct)) {
-    const changed = await portalState.markCheckoutReleaseChanged(session.checkout_session_id, currentProduct);
-    throw stateError(
-      "release_changed",
-      "The Product release changed. Review the current Product before confirming access.",
-      409,
-      changed.release_change
-    );
-  }
-  return finalizeCheckoutOrder({ session, authentication, commerce, portalState });
-}
-
-async function finalizeCheckoutOrder({ session, authentication, commerce, portalState, transaction: committedTransaction }) {
-  const transaction = committedTransaction ?? await commerce.confirmCheckout(
-    checkoutCommerceInput(session, authentication)
-  );
-  const { order, entitlement } = transaction;
-  const pending = await portalState.markCheckoutFulfillmentPending(session.checkout_session_id, {
-    order_id: order.order_id,
-    entitlement_id: entitlement.entitlement_id,
-    payment_status: "not_required"
-  });
-  const completed = await completeCheckoutAccess({ session: pending, order, entitlement, portalState });
+// The free, unmetered Commerce order that a library save grants.
+function libraryGrantInput(product, accountId) {
+  const release = { release_id: product.release_id ?? product.corpus_digest, corpus_digest: product.corpus_digest };
   return {
-    replayed: false,
-    body: checkoutOutcomeBody(completed, order, entitlement, {
-      payment_id: null,
-      status: "not_required",
-      amount_minor: 0,
-      currency: "USD",
-      mode: "not_required",
-      provider_payment_id: null
-    })
-  };
-}
-
-function checkoutCommerceInput(session, authentication) {
-  const product = session.product;
-  return {
-    buyer_id: authentication.profile.id,
-    buyer_display_name: authentication.profile.display_name,
+    buyer_id: accountId,
     creator_id: product.creator_id,
     creator_display_name: product.creator_name,
-    // `agent_id` is an internal Commerce compatibility alias only. It never
-    // crosses the public product response boundary.
+    // `agent_id` is an internal Commerce alias only; it never crosses the public product response boundary.
     agent_id: product.agent_id ?? product.product_id,
     product_id: product.product_id,
     product_name: product.product_name,
-    creator_snapshot: session.creator,
+    creator_snapshot: { id: product.creator_id, name: product.creator_name },
     product_snapshot: {
       product_id: product.product_id,
       product_name: product.product_name,
       promise: product.promise,
       description: product.description
     },
-    release_snapshot: session.release,
-    corpus_digest: session.release?.corpus_digest ?? product.corpus_digest,
-    release_id: session.release?.release_id ?? product.corpus_digest,
+    release_snapshot: release,
+    corpus_digest: release.corpus_digest,
+    release_id: release.release_id,
     subtotal_minor: 0,
     discount_minor: 0,
     tax_minor: null,
@@ -2635,25 +1850,8 @@ function checkoutCommerceInput(session, authentication) {
     gross_minor: 0,
     currency: "USD",
     payment_status: "not_required",
-    version_policy: "pinned",
-    idempotency_key: `checkout:${session.checkout_session_id}:confirm`
+    version_policy: "pinned"
   };
-}
-
-function pendingPaymentOutcome(session, payment) {
-  return {
-    checkout_session: session,
-    checkout_session_id: session.checkout_session_id,
-    status: payment.status,
-    order_id: null,
-    entitlement_id: null,
-    redirect_url: session.payment_redirect_url ?? payment.next_action?.redirect_url ?? null,
-    payment
-  };
-}
-
-function stablePaymentId(checkoutSessionId) {
-  return stableAuthorityUuid(`payment:${checkoutSessionId}`);
 }
 
 function creatorPayoutView(commerce, creatorId, currency, provider, payoutSchedule) {
@@ -2714,7 +1912,7 @@ async function submitReservedPayout(payout, provider, commerce, idempotencyKey) 
       status: result.status === "paid" ? "paid" : result.status === "failed" ? "failed" : "in_transit",
       provider_occurred_at: result.provider_occurred_at,
       failure_code: result.failure_code,
-      failure_message: providerFailureMessage(result.failure_code, result.status, "payout"),
+      failure_message: providerFailureMessage(result.failure_code, result.status),
       actor_id: submitted.provider,
       service_name: "payout-provider"
     });
@@ -2726,7 +1924,7 @@ async function submitReservedPayout(payout, provider, commerce, idempotencyKey) 
       provider_event_id: `provider-failure:${providerPayoutId}`,
       status: "failed",
       failure_code: error.code ?? "provider_temporarily_unavailable",
-      failure_message: providerFailureMessage(error.code, "failed", "payout"),
+      failure_message: providerFailureMessage(error.code, "failed"),
       actor_id: submitted.provider,
       service_name: "payout-provider"
     });
@@ -2734,14 +1932,9 @@ async function submitReservedPayout(payout, provider, commerce, idempotencyKey) 
   }
 }
 
-function providerFailureMessage(code, status, kind) {
+function providerFailureMessage(code, status) {
   if (!new Set(["failed", "cancelled"]).has(String(status ?? "").toLowerCase())) return undefined;
   const category = String(code ?? "").toLowerCase();
-  if (kind === "payment") {
-    if (category.includes("declin")) return "The payment was declined. Use another payment method.";
-    if (category.includes("cancel")) return "The payment was cancelled.";
-    return "The payment provider could not complete this payment.";
-  }
   if (category.includes("account") || category.includes("kyc")) {
     return "The payout account needs attention before another transfer can be submitted.";
   }
@@ -2754,34 +1947,6 @@ function normalizedCurrency(value) {
   return currency;
 }
 
-function entitlementAuthorization(entitlement) {
-  const unmetered = entitlement.access_mode === "unmetered" || Number(entitlement.gross_minor ?? 0) === 0;
-  const authorized = entitlement.status === "active" && (unmetered || Number(entitlement.remaining_units ?? 0) > 0);
-  return {
-    authorized,
-    reason: authorized
-      ? "authorized"
-      : entitlement.status === "active" && !unmetered
-        ? "units_exhausted"
-        : `entitlement_${entitlement.status}`,
-    entitlement_id: entitlement.entitlement_id,
-    order_id: entitlement.order_id,
-    order_line_id: entitlement.order_line_id,
-    buyer_id: entitlement.buyer_id,
-    creator_id: entitlement.creator_id,
-    agent_id: entitlement.agent_id,
-    product_id: entitlement.product_id,
-    purchased_release_id: entitlement.purchased_release_id ?? entitlement.release_id,
-    purchased_corpus_digest: entitlement.purchased_corpus_digest ?? entitlement.corpus_digest,
-    effective_corpus_digest: entitlement.effective_corpus_digest ?? entitlement.corpus_digest,
-    version_policy: entitlement.version_policy,
-    valid_from: entitlement.valid_from,
-    valid_until: entitlement.valid_until ?? null,
-    ...(unmetered ? {} : { remaining_units: entitlement.remaining_units }),
-    access_mode: unmetered ? "unmetered" : "metered",
-    status: entitlement.status
-  };
-}
 
 function runtimeEntitlementBinding(entitlement, portalState) {
   const productId = entitlement.product_id ?? entitlement.agent_id;
@@ -2822,76 +1987,6 @@ function runtimeEntitlementBinding(entitlement, portalState) {
     version_policy: entitlement.version_policy ?? "pinned",
     ...(briefSpec ? { brief_spec: structuredClone(briefSpec) } : {}),
     version_history: entitlement.version_history ?? []
-  };
-}
-
-async function confirmedProviderRefund(paymentProvider, order, input) {
-  if (Number(order.gross_minor) === 0) return {};
-  const refundId = `refund_${createHash("sha256").update(`provider-refund\0${order.order_id}\0${input.idempotency_key}`).digest("hex").slice(0, 24)}`;
-  const result = await paymentProvider.refundPayment({
-    refund_id: refundId,
-    order_id: order.order_id,
-    payment_id: order.payment_id,
-    provider_payment_id: order.payment?.provider_payment_id,
-    amount_minor: order.gross_minor,
-    currency: order.currency,
-    reason: input.reason,
-    actor_id: input.actor_id,
-    idempotency_key: input.idempotency_key
-  });
-  if (result.status !== "succeeded" || !result.provider_refund_id) {
-    throw stateError("provider_refund_not_confirmed", "The payment provider has not confirmed this refund.", 409);
-  }
-  return {
-    refund_id: refundId,
-    provider_refund_id: result.provider_refund_id,
-    provider_refund_status: "succeeded"
-  };
-}
-
-async function completeCheckoutAccess({ session, order, entitlement, portalState }) {
-  return portalState.completeCheckout(session.checkout_session_id, {
-    order_id: order.order_id,
-    entitlement_id: entitlement.entitlement_id,
-    payment_status: order.payment_status
-  });
-}
-
-function checkoutOutcomeBody(session, order, entitlement, payment) {
-  const entitlementId = entitlement?.entitlement_id ?? session.entitlement_id ?? order?.entitlement_id ?? null;
-  return {
-    order_id: order?.order_id ?? session.order_id,
-    status: order?.status ?? (session.status === "completed" ? "fulfilled" : session.status),
-    entitlement_id: entitlementId,
-    redirect_url: order?.order_id ? `/explore/orders/${encodeURIComponent(orderNumberFor(order))}/success` : null,
-    order: order ?? null,
-    payment: payment ?? {
-      payment_id: null,
-      status: session.payment_status ?? order?.payment_status ?? "not_required",
-      amount_minor: order?.gross_minor ?? session.totals?.total_minor ?? 0,
-      currency: order?.currency ?? session.totals?.currency ?? "USD"
-    },
-    entitlement: entitlement ?? (entitlementId ? { entitlement_id: entitlementId, status: "active" } : null)
-  };
-}
-
-function checkoutSessionPublic(session, creatorDisplayName) {
-  if (!creatorDisplayName) throw new Error(`Current creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
-  return {
-    ...session,
-    ...currentCreatorNameProjection(session, creatorDisplayName),
-    product: currentCreatorNameProjection(session.product, creatorDisplayName)
-  };
-}
-
-function checkoutOutcomePublic(outcome, session, creatorDisplayName) {
-  if (!creatorDisplayName) throw new Error(`Current creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
-  return {
-    ...outcome,
-    ...(outcome.order ? { order: currentCreatorNameProjection(outcome.order, creatorDisplayName) } : {}),
-    ...(outcome.entitlement && typeof outcome.entitlement === "object"
-      ? { entitlement: currentCreatorNameProjection(outcome.entitlement, creatorDisplayName) }
-      : {})
   };
 }
 
@@ -2959,16 +2054,6 @@ function publicCatalogAgent(agent, creatorState) {
   };
 }
 
-function checkoutReleaseIsCurrent(session, product) {
-  if (!product || product.availability !== "published") return false;
-  return String(product.release_id ?? product.corpus_digest)
-    === String(session.release?.release_id ?? session.release?.corpus_digest);
-}
-
-function checkoutSessionMatchesSelector(session, creatorId, productId) {
-  return String(session?.product?.creator_id) === String(creatorId)
-    && String(session?.product?.product_id) === String(productId);
-}
 
 function withBuyerAccess(product, entitlements) {
   const entitlement = entitlements.find((entry) => (
@@ -2987,13 +2072,6 @@ function findCatalogAgent(catalog, creatorSelector, productSelector) {
   ));
 }
 
-function selectorMatches(value, candidates) {
-  return candidates.some((candidate) => String(candidate) === String(value));
-}
-
-function selectorValues(entry, kind) {
-  return [kind === "creator" ? entry?.creator_id : entry?.product_id].filter(Boolean).map(String);
-}
 
 function publicProductPath(agent) {
   return `/products/${encodeURIComponent(agent?.product_id)}`;
@@ -3115,111 +2193,10 @@ function compareEntitlementsNewestFirst(left, right) {
     || String(right.entitlement_id ?? "").localeCompare(String(left.entitlement_id ?? ""));
 }
 
-function orderDetail(order, events = [], creatorDisplayName) {
-  if (typeof creatorDisplayName !== "string" || !creatorDisplayName) {
-    throw new Error(`Current creator account name is required for order ${String(order.order_id ?? order.id ?? "unknown")}.`);
-  }
-  const paymentStatus = order.payment_status ?? (order.gross_minor === 0 ? "not_required" : "paid");
-  const unmetered = order.access_mode === "unmetered" || Number(order.gross_minor ?? 0) === 0;
-  const storedEntitlement = order.entitlement ?? (order.entitlement_id ? { entitlement_id: order.entitlement_id, status: order.status === "refunded" ? "revoked" : "active" } : null);
-  const entitlement = storedEntitlement ? currentCreatorNameProjection(storedEntitlement, creatorDisplayName) : null;
-  const entitlementId = entitlement?.entitlement_id ?? null;
-  const deliveries = unmetered
-    ? []
-    : Array.isArray(order.deliveries)
-      ? order.deliveries
-      : events.filter((event) => event.order_id === order.order_id && event.event_type === "delivery.completed");
-  const refunds = Array.isArray(order.refunds)
-    ? order.refunds
-    : events.filter((event) => event.order_id === order.order_id && event.event_type === "order.refunded");
-  const refunded = order.status === "refunded" || refunds.length > 0;
-  const timeline = Array.isArray(order.timeline)
-    ? order.timeline
-    : events
-      .filter((event) => event.order_id === order.order_id)
-      .filter((event) => !unmetered || !new Set(["task.started", "artifact.created", "delivery.completed", "entitlement.units_reserved", "entitlement.units_consumed", "entitlement.units_released"]).has(event.event_type))
-      .map((event) => ({ event_id: event.event_id, type: event.event_type, occurred_at: event.occurred_at }))
-      .sort((left, right) => left.occurred_at.localeCompare(right.occurred_at));
-  const revenueRecognized = Array.isArray(order.revenue)
-    ? order.revenue.some((entry) => entry.status === "recognized")
-    : events.some((event) => event.order_id === order.order_id && event.event_type === "revenue.recognized");
-  const {
-    agent_id: _agentId,
-    creator_slug: _creatorSlug,
-    product_slug: _productSlug,
-    creator_slug_aliases: _creatorAliases,
-    product_slug_aliases: _productAliases,
-    ...publicOrder
-  } = order;
-  return {
-    ...currentCreatorNameProjection(publicOrder, creatorDisplayName),
-    product_id: order.product_id ?? order.agent_id,
-    access_mode: unmetered ? "unmetered" : "metered",
-    order_number: order.order_number ?? stableOrderNumber(order),
-    creator: order.creator_snapshot
-      ? currentCreatorNameProjection({ creator_snapshot: order.creator_snapshot }, creatorDisplayName).creator_snapshot
-      : { id: order.creator_id, name: creatorDisplayName },
-    status: refunded
-      ? order.status
-      : deliveries.length
-        ? "delivered"
-        : order.status === "paid" && entitlementId
-          ? "fulfilled"
-          : order.status,
-    entitlement_id: entitlementId,
-    entitlement,
-    created_at: order.created_at ?? order.occurred_at,
-    placed_at: order.placed_at ?? order.occurred_at,
-    total_minor: order.total_minor ?? order.gross_minor,
-    payment_status: paymentStatus,
-    entitlement_status: refunded ? "revoked" : entitlement?.status ?? (entitlementId ? "active" : "pending"),
-    revenue_status: revenueRecognized ? "recognized" : order.gross_minor === 0 ? "not_applicable" : "pending",
-    refund_status: refunded ? "refunded" : "none",
-    payment: { status: paymentStatus, payment_id: order.payment_id ?? null },
-    access: { status: refunded ? "revoked" : entitlement?.status ?? (entitlementId ? "active" : "pending"), entitlement_id: entitlementId },
-    ...(unmetered ? {} : {
-      delivery_status: deliveries.length ? "completed" : "not_started",
-      deliveries
-    }),
-    refund: refunds.at(-1) ?? null,
-    actions: {
-      can_request_refund: order.gross_minor > 0 && !refunded,
-      can_creator_refund: !refunded,
-      can_cancel_access: false
-    },
-    timeline
-  };
-}
-
-function stableOrderNumber(order) {
-  const timestamp = Date.parse(order?.created_at ?? order?.occurred_at ?? "") || Date.now();
-  const year = new Date(timestamp).getUTCFullYear();
-  const digest = createHash("sha256").update(String(order?.order_id ?? order?.id ?? "order")).digest("hex").slice(0, 8).toUpperCase();
-  return `HCH-${year}-${digest}`;
-}
-
-function orderNumberFor(order) {
-  return order?.order_number ?? stableOrderNumber(order);
-}
-
-function resolveOrderIdentifier(commerce, identifier, buyerId) {
-  const value = String(identifier ?? "");
-  const direct = commerce.getOrder(value);
-  if (direct && (!buyerId || direct.buyer_id === buyerId)) return direct;
-  return commerce.listBuyerOrders(buyerId).find((order) => stableOrderNumber(order) === value || order.order_number === value);
-}
-
 function randomId() {
   return randomUUID().replaceAll("-", "");
 }
 
-function stableAuthorityUuid(seed) {
-  const digest = createHash("sha256").update(String(seed)).digest("hex").slice(0, 32).split("");
-  digest[12] = "4";
-  digest[16] = ["8", "9", "a", "b"][parseInt(digest[16], 16) % 4];
-  const hex = digest.join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 function catalogAgentToProduct(agent) {
   return {
@@ -3256,20 +2233,6 @@ function requireCommandKey(request, body) {
   return value;
 }
 
-function assertNoPrivateCommerceFields(value) {
-  const forbidden = new Set(["artifactpath", "workspacepath", "content", "conversationid", "toolarguments", "arguments"]);
-  const visit = (input) => {
-    if (!input || typeof input !== "object") return;
-    for (const [key, nested] of Object.entries(input)) {
-      const normalizedKey = key.toLowerCase().replaceAll(/[^a-z0-9]/g, "");
-      if (forbidden.has(normalizedKey)) {
-        throw stateError("private_commerce_field", `Commerce payload must not contain ${key}.`, 400);
-      }
-      visit(nested);
-    }
-  };
-  visit(value);
-}
 
 function cookieCsrfError(request, sessionToken = requestCookies(request).hatch_web_session) {
   if (["GET", "HEAD", "OPTIONS"].includes(String(request.method ?? "GET").toUpperCase())) return undefined;
@@ -3371,6 +2334,7 @@ function crossSiteMutationError(request) {
 }
 
 const ARTIFACT_DEFINITION_PATH = /^\/v1\/web-chat\/products\/[^/]+\/artifact(?:\/conversations)?$/;
+const PRODUCT_AGENT_PATH = /^\/v1\/web-chat\/products\/[^/]+\/agent$/;
 const CONVERSATION_ASSET_UPLOAD_PATH = /^\/v1\/web-chat\/conversations\/[^/]+\/assets$/;
 const WEB_CHAT_IMAGE_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 const WEB_CHAT_FILE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
@@ -3481,53 +2445,6 @@ function paginate(items, url, defaultLimit = 50) {
   };
 }
 
-function validFilterDate(value, field) {
-  if (!value) return undefined;
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) throw stateError("invalid_filter", `${field} must be an ISO date or timestamp.`, 400);
-  return date;
-}
-
-function filterCreatorOrders(orders, url) {
-  const orderStatus = url.searchParams.get("order");
-  const deliveryStatus = url.searchParams.get("delivery");
-  const productId = url.searchParams.get("product");
-  const paymentStatus = url.searchParams.get("payment");
-  const refundStatus = url.searchParams.get("refund");
-  const from = validFilterDate(url.searchParams.get("from"), "from");
-  const to = validFilterDate(url.searchParams.get("to"), "to");
-  return orders.filter((order) => (
-    (!orderStatus || order.status === orderStatus || (orderStatus === "fulfilled" && order.status === "delivered"))
-    && (!deliveryStatus || order.delivery_status === deliveryStatus)
-    && (!productId || order.product_id === productId)
-    && (!paymentStatus || order.payment_status === paymentStatus)
-    && (!refundStatus || order.refund_status === refundStatus)
-    && (!from || Date.parse(order.occurred_at ?? order.created_at) >= from.getTime())
-    && (!to || Date.parse(order.occurred_at ?? order.created_at) <= to.getTime())
-  ));
-}
-
-function creatorOrderExportRow(order) {
-  const recognized = (Array.isArray(order.revenue) ? order.revenue : []).filter((entry) => entry.status === "recognized");
-  return {
-    order_reference: order.order_id,
-    buyer_display_name: order.buyer_display_name ?? "Hatch buyer",
-    product_id: order.product_id,
-    product_name: order.product_name ?? order.product_snapshot?.name ?? "",
-    order_status: order.status,
-    payment_status: order.payment_status,
-    entitlement_status: order.entitlement_status,
-    delivery_status: order.delivery_status,
-    delivery_count: order.deliveries?.length ?? 0,
-    artifact_types: [...new Set((order.deliveries ?? []).map((delivery) => delivery.artifact_type).filter(Boolean))].join("|"),
-    gross_minor: order.gross_minor,
-    currency: order.currency,
-    recognized_gross_minor: recognized.reduce((sum, entry) => sum + Number(entry.gross_minor ?? 0), 0),
-    creator_share_minor: recognized.reduce((sum, entry) => sum + Number(entry.creator_share_minor ?? 0), 0),
-    refund_status: order.refund_status,
-    created_at: order.created_at ?? order.occurred_at
-  };
-}
 
 function decodeCursor(value) {
   if (!value) return 0;
@@ -3569,162 +2486,10 @@ function sendHtml(response, status, body, headers = {}) {
   response.end(body);
 }
 
-function sendCsv(response, filename, rows) {
-  const columns = Object.keys(rows[0] ?? creatorOrderExportRow({ deliveries: [], revenue: [] }));
-  const csv = [
-    columns.join(","),
-    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(","))
-  ].join("\n");
-  response.statusCode = 200;
-  response.setHeader("access-control-allow-origin", "http://127.0.0.1:8510");
-  response.setHeader("access-control-allow-credentials", "true");
-  response.setHeader("access-control-expose-headers", "x-request-id, content-disposition");
-  response.setHeader("content-type", "text/csv; charset=utf-8");
-  response.setHeader("content-disposition", `attachment; filename="${filename}"`);
-  response.end(`${csv}\n`);
-}
 
-function csvCell(value) {
-  const text = value === null || value === undefined ? "" : String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-async function commerceOperationsSnapshot({ ledger, commerce, portalState, now = new Date() }) {
-  await ledger.refresh?.();
-  await portalState.refresh?.();
-  const nowMs = now.getTime();
-  const events = ledger.listEvents();
-  const pendingCheckoutStatuses = new Set(["payment_pending", "requires_action", "fulfillment_pending"]);
-  const checkouts = portalState.listCheckoutSessions()
-    .filter((session) => pendingCheckoutStatuses.has(session.status))
-    .map((session) => ({
-      checkout_session_id: session.checkout_session_id,
-      status: session.status,
-      age_ms: ageMs(session.updated_at ?? session.created_at, nowMs),
-      retry_count: Number(session.reconcile_attempts ?? 0),
-      last_error_category: session.reconcile_last_error?.category ?? null
-    }));
-  const ordersByPayment = new Set(events
-    .filter((event) => event.event_type === "order.placed" && event.payment_id)
-    .map((event) => event.payment_id));
-  const capturedWithoutOrder = commerce.listPayments()
-    .filter((payment) => payment.status === "succeeded" && !ordersByPayment.has(payment.payment_id))
-    .map((payment) => ({
-      payment_id: payment.payment_id,
-      checkout_session_id: payment.checkout_session_id ?? null,
-      age_ms: ageMs(payment.updated_at ?? payment.created_at, nowMs),
-      status: payment.status
-    }));
-  const entitlements = [...new Set(events
-    .filter((event) => event.event_type === "entitlement.granted")
-    .map((event) => event.entitlement_id))]
-    .map((entitlementId) => commerce.getEntitlement(entitlementId))
-    .filter(Boolean);
-  const staleReservations = entitlements.flatMap((entitlement) => entitlement.reservations
-    .filter((reservation) => reservation.status === "expired")
-    .map((reservation) => ({
-      reservation_id: reservation.reservation_id,
-      entitlement_id: entitlement.entitlement_id,
-      age_ms: ageMs(reservation.expires_at, nowMs),
-      status: reservation.status
-    })));
-  const pendingRevenue = commerce.listDeliveries()
-    .filter((delivery) => delivery.revenue_status === "pending")
-    .map((delivery) => ({
-      delivery_id: delivery.delivery_id,
-      order_id: delivery.order_id,
-      age_ms: ageMs(delivery.completed_at, nowMs),
-      status: delivery.revenue_status
-    }));
-  const payoutIds = [...new Set(events
-    .filter((event) => event.event_type === "payout.reserved")
-    .map((event) => event.payout_id))];
-  const payoutAttention = payoutIds
-    .map((payoutId) => commerce.getPayout(payoutId))
-    .filter((payout) => payout && ["failed", "submitted", "in_transit"].includes(payout.status))
-    .map((payout) => ({
-      payout_id: payout.payout_id,
-      status: payout.status,
-      attempt: payout.attempt,
-      age_ms: ageMs(payout.submitted_at ?? payout.updated_at ?? payout.created_at, nowMs),
-      retry_count: Number(payout.reconciliation?.retry_count ?? 0),
-      last_error_category: payout.reconciliation?.last_error?.code ?? payout.failure?.code ?? null
-    }));
-  let outbox = [];
-  if (typeof ledger.listPendingOutbox === "function") {
-    outbox = (await ledger.listPendingOutbox({ limit: 1_000 })).map((item) => ({
-      outbox_id: item.outbox_id,
-      event_id: item.event_id,
-      topic: item.topic,
-      age_ms: ageMs(item.created_at, nowMs),
-      retry_count: Number(item.attempts ?? 0),
-      last_error_category: item.last_error ? "dispatch_failed" : null
-    }));
-  }
-  const refundProjectionLag = outbox
-    .filter((item) => item.topic === "entitlement.revoked")
-    .map((item) => ({ ...item, status: "refund_access_sync_pending" }));
-  const slas_ms = {
-    fulfillment: 5 * 60_000,
-    revenue: 5 * 60_000,
-    outbox: 5 * 60_000,
-    payout: 3 * 24 * 60 * 60_000
-  };
-  const alerts = [
-    ...checkouts.filter((item) => item.age_ms >= slas_ms.fulfillment).map((item) => operationalAlert("fulfillment_pending", item.checkout_session_id, item)),
-    ...capturedWithoutOrder.filter((item) => item.age_ms >= slas_ms.fulfillment).map((item) => operationalAlert("captured_without_order", item.payment_id, item)),
-    ...staleReservations.map((item) => operationalAlert("stale_reservation", item.reservation_id, item)),
-    ...pendingRevenue.filter((item) => item.age_ms >= slas_ms.revenue).map((item) => operationalAlert("revenue_pending", item.delivery_id, item)),
-    ...refundProjectionLag.filter((item) => item.age_ms >= slas_ms.outbox || item.retry_count >= 3).map((item) => operationalAlert("refund_projection_lag", item.outbox_id, item)),
-    ...outbox.filter((item) => item.topic !== "entitlement.revoked" && (item.age_ms >= slas_ms.outbox || item.retry_count >= 3)).map((item) => operationalAlert("outbox_pending", item.outbox_id, item)),
-    ...payoutAttention.filter((item) => item.status === "failed" || item.age_ms >= slas_ms.payout || item.retry_count >= 3).map((item) => operationalAlert("payout_attention", item.payout_id, item))
-  ];
-  return {
-    generated_at: now.toISOString(),
-    slas_ms,
-    counts: {
-      fulfillment_pending: checkouts.length,
-      captured_without_order: capturedWithoutOrder.length,
-      stale_reservations: staleReservations.length,
-      revenue_pending: pendingRevenue.length,
-      refund_projection_lag: refundProjectionLag.length,
-      outbox_pending: outbox.length,
-      payout_attention: payoutAttention.length,
-      alerts: alerts.length
-    },
-    pending: {
-      checkouts,
-      captured_without_order: capturedWithoutOrder,
-      stale_reservations: staleReservations,
-      revenue: pendingRevenue,
-      refund_projection_lag: refundProjectionLag,
-      outbox,
-      payouts: payoutAttention
-    },
-    alerts
-  };
-}
-
-function operationalAlert(category, resourceId, item) {
-  return {
-    severity: item.status === "failed" || Number(item.retry_count ?? 0) >= 3 ? "critical" : "warning",
-    category,
-    resource_id: String(resourceId),
-    age_ms: item.age_ms,
-    retry_count: Number(item.retry_count ?? item.attempt ?? 0),
-    last_error_category: item.last_error_category ?? null
-  };
-}
-
-function ageMs(value, nowMs) {
-  const timestamp = Date.parse(String(value ?? ""));
-  return Number.isFinite(timestamp) ? Math.max(0, nowMs - timestamp) : 0;
-}
-
-// Retired buyer routes. /home and /library go to Studio; buyer orders live under /explore.
+// Retired buyer routes. /home goes to Studio; buyer orders live under /explore.
 export function retiredPortalRedirect(pathname) {
-  if (pathname === "/home" || pathname === "/library" || pathname.startsWith("/library/")) return "/studio";
-  if (pathname === "/orders" || pathname.startsWith("/orders/")) return `/explore${pathname}`;
+  if (pathname === "/home") return "/studio";
   return null;
 }
 
@@ -3741,10 +2506,9 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/products/")
     || pathname.startsWith("/chat/product/")
     || pathname.startsWith("/artifact/")
-    || pathname === "/checkout"
-    || pathname.startsWith("/checkout/")
     || pathname === "/studio"
     || pathname.startsWith("/studio/")
+    || pathname === "/library"
     || pathname === "/account"
     || pathname.startsWith("/account/")
     || pathname === "/sign-in"

@@ -58,13 +58,13 @@ test("Creator shell is a sidebar workspace with every Studio section", async () 
   const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
   assert.match(source, /<WebBrand className="cpv2-brand" label=\{t\("studio"\)\}/);
   assert.doesNotMatch(source, /HatchBrand/);
-  for (const key of ["sxNavOverview", "sxNavAgents", "sxNavOrders"]) assert.match(source, new RegExp(`label: "${key}"`));
+  for (const key of ["sxNavOverview", "sxNavAgents", "sxNavUsers"]) assert.match(source, new RegExp(`label: "${key}"`));
   // Earnings stays routable but is hidden from navigation while Agents are free.
   assert.doesNotMatch(source, /label: "sxNavEarnings"/);
   // Studio Settings (messaging apps, API keys) is a nav item; the account page stays in the account menu.
   assert.match(source, /label: "sxNavSettings"/);
   assert.match(source, /go\("\/account"\)/);
-  for (const page of ["StudioOrdersPage", "StudioOrderDetailPage", "StudioEarningsPage"]) assert.match(source, new RegExp(`opsPage\\("${page}"\\)`));
+  for (const page of ["StudioUsersPage", "StudioEarningsPage"]) assert.match(source, new RegExp(`opsPage\\("${page}"\\)`));
   assert.match(source, /import\("\.\/studioOps\.jsx"\)/);
   assert.doesNotMatch(source, /function OrdersPage|function OrderPage/);
 });

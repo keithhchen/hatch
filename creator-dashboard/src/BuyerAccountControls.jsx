@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, ChevronDown, Globe2, LogOut, ReceiptText, Settings } from "lucide-react";
+import { Check, ChevronDown, Globe2, LogOut, Library, Settings } from "lucide-react";
 import { Avatar, DropdownMenu } from "@hatch/ui";
 import { buyerT } from "./buyerI18n.js";
 import { LOCALES, useLocale } from "./locale.jsx";
@@ -38,7 +38,7 @@ export function BuyerLanguageMenu({ className = "" }) {
 }
 
 const ACCOUNT_LINKS = Object.freeze([
-  { value: "orders", href: "/explore/orders", label: "Orders and receipts", Icon: ReceiptText },
+  { value: "library", href: "/library", label: "My library", Icon: Library },
   { value: "settings", href: "/account", label: "Settings", Icon: Settings }
 ]);
 

@@ -4,7 +4,7 @@ import { WebChatCapabilityPolicy } from "../webChatRuntimeBridge.mjs";
 
 test("Web Chat declares no local tools on hello and message", () => {
   const policy = new WebChatCapabilityPolicy();
-  const hello = policy.prepare({ type: "client.hello", protocol_version: "0.8", conversation_id: "conversation", entitlement_id: "entitlement", local_tools: [] }, false, "registry-token");
+  const hello = policy.prepare({ type: "client.hello", protocol_version: "0.8", conversation_id: "conversation", product_id: "product", local_tools: [] }, false, "registry-token");
   assert.deepEqual(hello.local_tools, []);
   assert.equal(hello.auth_token, "registry-token");
   const message = policy.prepare({ type: "client.message", run_id: "run", conversation_id: "conversation", local_tools: [], message: { role: "user", content: "Hello" } }, true, "registry-token");

@@ -9,7 +9,6 @@ import { USAGE_COPY } from "./usageCopy.js";
 export const STUDIO_COPY = {
   en: {
     navAgents: "My Agents",
-    navOrders: "Orders",
     studioMenu: "Menu",
     // The five-step path.
     stepRead: "Upload",
@@ -44,13 +43,9 @@ export const STUDIO_COPY = {
     homeTitle: "Home",
     homeNext: (step) => `Next: ${step}`,
     homeLiveBody: "Published. Clients can purchase and use this Agent.",
-    homeStatOrders: "Purchases",
     homeStatLive: "Published",
     homeStatDraft: "Drafts",
     homeYourAgents: "My Agents",
-    homeRecentOrders: "Recent orders",
-    homeNoOrders: "No orders yet. Purchases appear here after an Agent is published.",
-    homeSeeOrders: "View all orders",
     newAgent: "New Agent",
     // Agents list
     agentsPill: "Studio",
@@ -114,17 +109,9 @@ export const STUDIO_COPY = {
     previewBody: "Only you can see this page until the Agent is published.",
     previewBack: "Back to build",
     // Orders
-    ordersPill: "Studio",
-    ordersTitle: "Orders",
-    ordersBody: "All purchases and access, newest first.",
-    ordersFilterAgent: "Agent",
-    ordersAllAgents: "All Agents",
-    ordersEmptyTitle: "No orders yet",
-    ordersEmptyBody: "Purchases appear here after an Agent is published."
   },
   zh: {
     navAgents: "我的 Agent",
-    navOrders: "订单",
     studioMenu: "菜单",
     stepRead: "上传资料",
     stepReadBody: "添加文件和公开内容，作为 Agent 的学习来源。",
@@ -157,13 +144,9 @@ export const STUDIO_COPY = {
     homeTitle: "首页",
     homeNext: (step) => `下一步：${step}`,
     homeLiveBody: "已发布，客户可购买和使用。",
-    homeStatOrders: "购买",
     homeStatLive: "已发布",
     homeStatDraft: "草稿",
     homeYourAgents: "我的 Agent",
-    homeRecentOrders: "最近订单",
-    homeNoOrders: "暂无订单。Agent 发布后，购买记录将显示在这里。",
-    homeSeeOrders: "查看全部订单",
     newAgent: "新建 Agent",
     agentsPill: "工作室",
     agentsTitle: "我的 Agent",
@@ -222,17 +205,9 @@ export const STUDIO_COPY = {
     previewTitle: "客户页面",
     previewBody: "Agent 发布前，此页面仅你可见。",
     previewBack: "返回构建",
-    ordersPill: "工作室",
-    ordersTitle: "订单",
-    ordersBody: "全部购买和使用权限，按时间倒序排列。",
-    ordersFilterAgent: "Agent",
-    ordersAllAgents: "全部 Agent",
-    ordersEmptyTitle: "暂无订单",
-    ordersEmptyBody: "Agent 发布后，购买记录将显示在这里。"
   },
   ja: {
     navAgents: "マイ Agent",
-    navOrders: "注文",
     studioMenu: "メニュー",
     stepRead: "アップロード",
     stepReadBody: "Agent の学習元となるファイルと公開コンテンツを追加します。",
@@ -265,13 +240,9 @@ export const STUDIO_COPY = {
     homeTitle: "ホーム",
     homeNext: (step) => `次のステップ：${step}`,
     homeLiveBody: "公開済みです。顧客が購入・利用できます。",
-    homeStatOrders: "購入",
     homeStatLive: "公開済み",
     homeStatDraft: "下書き",
     homeYourAgents: "マイ Agent",
-    homeRecentOrders: "最近の注文",
-    homeNoOrders: "注文はまだありません。Agent の公開後、購入履歴がここに表示されます。",
-    homeSeeOrders: "すべての注文を表示",
     newAgent: "新規 Agent",
     agentsPill: "スタジオ",
     agentsTitle: "マイ Agent",
@@ -330,13 +301,6 @@ export const STUDIO_COPY = {
     previewTitle: "顧客向けページ",
     previewBody: "Agent を公開するまで、このページはあなたにのみ表示されます。",
     previewBack: "構築に戻る",
-    ordersPill: "スタジオ",
-    ordersTitle: "注文",
-    ordersBody: "すべての購入と利用権限を新しい順に表示します。",
-    ordersFilterAgent: "Agent",
-    ordersAllAgents: "すべての Agent",
-    ordersEmptyTitle: "注文はまだありません",
-    ordersEmptyBody: "Agent の公開後、購入履歴がここに表示されます。"
   }
 };
 

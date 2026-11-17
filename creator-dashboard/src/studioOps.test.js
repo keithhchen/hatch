@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { STUDIO_OPS_COPY, eventLabel, statusLabel } from "./studioOpsCopy.js";
+import { STUDIO_OPS_COPY, statusLabel } from "./studioOpsCopy.js";
 import {
-  ORDER_FILTER_OPTIONS,
-  activeFilterCount,
-  dayBoundary,
   formatMinor,
-  orderShares,
-  ordersQuery,
-  payoutSetupState
+  payoutSetupState,
+  userLabelKey,
+  userRows,
+  userTotals,
+  usersQuery
 } from "./studioOpsModel.js";
 
 test("formatMinor converts minor units per currency and locale", () => {
@@ -19,31 +18,35 @@ test("formatMinor converts minor units per currency and locale", () => {
   assert.equal(formatMinor(null, "USD", "en"), "");
 });
 
-test("ordersQuery maps filters and paging to the orders API query", () => {
-  assert.equal(ordersQuery({}), "");
-  const query = new URLSearchParams(ordersQuery(
-    { product: "p1", order: "", payment: "paid", delivery: "completed", refund: "none", from: "2026-10-01", to: "2026-10-31" },
-    { limit: 500, cursor: "MjU" }
-  ).slice(1));
-  assert.equal(query.get("product"), "p1");
-  assert.equal(query.has("order"), false);
-  assert.equal(query.get("payment"), "paid");
-  assert.equal(query.get("delivery"), "completed");
-  assert.equal(query.get("refund"), "none");
-  assert.equal(query.get("from"), new Date("2026-10-01T00:00:00.000").toISOString());
-  assert.equal(query.get("to"), new Date("2026-10-31T23:59:59.999").toISOString());
-  assert.equal(query.get("limit"), "100");
-  assert.equal(query.get("cursor"), "MjU");
-  assert.equal(dayBoundary("not-a-date", "start"), "");
-  assert.equal(activeFilterCount({ product: "p1", from: "2026-10-01", order: " " }), 2);
+test("usersQuery filters by Agent only when one is chosen", () => {
+  assert.equal(usersQuery(""), "");
+  assert.equal(usersQuery("p 1"), "?product_id=p%201");
 });
 
-test("orderShares sums recognized revenue and ignores reversed entries", () => {
-  assert.deepEqual(orderShares({ revenue: [
-    { status: "recognized", creator_share_minor: 700, hatch_share_minor: 300 },
-    { status: "reversed", creator_share_minor: 700, hatch_share_minor: 300 }
-  ] }), { recognized: true, creator: 700, hatch: 300 });
-  assert.deepEqual(orderShares({ revenue: [] }), { recognized: false, creator: null, hatch: null });
+test("userRows sorts by last activity, newest first", () => {
+  const rows = userRows([
+    { kind: "guest", product_id: "p1", last_at: "2026-11-01T00:00:00Z" },
+    { kind: "im", product_id: "p2", last_at: "2026-11-03T00:00:00Z" },
+    { kind: "account", product_id: "p1", last_at: "2026-11-02T00:00:00Z" }
+  ]);
+  assert.deepEqual(rows.map((row) => row.kind), ["im", "account", "guest"]);
+  assert.deepEqual(userRows(undefined), []);
+});
+
+test("userLabelKey maps each kind to its label and defaults to account", () => {
+  assert.equal(userLabelKey("guest"), "userGuest");
+  assert.equal(userLabelKey("im"), "userIm");
+  assert.equal(userLabelKey("account"), "userAccount");
+  assert.equal(userLabelKey("other"), "userAccount");
+});
+
+test("userTotals counts users, distinct Agents, conversations and messages", () => {
+  assert.deepEqual(userTotals([
+    { product_id: "p1", conversations: 2, messages: 10 },
+    { product_id: "p1", conversations: 1, messages: 3 },
+    { product_id: "p2", conversations: 4, messages: 5 }
+  ]), { users: 3, agents: 2, conversations: 7, messages: 18 });
+  assert.deepEqual(userTotals([]), { users: 0, agents: 0, conversations: 0, messages: 0 });
 });
 
 test("payout setup state follows the API contract", () => {
@@ -64,9 +67,5 @@ test("copy is complete and consistent across zh, en and ja", () => {
     const strings = JSON.stringify(copy, (key, value) => typeof value === "function" ? value(1) : value);
     assert.doesNotMatch(strings, /[!！?？]/, `${locale} copy has no ! or ?`);
   }
-  for (const value of Object.values(ORDER_FILTER_OPTIONS).flat()) {
-    for (const locale of ["zh", "en", "ja"]) assert.ok(STUDIO_OPS_COPY[locale].status[value], `${locale} status ${value}`);
-  }
   assert.equal(statusLabel(STUDIO_OPS_COPY.ja, "refunded"), "返金済み");
-  assert.equal(eventLabel(STUDIO_OPS_COPY.en, "custom.event"), "custom.event");
 });

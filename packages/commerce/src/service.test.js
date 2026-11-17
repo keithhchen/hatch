@@ -109,13 +109,6 @@ test("an account cannot acquire its own Agent through any checkout entry or the 
   const own = { ...identity, buyer_id: identity.creator_id };
   const selfPurchase = (error) => error instanceof CommerceInvariantError && error.code === "self_purchase_not_allowed";
   await assert.rejects(commerce.confirmCheckout({ ...own, gross_minor: 0, idempotency_key: "self:free" }), selfPurchase);
-  await assert.rejects(commerce.createPayment({
-    ...own, payment_id: "payment_self", amount_minor: 100, provider: "test", idempotency_key: "self:payment"
-  }), selfPurchase);
-  await assert.rejects(commerce.confirmCheckoutFromProviderEvent(
-    { payment_id: "payment_self", provider: "test", provider_event_id: "evt_self", status: "succeeded" },
-    { ...own, payment_id: "payment_self", gross_minor: 100, idempotency_key: "self:provider" }
-  ), selfPurchase);
   await assert.rejects(
     ledger.append("order.placed", { ...own, order_id: "order_self", gross_minor: 0 }, { idempotencyKey: "self:ledger" }),
     selfPurchase

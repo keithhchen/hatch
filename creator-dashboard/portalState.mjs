@@ -5,7 +5,6 @@ import { withSchemaLock } from "../packages/commerce/src/schemaLock.js";
 
 const EMPTY_STATE = Object.freeze({
   contract_version: "1",
-  checkout_sessions: {},
   creator_products: {},
   web_sessions: {},
   oauth_authorization_transactions: {},
@@ -16,7 +15,7 @@ const EMPTY_STATE = Object.freeze({
 
 /**
  * Small durable workflow store for Portal state that is not a Commerce fact:
- * checkout release snapshots, Creator approvals/listings, and Factory form drafts.
+ * Creator approvals/listings, and Factory form drafts.
  * Orders, entitlements, deliveries, revenue, refunds, and payouts stay in the
  * Commerce ledger/repository.
  */
@@ -211,160 +210,6 @@ export class PortalStateStore {
     });
   }
 
-  getCheckoutSession(sessionId) {
-    return checkoutView(this.#state.checkout_sessions[sessionId], this.clock());
-  }
-
-  findCheckoutSessionByRequest(buyerId, requestKey) {
-    return checkoutView(Object.values(this.#state.checkout_sessions).find((session) => (
-      session.buyer_id === buyerId && session.request_key === requestKey
-    )), this.clock());
-  }
-
-  findCheckoutSessionByPaymentId(paymentId) {
-    return checkoutView(Object.values(this.#state.checkout_sessions).find((session) => (
-      session.payment_id === paymentId
-    )), this.clock());
-  }
-
-  async createCheckoutSession(input) {
-    return this.#mutate((state) => {
-      const existing = input.request_key
-        ? Object.values(state.checkout_sessions).find((session) => (
-          session.buyer_id === input.buyer_id && session.request_key === input.request_key
-        ))
-        : undefined;
-      if (existing) return existing;
-      const now = this.clock();
-      const session = {
-        ...clone(input),
-        checkout_session_id: this.idFactory("checkout"),
-        status: "open",
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-        expires_at: new Date(now.getTime() + 30 * 60_000).toISOString()
-      };
-      state.checkout_sessions[session.checkout_session_id] = session;
-      return session;
-    });
-  }
-
-  async completeCheckout(sessionId, outcome) {
-    return this.#mutate((state) => {
-      const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
-      if (session.status === "completed") return session;
-      if (session.status === "open" && Date.parse(session.expires_at) <= this.clock().getTime()) {
-        session.status = "expired";
-        session.updated_at = this.clock().toISOString();
-        throw stateError("checkout_expired", "Checkout session has expired.", 409);
-      }
-      Object.assign(session, clone(outcome), {
-        status: "completed",
-        reconcile_last_error: null,
-        updated_at: this.clock().toISOString()
-      });
-      return session;
-    });
-  }
-
-  async noteCheckoutReconcileFailure(sessionId, error) {
-    return this.#mutate((state) => {
-      const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
-      session.reconcile_attempts = Number(session.reconcile_attempts ?? 0) + 1;
-      session.reconcile_last_error = {
-        category: String(error?.code ?? "reconcile_failed"),
-        occurred_at: this.clock().toISOString()
-      };
-      session.updated_at = this.clock().toISOString();
-      return session;
-    });
-  }
-
-  async markCheckoutCompensated(sessionId, outcome) {
-    return this.#mutate((state) => {
-      const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
-      if (session.status === "refunded") return session;
-      if (session.status !== "fulfillment_pending") {
-        throw stateError("checkout_not_compensatable", "Only pending fulfillment can be compensated.", 409);
-      }
-      Object.assign(session, clone(outcome), {
-        status: "refunded",
-        payment_status: "refunded",
-        reconcile_last_error: null,
-        compensated_at: this.clock().toISOString(),
-        updated_at: this.clock().toISOString()
-      });
-      return session;
-    });
-  }
-
-  async markCheckoutFulfillmentPending(sessionId, outcome) {
-    return this.#mutate((state) => {
-      const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
-      if (session.status === "completed") return session;
-      if (!["open", "payment_pending", "fulfillment_pending"].includes(session.status)) {
-        throw stateError("checkout_not_confirmable", "Checkout session cannot be fulfilled in its current state.", 409);
-      }
-      Object.assign(session, clone(outcome), {
-        status: "fulfillment_pending",
-        fulfillment_started_at: session.fulfillment_started_at ?? this.clock().toISOString(),
-        updated_at: this.clock().toISOString()
-      });
-      return session;
-    });
-  }
-
-  async markCheckoutReleaseChanged(sessionId, currentProduct) {
-    return this.#mutate((state) => {
-      const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
-      if (["completed", "fulfillment_pending"].includes(session.status)) return session;
-      session.status = "release_changed";
-      session.release_change = {
-        previous_release: clone(session.release ?? null),
-        current_release: currentProduct ? {
-          release_id: currentProduct.release_id ?? currentProduct.corpus_digest,
-          corpus_digest: currentProduct.corpus_digest
-        } : null,
-        detected_at: this.clock().toISOString()
-      };
-      session.updated_at = this.clock().toISOString();
-      return session;
-    });
-  }
-
-  async markCheckoutPayment(sessionId, payment) {
-    return this.#mutate((state) => {
-      const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
-      if (["completed", "fulfillment_pending"].includes(session.status)) return session;
-      if (!["open", "payment_pending", "requires_action", "payment_failed"].includes(session.status)) {
-        throw stateError("checkout_not_payable", "Checkout session cannot accept a payment update.", 409);
-      }
-      const providerStatus = String(payment.status ?? "pending");
-      const status = providerStatus === "requires_action"
-        ? "requires_action"
-        : ["failed", "cancelled"].includes(providerStatus)
-          ? "payment_failed"
-          : "payment_pending";
-      Object.assign(session, {
-        payment_id: String(payment.payment_id),
-        payment_status: providerStatus,
-        payment_redirect_url: payment.redirect_url ?? null,
-        payment_provider: payment.provider ?? null,
-        status,
-        updated_at: this.clock().toISOString()
-      });
-      return session;
-    });
-  }
-
-  listPendingCheckouts() {
-    return clone(Object.values(this.#state.checkout_sessions).filter((session) => session.status === "fulfillment_pending"));
-  }
-
-  listCheckoutSessions() {
-    return clone(Object.values(this.#state.checkout_sessions));
-  }
-
   listCreatorProducts(creatorId) {
     return clone(Object.values(this.#state.creator_products).filter((item) => (
       creatorId === undefined || item.creator_id === creatorId
@@ -452,7 +297,6 @@ export function stateError(code, message, status = 422, details) {
 function normalizeState(value) {
   return {
     contract_version: "1",
-    checkout_sessions: mapObjectValues(value?.checkout_sessions, stripRemovedCheckoutFields),
     creator_products: mapObjectValues(value?.creator_products, stripRemovedCreatorProductFields),
     web_sessions: objectValue(value?.web_sessions),
     oauth_authorization_transactions: objectValue(value?.oauth_authorization_transactions),
@@ -483,13 +327,6 @@ function mapObjectValues(value, transform) {
   return Object.fromEntries(Object.entries(objectValue(value)).map(([key, item]) => [key, transform(item)]));
 }
 
-function stripRemovedCheckoutFields(value) {
-  const session = clone(value) ?? {};
-  delete session.offer_snapshot;
-  delete session.quote_change;
-  return session;
-}
-
 function stripRemovedCreatorProductFields(value) {
   const product = clone(value) ?? {};
   delete product.offer_draft;
@@ -511,19 +348,6 @@ function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
-
-function checkoutView(value, now) {
-  const session = clone(value);
-  if (session?.status === "open" && Date.parse(session.expires_at) <= now.getTime()) {
-    session.status = "expired";
-  }
-  return session;
-}
-
-function requireRecord(value, code, message) {
-  if (!value) throw stateError(code, message, 404);
-  return value;
-}
 
 function creatorProductKey(creatorId, productId) {
   return `${creatorId}:${productId}`;

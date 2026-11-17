@@ -9,7 +9,7 @@ import { answeredCount, assignNames, buildFormMd, draftStore, fileMediaType, for
 import { ArtifactApi, loadArtifact } from "./artifactClient.js";
 import { ArtifactRoute } from "./artifactRoute.js";
 import { WebChatRoute } from "./webChatRoute.js";
-import { startEarlyLoad, takeEarlyAccess, takeEarlyMe } from "./earlyLoad.js";
+import { startEarlyLoad, takeEarlyAgent, takeEarlyMe } from "./earlyLoad.js";
 import { webChatT } from "./webChatI18n.js";
 
 const fields = [
@@ -87,17 +87,17 @@ test("loading an artifact product: definition and the buyer's reports; a chat-on
     if (url.includes("/artifact/conversations")) return [{ conversation_id: "c9", status: "ready" }];
     return { intake: { fields } };
   };
-  assert.equal(await loadArtifact(request, { entitlement_id: "e1" }, "chat-product"), null);
-  const mode = await loadArtifact(request, { entitlement_id: "e1" }, "artifact-product");
+  assert.equal(await loadArtifact(request, "chat-product"), null);
+  const mode = await loadArtifact(request, "artifact-product");
   assert.deepEqual(mode.conversations, [{ conversation_id: "c9", status: "ready" }]);
-  assert.deepEqual(calls.slice(2), ["/v1/web-chat/products/artifact-product/artifact?entitlement_id=e1", "/v1/web-chat/products/artifact-product/artifact/conversations?entitlement_id=e1"]);
-  await assert.rejects(loadArtifact(async () => { throw Object.assign(new Error("boom"), { status: 500 }); }, {}, "p"), /boom/);
+  assert.deepEqual(calls.slice(2), ["/v1/web-chat/products/artifact-product/artifact?product_id=artifact-product", "/v1/web-chat/products/artifact-product/artifact/conversations?product_id=artifact-product"]);
+  await assert.rejects(loadArtifact(async () => { throw Object.assign(new Error("boom"), { status: 500 }); }, "p"), /boom/);
 });
 
 test("submit sequence: create, upload form.md then every file, then a message with the form text only", async () => {
   const log = [];
   const request = async (url, init) => { log.push(`${init?.method ?? "GET"} ${url.split("?")[0]} key=${init?.headers?.["idempotency-key"]}`); return { conversation_id: "c1" }; };
-  const api = new ArtifactApi(request, { entitlement_id: "e1" });
+  const api = new ArtifactApi(request, { product_id: "p1" });
   api.upload = async (conversationId, file, name, mediaType) => { log.push(`upload ${conversationId} ${name} ${mediaType}`); return {}; };
   api.transport.connect = (conversationId, { onOpen, onEvent }) => {
     const connection = { hello: () => setTimeout(() => onEvent({ type: "session.ready" })), close() {}, send: message => { log.push(`message ${JSON.stringify(Object.keys(message).sort())} ${message.clientMessageId} ${message.runId}`); setTimeout(() => onEvent({ type: "message.accepted", client_message_id: message.clientMessageId })); } };
@@ -118,10 +118,10 @@ test("submit sequence: create, upload form.md then every file, then a message wi
 test("unlocking a report is a POST to the report's unlock route, and the files are the summary's and the full report's", async () => {
   const calls = [];
   const request = async (url, init) => { calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`); return { status: "generating", phase: "full" }; };
-  const api = new ArtifactApi(request, { entitlement_id: "e1" });
+  const api = new ArtifactApi(request, { product_id: "p1" });
   assert.deepEqual(await api.unlockReport("c1"), { status: "generating", phase: "full" });
-  assert.deepEqual(calls, ["POST /v1/web-chat/conversations/c1/report/unlock?entitlement_id=e1 {}"]);
-  assert.equal(api.reportFileUrl("c1", "summary.png"), "/v1/web-chat/conversations/c1/report/files/summary.png?entitlement_id=e1");
+  assert.deepEqual(calls, ["POST /v1/web-chat/conversations/c1/report/unlock?product_id=p1 {}"]);
+  assert.equal(api.reportFileUrl("c1", "summary.png"), "/v1/web-chat/conversations/c1/report/files/summary.png?product_id=p1");
 });
 
 // Explicit upstream stub for proxy transport tests, never product UAT: it checks only that bytes pass through unchanged.
@@ -153,36 +153,36 @@ test("the web-chat proxy streams asset uploads up and report files down as raw b
   const base = `http://127.0.0.1:${api.address().port}`;
   const headers = { authorization: "Bearer api-key-1" };
   try {
-    const upload = await fetch(`${base}/v1/web-chat/conversations/c1/assets?name=%E6%88%90%E7%BB%A9.pdf&entitlement_id=e1`, { method: "POST", headers: { ...headers, "content-type": "application/pdf" }, body: pdf });
+    const upload = await fetch(`${base}/v1/web-chat/conversations/c1/assets?name=%E6%88%90%E7%BB%A9.pdf&product_id=p1`, { method: "POST", headers: { ...headers, "content-type": "application/pdf" }, body: pdf });
     assert.equal(upload.status, 200);
     assert.deepEqual(await upload.json(), { asset_id: "asset_1" });
-    assert.equal(seen[0].url, "/v1/conversations/c1/assets?name=%E6%88%90%E7%BB%A9.pdf&entitlement_id=e1");
+    assert.equal(seen[0].url, "/v1/conversations/c1/assets?name=%E6%88%90%E7%BB%A9.pdf&product_id=p1");
     assert.equal(seen[0].type, "application/pdf");
     assert.equal(seen[0].authorization, "Bearer api-key-1");
     assert.deepEqual(seen[0].body, pdf);
 
-    const download = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/summary.pdf?entitlement_id=e1`, { headers });
+    const download = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/summary.pdf?product_id=p1`, { headers });
     assert.equal(download.status, 200);
     assert.equal(download.headers.get("content-type"), "application/pdf");
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
 
-    const signed = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/signed.png?entitlement_id=e1`, { headers, redirect: "manual" });
+    const signed = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/signed.png?product_id=p1`, { headers, redirect: "manual" });
     assert.deepEqual([signed.status, signed.headers.get("location"), (await signed.arrayBuffer()).byteLength], [302, `http://127.0.0.1:${oss.address().port}/object.png?sig=1`, 0]);
     assert.equal(ossHits, 0, "the proxy passes the redirect on and never follows it");
 
-    const unlock = await fetch(`${base}/v1/web-chat/conversations/c1/report/unlock?entitlement_id=e1`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}" });
+    const unlock = await fetch(`${base}/v1/web-chat/conversations/c1/report/unlock?product_id=p1`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}" });
     assert.equal(unlock.status, 200);
-    assert.deepEqual([seen.at(-1).method, seen.at(-1).url], ["POST", "/v1/conversations/c1/report/unlock?entitlement_id=e1"]);
+    assert.deepEqual([seen.at(-1).method, seen.at(-1).url], ["POST", "/v1/conversations/c1/report/unlock?product_id=p1"]);
 
-    const definition = await fetch(`${base}/v1/web-chat/products/p1/artifact?entitlement_id=e1`, { headers });
+    const definition = await fetch(`${base}/v1/web-chat/products/p1/artifact?product_id=p1`, { headers });
     assert.equal(definition.status, 200);
-    assert.equal(seen.at(-1).url, "/v1/products/p1/artifact?entitlement_id=e1");
-    const created = await fetch(`${base}/v1/web-chat/products/p1/artifact/conversations?entitlement_id=e1`, { method: "POST", headers: { ...headers, "content-type": "application/json", "idempotency-key": "k-1" }, body: "{}" });
+    assert.equal(seen.at(-1).url, "/v1/products/p1/artifact?product_id=p1");
+    const created = await fetch(`${base}/v1/web-chat/products/p1/artifact/conversations?product_id=p1`, { method: "POST", headers: { ...headers, "content-type": "application/json", "idempotency-key": "k-1" }, body: "{}" });
     assert.equal(created.status, 200);
-    assert.equal(seen.at(-1).url, "/v1/products/p1/artifact/conversations?entitlement_id=e1");
+    assert.equal(seen.at(-1).url, "/v1/products/p1/artifact/conversations?product_id=p1");
     assert.equal(seen.at(-1).method, "POST");
     assert.equal(seen.at(-1).key, "k-1", "the submission key reaches the Runtime");
-    await (await fetch(`${base}/v1/web-chat/products/p1/artifact/conversations?entitlement_id=e1`, { headers })).text();
+    await (await fetch(`${base}/v1/web-chat/products/p1/artifact/conversations?product_id=p1`, { headers })).text();
     assert.equal(seen.at(-1).method, "GET");
 
     const before = seen.length;
@@ -242,7 +242,7 @@ test("definition, list and the routed report are all asked before any of them an
   const started = [];
   const release = [];
   const request = url => new Promise(resolve => { started.push(url); release.push(() => resolve(url.includes("/artifact/conversations") ? [] : { intake: { fields } })); });
-  const loading = loadArtifact(request, { entitlement_id: "e1" }, "p1", "c1");
+  const loading = loadArtifact(request, "p1", "c1");
   assert.equal(started.length, 3, "nothing was awaited between the three calls");
   assert.ok(started.some(url => url.includes("/conversations/c1/report")));
   release.forEach(done => done());
@@ -257,39 +257,40 @@ test("a report that is not found or forbidden is its own state, in every languag
   assert.ok(!isMissingReport({ status: 500 }) && !isMissingReport(new Error("network")));
   assert.equal(webChatT("zh", "artifactReportNotFound"), "找不到这份报告");
   const request = async url => { if (url.includes("/report")) throw Object.assign(new Error("nope"), { status: 404 }); return url.includes("/artifact/conversations") ? [] : { intake: { fields } }; };
-  const mode = await loadArtifact(request, { entitlement_id: "e1" }, "p1", "unknown");
+  const mode = await loadArtifact(request, "p1", "unknown");
   assert.deepEqual(mode.conversations, [], "the list still loads for the sidebar");
   await assert.rejects(mode.api.report("unknown"), error => isMissingReport(error));
 });
 
-test("on an artifact path the Product-access request starts at once, once; elsewhere nothing starts", async () => {
+test("on an artifact path the Product's Agent request starts at once, once and for that Product; elsewhere nothing starts", async () => {
   const calls = [];
   const request = async url => { calls.push(url); return {}; };
   const loads = [];
   startEarlyLoad("/studio", request, async () => loads.push("x"));
-  assert.equal(takeEarlyAccess(), null);
+  assert.equal(takeEarlyAgent("p1"), null);
   assert.equal(takeEarlyMe(), null);
   startEarlyLoad("/artifact/p1", request, async () => loads.push("page"));
-  assert.deepEqual(calls, ["/v1/user/product-access", "/v1/auth/me"]);
+  assert.deepEqual(calls, ["/v1/web-chat/products/p1/agent", "/v1/auth/me"]);
   assert.deepEqual(loads, ["page"]);
-  assert.ok(takeEarlyAccess() instanceof Promise);
-  assert.equal(takeEarlyAccess(), null);
+  assert.equal(takeEarlyAgent("p2"), null, "another Product does not take it");
+  assert.ok(takeEarlyAgent("p1") instanceof Promise);
+  assert.equal(takeEarlyAgent("p1"), null);
   assert.ok(takeEarlyMe() instanceof Promise);
   assert.equal(takeEarlyMe(), null);
 });
 
-test("/me and product-access are both started before either answers", () => {
+test("/me and the Agent are both started before either answers", () => {
   const started = [];
   startEarlyLoad("/artifact/p1", url => { started.push(url); return new Promise(() => {}); }, async () => {});
-  assert.deepEqual(started, ["/v1/user/product-access", "/v1/auth/me"]);
-  takeEarlyAccess(); takeEarlyMe();
+  assert.deepEqual(started, ["/v1/web-chat/products/p1/agent", "/v1/auth/me"]);
+  takeEarlyAgent("p1"); takeEarlyMe();
 });
 
 test("the routed report is handed to the page before the definition and the list answer", async () => {
   const release = {};
   const request = url => new Promise(resolve => { release[url.includes("/report") ? "report" : "rest"] ??= []; release[url.includes("/report") ? "report" : "rest"].push(() => resolve(url.includes("/artifact/conversations") ? [] : { intake: { fields } })); });
   const handed = [];
-  const loading = loadArtifact(request, { entitlement_id: "e1" }, "p1", "c1", api => handed.push(api));
+  const loading = loadArtifact(request, "p1", "c1", api => handed.push(api));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(handed.length, 0, "nothing before the server answered the report");
   release.report.forEach(done => done());
@@ -297,7 +298,7 @@ test("the routed report is handed to the page before the definition and the list
   assert.equal(handed.length, 1, "the report answered; definition and list are still pending");
   release.rest.forEach(done => done());
   assert.equal((await loading).api, handed[0]);
-  const failing = loadArtifact(url => url.includes("/report") ? Promise.reject(Object.assign(new Error("no"), { status: 404 })) : new Promise(() => {}), {}, "p1", "c2", api => handed.push(api));
+  const failing = loadArtifact(url => url.includes("/report") ? Promise.reject(Object.assign(new Error("no"), { status: 404 })) : new Promise(() => {}), "p1", "c2", api => handed.push(api));
   failing.catch(() => {});
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(handed.length, 2, "a 404 also answers; the page shows its not-found state");

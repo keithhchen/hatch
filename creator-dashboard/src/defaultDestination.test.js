@@ -26,9 +26,10 @@ test("sign-in default, safeReturnTo fallback and product fallback are /studio", 
   assert.match(buyer, /\/products\/\$\{encodeURIComponent\(product\)\}` : STUDIO_ROOT/);
 });
 
-test("retired /home and /library go to /studio; /orders stays under /explore", () => {
-  for (const path of ["/home", "/library", "/library/ent-1"]) assert.equal(retiredPortalRedirect(path), "/studio");
-  assert.equal(retiredPortalRedirect("/orders/HAT-1"), "/explore/orders/HAT-1");
+test("retired /home goes to /studio; /library is a live route", () => {
+  assert.equal(retiredPortalRedirect("/home"), "/studio");
+  assert.equal(retiredPortalRedirect("/library"), null);
+  assert.equal(retiredPortalRedirect("/orders/HAT-1"), null);
 });
 
 test("every brand logo links to /", () => {
@@ -43,5 +44,5 @@ test("every brand logo links to /", () => {
 test("non-logo home links go to /studio", () => {
   assert.match(read("CreatorPortalV2.jsx"), /className="sx-back" href="\/"[^\n]*go\("\/"\)/);
   assert.match(read("DownloadPage.jsx"), /className="download-page__web" href="\/studio"/);
-  assert.equal((read("WebChatShell.jsx").match(/href="\/studio"/g) || []).length + (read("productAccess.jsx").match(/href="\/studio"/g) || []).length, 2);
+  assert.match(read("productAgent.jsx"), /profile \? \{ href: "\/library"[^\n]*: \{ href: "\/explore"/);
 });

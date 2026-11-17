@@ -3,7 +3,8 @@ import { InlineAlert, Input, Progress, Textarea } from "@hatch/ui";
 import { AttachButton } from "@hatch/chat/react";
 import { ArrowUp, Check, Paperclip, X } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
-import { intakeStarted, intakeSubmitted } from "./analytics/events.js";
+import { guestLimitReached, intakeStarted, intakeSubmitted } from "./analytics/events.js";
+import { GuestAuthButtons } from "./productAgent.jsx";
 import {
   FORM_FILE_NAME, INTAKE_FILE_ACCEPT, MAX_FILE_BYTES, MAX_INTAKE_FILES, answeredCount, assignNames, buildFormMd, draftStore, fileCount, fileMediaType, isAcceptedFile, submissionIds, validateIntake, localizeIntake } from "./artifactForm.js";
 import { BrowserImageAttachments } from "./webChatClient.js";
@@ -52,6 +53,7 @@ export function ArtifactIntakePage({ api, definition, productId, productName, dr
   const [problems, setProblems] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  useEffect(() => { if (error?.code === "login_required") analytics.track(guestLimitReached({ agentId: productId })); }, [analytics, error, productId]);
   const conversationRef = useRef(draftConversationId);
   const uploadedRef = useRef(new Map());
   const preparedRef = useRef(new Map());
@@ -187,6 +189,7 @@ export function ArtifactIntakePage({ api, definition, productId, productName, dr
       {missing.length ? <InlineAlert tone="error">{t("artifactMissingRequired", { fields: missing.join("、") })}</InlineAlert> : null}
       {problems.some(problem => problem.code === "fileLimit") ? <InlineAlert tone="error">{t("artifactFileLimit", { max: MAX_INTAKE_FILES })}</InlineAlert> : null}
       {error ? <InlineAlert tone="error">{webChatErrorText(error, locale)}</InlineAlert> : null}
+      {error?.code === "login_required" ? <GuestAuthButtons navigate={navigate} t={t} /> : null}
       <div className="artifact__bar">
         {total ? <span className="artifact__count">{t("artifactFilesCount", { count: total, max: MAX_INTAKE_FILES })}</span> : <span />}
         <button type="submit" form="artifact-intake" className="web-chat__button web-chat__button--yolk" disabled={busy}><span>{busy ? t("artifactSubmitting") : t("artifactSubmit")}</span><ArrowUp aria-hidden="true" /></button>

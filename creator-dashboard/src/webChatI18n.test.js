@@ -11,9 +11,6 @@ test("Web Chat provides complete English, Chinese, and Japanese copy", () => {
 test("Web Chat translates interpolated copy and known client errors", () => {
   assert.equal(webChatT("en", "agentGenerating", { agent: "Tutor" }), "Tutor is generating a reply");
   assert.equal(webChatT("ja", "removeImage", { name: "plan.png" }), "plan.pngを削除");
-  assert.equal(webChatT("en", "subscribeToExpertProduct", { name: "Maya" }), "View product");
-  assert.equal(webChatT("zh", "subscribeToExpertProduct", { name: "Maya" }), "查看产品");
-  assert.equal(webChatT("ja", "subscribeToExpertProduct", { name: "Maya" }), "製品を見る");
   assert.equal(webChatErrorText({ code: "web_local_tool_unavailable" }, "en"), "This browser cannot run local tools.");
   assert.equal(webChatErrorText({ code: "imageCountLimit" }, "zh"), "每条消息最多添加 8 张图片。");
   assert.equal(webChatT("ja", "expertAi", { name: "Maya" }), "MayaのAI");
@@ -35,4 +32,17 @@ test("Web Chat UI copy stays neutral: no exclamations, questions, or chatty phra
 
 test("Web Chat preserves server-owned error messages", () => {
   assert.equal(webChatErrorText({ message: "Runtime supplied detail" }, "ja"), "Runtime supplied detail");
+});
+
+test("a refused message that needs an account reads as the login wall in every language, whatever the server said", () => {
+  const error = { code: "login_required", status: 401, message: "Sign in to keep going." };
+  assert.equal(webChatErrorText(error, "en"), "Sign in to continue the conversation.");
+  assert.match(webChatErrorText(error, "zh"), /登录/);
+  assert.match(webChatErrorText(error, "ja"), /ログイン/);
+});
+
+test("the retired purchase model has no Web Chat copy left", () => {
+  for (const copy of Object.values(webChatCopy)) {
+    for (const key of Object.keys(copy)) assert.doesNotMatch(key, /paywall|noAccess|subscribe|checkingSubscription/i, key);
+  }
 });

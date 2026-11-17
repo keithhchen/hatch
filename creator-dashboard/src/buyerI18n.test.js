@@ -27,7 +27,7 @@ test("Japanese copy never reuses the Chinese text", () => {
 
 test("buyer copy provides distinct Chinese and Japanese navigation and task states", () => {
   for (const locale of ["zh", "ja"]) {
-    for (const key of ["Explore", "Discover", "Orders and receipts", "Orders", "Sign in", "No published Agents", "My Agents", "Session expired", "Confirm order", "Page not found", "Loading details"]) {
+    for (const key of ["Explore", "Discover", "My library", "Remove", "Sign in", "No published Agents", "Session expired", "Page not found", "Loading details"]) {
       assert.notEqual(buyerT(locale, key), key, `${locale} must translate ${key}`);
     }
   }
@@ -53,6 +53,6 @@ test("buyer pages use only people-free still-life photos and no photo captions",
 test("buyer copy falls back to source English and interpolates values", () => {
   assert.equal(buyerT("en", "Explore"), "Explore");
   assert.equal(buyerT("zh", "Unknown {value}", { value: 3 }), "Unknown 3");
-  assert.equal(buyerT("zh", "Order #{reference}", { reference: "A1" }), "订单号 A1");
-  assert.ok(Object.keys(buyerDictionary("ja")).length > 200);
+  assert.equal(buyerT("zh", "Signed in as {name}", { name: "A1" }), "当前登录：A1");
+  assert.ok(Object.keys(buyerDictionary("ja")).length > 100);
 });
