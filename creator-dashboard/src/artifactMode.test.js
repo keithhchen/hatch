@@ -9,7 +9,7 @@ import { answeredCount, assignNames, buildFormMd, draftStore, fileMediaType, for
 import { ArtifactApi, loadArtifact } from "./artifactClient.js";
 import { ArtifactRoute } from "./artifactRoute.js";
 import { WebChatRoute } from "./webChatRoute.js";
-import { startEarlyLoad, takeEarlyAccess } from "./earlyLoad.js";
+import { startEarlyLoad, takeEarlyAccess, takeEarlyMe } from "./earlyLoad.js";
 import { webChatT } from "./webChatI18n.js";
 
 const fields = [
@@ -268,9 +268,37 @@ test("on an artifact path the Product-access request starts at once, once; elsew
   const loads = [];
   startEarlyLoad("/studio", request, async () => loads.push("x"));
   assert.equal(takeEarlyAccess(), null);
+  assert.equal(takeEarlyMe(), null);
   startEarlyLoad("/artifact/p1", request, async () => loads.push("page"));
-  assert.deepEqual(calls, ["/v1/user/product-access"]);
+  assert.deepEqual(calls, ["/v1/user/product-access", "/v1/auth/me"]);
   assert.deepEqual(loads, ["page"]);
   assert.ok(takeEarlyAccess() instanceof Promise);
   assert.equal(takeEarlyAccess(), null);
+  assert.ok(takeEarlyMe() instanceof Promise);
+  assert.equal(takeEarlyMe(), null);
+});
+
+test("/me and product-access are both started before either answers", () => {
+  const started = [];
+  startEarlyLoad("/artifact/p1", url => { started.push(url); return new Promise(() => {}); }, async () => {});
+  assert.deepEqual(started, ["/v1/user/product-access", "/v1/auth/me"]);
+  takeEarlyAccess(); takeEarlyMe();
+});
+
+test("the routed report is handed to the page before the definition and the list answer", async () => {
+  const release = {};
+  const request = url => new Promise(resolve => { release[url.includes("/report") ? "report" : "rest"] ??= []; release[url.includes("/report") ? "report" : "rest"].push(() => resolve(url.includes("/artifact/conversations") ? [] : { intake: { fields } })); });
+  const handed = [];
+  const loading = loadArtifact(request, { entitlement_id: "e1" }, "p1", "c1", api => handed.push(api));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(handed.length, 0, "nothing before the server answered the report");
+  release.report.forEach(done => done());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(handed.length, 1, "the report answered; definition and list are still pending");
+  release.rest.forEach(done => done());
+  assert.equal((await loading).api, handed[0]);
+  const failing = loadArtifact(url => url.includes("/report") ? Promise.reject(Object.assign(new Error("no"), { status: 404 })) : new Promise(() => {}), {}, "p1", "c2", api => handed.push(api));
+  failing.catch(() => {});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(handed.length, 2, "a 404 also answers; the page shows its not-found state");
 });

@@ -108,10 +108,15 @@ export class ArtifactApi {
 /**
  * The product's artifact definition and the buyer's reports, or null when the product is not in artifact mode.
  * The definition, the list and the routed conversation's report are asked together, not one after another.
+ * `onReport(api)` is called as soon as the routed report has answered (found or not), without waiting for the rest;
+ * the report page then takes that same answer from `api.report`.
  */
-export async function loadArtifact(request, access, productId, conversationId = null) {
+export async function loadArtifact(request, access, productId, conversationId = null, onReport = () => {}) {
   const api = new ArtifactApi(request, accessScope(access, productId));
-  if (conversationId) api.prefetchReport(conversationId);
+  if (conversationId) {
+    api.prefetchReport(conversationId);
+    api.early.promise.then(() => onReport(api), () => onReport(api));
+  }
   const [definition, listed] = await Promise.all([api.definition(productId), api.listConversations(productId).catch(error => ({ error }))]);
   if (!definition) return null; // a chat-only product has no list either
   if (listed.error) throw listed.error;

@@ -26,6 +26,7 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
   const accessState = useProductAccess(productId, request);
   const access = accessState.access;
   const [mode, setMode] = useState(null);
+  const [earlyApi, setEarlyApi] = useState(null); // set once the routed report has answered, before the definition and the list
   const [error, setError] = useState(null);
   const [download, setDownload] = useState(null);
   const params = new URLSearchParams(search);
@@ -34,8 +35,9 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
     if (!access) return undefined;
     let live = true;
     setMode(null);
+    setEarlyApi(null);
     setError(null);
-    loadArtifact(request, access, productId, routedConversationId)
+    loadArtifact(request, access, productId, routedConversationId, api => { if (live) setEarlyApi(api); })
       .then(loaded => { if (!live) return; if (loaded) setMode(loaded); else setError({ key: "artifactNoReport" }); })
       .catch(cause => { if (live) setError(cause); });
     return () => { live = false; };
@@ -44,13 +46,15 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
   const toIntake = useCallback(() => navigate(ArtifactRoute.productPath(productId), { replace: true }), [navigate, productId]);
 
   const gate = { navigate, profile, onSignOut, productId, t, locale };
-  if (!mode) return <ProductAccessGate {...gate} state={error ? { status: "error", error } : accessState} />;
+  if (!mode && (error || !earlyApi)) return <ProductAccessGate {...gate} state={error ? { status: "error", error } : accessState} />;
 
   const identity = resolveCreatorIdentity({ access });
   const agentName = t("expertAi", { name: identity.creatorName });
-  const shown = resumeView(mode.conversations, routedConversationId, { startNew: params.get("new") === "1" });
-  const sidebar = mode.conversations.map(entry => ({ id: entry.conversation_id, title: t(STATUS_KEYS[entry.status] ?? "artifactStatusWaiting"), created_at: entry.created_at }));
-  const select = id => navigate(mode.conversations.find(entry => entry.conversation_id === id)?.status === "draft" ? ArtifactRoute.productPath(productId) : ArtifactRoute.conversationPath(productId, id));
+  const api = mode?.api ?? earlyApi;
+  const conversations = mode?.conversations ?? [];
+  const shown = mode ? resumeView(conversations, routedConversationId, { startNew: params.get("new") === "1" }) : { view: "report", conversationId: routedConversationId };
+  const sidebar = conversations.map(entry => ({ id: entry.conversation_id, title: t(STATUS_KEYS[entry.status] ?? "artifactStatusWaiting"), created_at: entry.created_at }));
+  const select = id => navigate(conversations.find(entry => entry.conversation_id === id)?.status === "draft" ? ArtifactRoute.productPath(productId) : ArtifactRoute.conversationPath(productId, id));
 
   const headerExtra = download ? <a className="web-chat__button web-chat__button--yolk artifact__header-download" href={download.href} download onClick={download.track}><Download aria-hidden="true" />{t("artifactDownload")}</a> : null;
 
@@ -59,7 +63,7 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
     {header => <main className="web-chat__main">
       {header}
       {shown.view === "report"
-        ? <ArtifactReportPage key={shown.conversationId} api={mode.api} conversationId={shown.conversationId} productId={productId} onDraft={toIntake} onDownload={setDownload} debug={params.get("debug") === "1"} t={t} locale={locale} />
+        ? <ArtifactReportPage key={shown.conversationId} api={api} conversationId={shown.conversationId} productId={productId} onDraft={toIntake} onDownload={setDownload} debug={params.get("debug") === "1"} t={t} locale={locale} />
         : <ArtifactIntakePage api={mode.api} definition={mode.definition} productId={productId} productName={identity.productName} draftConversationId={shown.draftConversationId}
           conversationPath={id => ArtifactRoute.conversationPath(productId, id)} navigate={navigate} t={t} locale={locale} />}
     </main>}

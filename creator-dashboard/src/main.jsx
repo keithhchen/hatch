@@ -15,7 +15,7 @@ import { captureRenderError, initSentry } from "./sentry.js";
 import { AnalyticsProvider, useAccountIdentity } from "./analytics/AnalyticsProvider.jsx";
 import { createAnalytics } from "./analytics/createAnalytics.js";
 import { lazyWithReload, reloadOnStaleBuild } from "./staleBuild.js";
-import { startEarlyLoad } from "./earlyLoad.js";
+import { startEarlyLoad, takeEarlyMe } from "./earlyLoad.js";
 
 initSentry(import.meta.env);
 const analytics = createAnalytics(import.meta.env);
@@ -92,7 +92,7 @@ function App() {
     }
     let active = true;
     setSessionStatus("loading");
-    dashboardRequest("/v1/auth/me")
+    (takeEarlyMe() ?? dashboardRequest("/v1/auth/me"))
       .then((nextProfile) => {
         if (!active) return;
         setProfile(nextProfile);
