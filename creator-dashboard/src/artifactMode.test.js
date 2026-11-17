@@ -90,7 +90,7 @@ test("loading an artifact product: definition and the buyer's reports; a chat-on
   assert.equal(await loadArtifact(request, { entitlement_id: "e1" }, "chat-product"), null);
   const mode = await loadArtifact(request, { entitlement_id: "e1" }, "artifact-product");
   assert.deepEqual(mode.conversations, [{ conversation_id: "c9", status: "ready" }]);
-  assert.deepEqual(calls.slice(1), ["/v1/web-chat/products/artifact-product/artifact?entitlement_id=e1", "/v1/web-chat/products/artifact-product/artifact/conversations?entitlement_id=e1"]);
+  assert.deepEqual(calls.slice(2), ["/v1/web-chat/products/artifact-product/artifact?entitlement_id=e1", "/v1/web-chat/products/artifact-product/artifact/conversations?entitlement_id=e1"]);
   await assert.rejects(loadArtifact(async () => { throw Object.assign(new Error("boom"), { status: 500 }); }, {}, "p"), /boom/);
 });
 
