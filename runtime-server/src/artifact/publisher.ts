@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { ConversationRecord } from "../conversationRepository.js";
 import type { ProductAnalytics } from "../analytics/port.js";
 import { reportReady } from "../analytics/events.js";
-import { scopeKey, type AssetBlobs } from "../assets/domain.js";
+import { scopeKey } from "../assets/domain.js";
 import { assetScopeOf } from "../chat/assets.js";
 import { validateReportHtml } from "./html.js";
-import type { RenderedReport, ReportKeys, ReportPhase, ReportRenderer, ReportRepository } from "./ports.js";
+import type { RenderedReport, ReportBlobs, ReportKeys, ReportPhase, ReportRenderer, ReportRepository } from "./ports.js";
 import type { ReportProgress } from "./progress.js";
 
 /** Rendering is a hosted agent's work and takes minutes, not seconds. */
@@ -22,6 +22,7 @@ const must = (name: string, bytes: Buffer, magic: Buffer) => {
 const validated = (phase: ReportPhase, r: RenderedReport) => {
   must(`${phase}.pdf`, r.pdf, PDF);
   if (phase === "summary") must("summary.png", r.firstPagePng, PNG);
+  else if (r.pageImages?.length !== r.pages) throw new Error("The renderer produced no image for some page");
   return r;
 };
 
@@ -33,7 +34,7 @@ const validated = (phase: ReportPhase, r: RenderedReport) => {
  */
 export class ReportPublisher {
   constructor(private readonly deps: {
-    reports: ReportRepository; renderer: ReportRenderer; blobs: AssetBlobs; analytics?: ProductAnalytics;
+    reports: ReportRepository; renderer: ReportRenderer; blobs: ReportBlobs; analytics?: ProductAnalytics;
     renderTimeoutMs?: number; pausesMs?: readonly number[]; sleep?: (ms: number) => Promise<void>; clock?: () => Date; id?: () => string;
   }) {}
 
@@ -48,7 +49,7 @@ export class ReportPublisher {
     for (let attempt = 0; !rendered; attempt++) {
       const deadline = AbortSignal.timeout(renderTimeoutMs);
       try {
-        rendered = validated(input.phase, await renderer.render(input.html, input.signal ? AbortSignal.any([input.signal, deadline]) : deadline));
+        rendered = validated(input.phase, await renderer.render(input.html, { pages: input.phase === "full" ? "all" : "first", signal: input.signal ? AbortSignal.any([input.signal, deadline]) : deadline }));
       } catch (error) {
         input.signal?.throwIfAborted();
         if (attempt >= pausesMs.length) throw new Error(`Rendering the report failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -60,8 +61,12 @@ export class ReportPublisher {
     const files: Array<[keyof ReportKeys, string, Buffer, string]> = input.phase === "summary"
       ? [["summaryHtml", "summary.html", Buffer.from(input.html), HTML], ["summaryPdf", "summary.pdf", rendered.pdf, "application/pdf"], ["summaryPng", "summary.png", rendered.firstPagePng, "image/png"]]
       : [["fullHtml", "full.html", Buffer.from(input.html), HTML], ["fullPdf", "full.pdf", rendered.pdf, "application/pdf"]];
-    const keys: ReportKeys = Object.fromEntries(files.map(([key, name]) => [key, `${prefix}/${name}`]));
-    await Promise.all(files.map(([, name, bytes, contentType]) => blobs.put(`${prefix}/${name}`, bytes, { contentType })));
+    const pages = (rendered.pageImages ?? []).map((bytes, i): [string, Buffer] => [`full/page-${i + 1}.webp`, bytes]);
+    const keys: ReportKeys = { ...Object.fromEntries(files.map(([key, name]) => [key, `${prefix}/${name}`])), ...(pages.length ? { fullPages: pages.map(([name]) => `${prefix}/${name}`) } : {}) };
+    await Promise.all([
+      ...files.map(([, name, bytes, contentType]) => blobs.put(`${prefix}/${name}`, bytes, { contentType })),
+      ...pages.map(([name, bytes]) => blobs.put(`${prefix}/${name}`, bytes, { contentType: "image/webp" }))
+    ]);
     const record = await reports.ready(conversation.id, input.attempt, input.phase, keys, clock());
     if (!record) throw new Error("This report is now being produced by a newer attempt; stop.");
     analytics?.capture(conversation.ownerAccountId, reportReady(Math.round((Date.now() - input.startedAt) / 1000)));

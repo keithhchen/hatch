@@ -48,8 +48,8 @@ export class ArtifactApi {
     return this.request(this.transport.conversationUrl(conversationId, "/report/unlock"), { method: "POST", body: "{}" });
   }
 
-  reportFileUrl(conversationId, name) {
-    return this.transport.conversationUrl(conversationId, `/report/files/${encodeURIComponent(name)}`);
+  reportFileUrl(conversationId, name, parameters) {
+    return this.transport.conversationUrl(conversationId, `/report/files/${name.split("/").map(encodeURIComponent).join("/")}`, parameters);
   }
 
   /** Raw bytes to the conversation's asset route under `name`, with byte progress. Resolves to the runtime's asset record. */

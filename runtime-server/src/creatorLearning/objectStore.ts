@@ -20,7 +20,7 @@ export type ObjectStoreObject = {
 
 /** A short-lived URL for one object: PUT it from a browser, or GET it from a sandbox. Send exactly `headers` with it. */
 export type PresignedRequest = { url: string; method: "PUT" | "GET"; headers: Record<string, string>; expiresAt: string };
-export type PresignOptions = { method: "PUT" | "GET"; expiresSeconds: number; contentType?: string };
+export type PresignOptions = { method: "PUT" | "GET"; expiresSeconds: number; contentType?: string; /** GET only: the Content-Disposition the response carries, e.g. to make a browser save the file. */ contentDisposition?: string };
 
 export interface ArtifactObjectStore {
   put(key: string, content: Buffer | string, options?: ObjectStorePutOptions): Promise<ObjectStoreObject>;
@@ -288,7 +288,8 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
     const client = await this.createClient(true);
     const contentType = options.contentType ?? "application/octet-stream";
     const url = client.signatureUrl(objectKey(this.options.prefix, key), {
-      method: options.method, expires: options.expiresSeconds, ...(options.method === "PUT" ? { "Content-Type": contentType } : {})
+      method: options.method, expires: options.expiresSeconds, ...(options.method === "PUT" ? { "Content-Type": contentType } : {}),
+      ...(options.method === "GET" && options.contentDisposition ? { response: { "content-disposition": options.contentDisposition } } : {})
     });
     return { url, method: options.method, headers: options.method === "PUT" ? { "Content-Type": contentType } : {}, expiresAt: new Date(Date.now() + options.expiresSeconds * 1000).toISOString() };
   }

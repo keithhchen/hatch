@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
-import { InlineAlert, Progress } from "@hatch/ui";
-import { Lock } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { InlineAlert } from "@hatch/ui";
+import { BookOpen, FileCheck, Globe, Lightbulb, Lock, PenLine, ScanSearch } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
 import { reportFileOpened, reportViewed } from "./analytics/events.js";
 import { REPORT_STEPS, formatElapsed, isWaiting, reportStep } from "./artifactForm.js";
@@ -8,38 +8,14 @@ import { WebChatEgg } from "./webChatGate.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
 
 const POLL_MS = 5000;
-/** A PDF shown as its pages, drawn by pdf.js at the column's width: the same pages a download would give. */
-function PdfPages({ src, title, failed }) {
-  const box = useRef(null);
-  const [error, setError] = useState(null);
-  useEffect(() => {
-    let cancelled = false;
-    let doc;
-    (async () => {
-      const [pdfjs, worker] = await Promise.all([import("pdfjs-dist"), import("pdfjs-dist/build/pdf.worker.min.mjs?url")]);
-      pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-      doc = await pdfjs.getDocument({ url: src, withCredentials: true }).promise;
-      const host = box.current;
-      if (cancelled || !host) return;
-      host.replaceChildren();
-      const ratio = window.devicePixelRatio || 1;
-      for (let n = 1; n <= doc.numPages && !cancelled; n += 1) {
-        const page = await doc.getPage(n);
-        const viewport = page.getViewport({ scale: (host.clientWidth / page.getViewport({ scale: 1 }).width) * ratio });
-        const canvas = document.createElement("canvas");
-        canvas.className = "artifact__page";
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        host.appendChild(canvas);
-        await page.render({ canvas, canvasContext: canvas.getContext("2d"), viewport }).promise;
-      }
-    })().catch((cause) => { if (!cancelled) setError(cause); });
-    return () => { cancelled = true; void doc?.destroy(); };
-  }, [src]);
-  return <>
-    <div ref={box} className="artifact__pages" role="document" aria-label={title} />
-    {error ? <InlineAlert tone="error" title={failed} /> : null}
-  </>;
+const ESTIMATE_MINUTES = 6;
+/** One animated glyph per step; the animation is the step's own motion (a page turning, a globe turning, a pen writing). */
+const STEP_GLYPHS = { reading: BookOpen, consulting: Lightbulb, researching: Globe, writing: PenLine, proofreading: ScanSearch, rendering: FileCheck };
+/** The full report as its pages, rendered at publish time: images load from the object store without a cross-origin fetch. */
+function ReportPages({ pageUrl, count, title }) {
+  return <div className="artifact__pages" role="document" aria-label={title}>
+    {Array.from({ length: count }, (_, index) => <img key={index} className="artifact__page" loading="lazy" src={pageUrl(index + 1)} alt={`${title} ${index + 1}`} />)}
+  </div>;
 }
 
 const LOCKED_REST = "/assets/web/report-locked.webp";
@@ -102,7 +78,7 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, on
   const fullReady = status === "ready" && report?.phase === "full";
   useEffect(() => {
     if (!fullReady) return undefined;
-    onDownload?.({ href: api.reportFileUrl(conversationId, "full.pdf"), track: () => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" })) });
+    onDownload?.({ href: api.reportFileUrl(conversationId, "full.pdf", { download: 1 }), track: () => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" })) });
     return () => onDownload?.(null);
   }, [fullReady, api, conversationId, productId, analytics, onDownload]);
 
@@ -125,12 +101,14 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, on
     {waiting ? <div className="artifact__generating">
       <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>{t(report.phase === "full" ? "artifactGeneratingFull" : "artifactGenerating")}</span></div>
       {(() => {
-        const step = reportStep(report);
-        return <div className="artifact__steps">
-          <Progress value={(step - 1) / REPORT_STEPS.length * 100 + 100 / REPORT_STEPS.length / 2} label={t("artifactStep", { step, total: REPORT_STEPS.length, label: t(`artifactStep_${REPORT_STEPS[step - 1]}`) })} />
+        const name = REPORT_STEPS[reportStep(report) - 1];
+        const Glyph = STEP_GLYPHS[name];
+        return <div className="artifact__step" key={name} role="status">
+          <span className={`artifact__glyph artifact__glyph--${name}`}><Glyph size={22} strokeWidth={1.75} aria-hidden /></span>
+          <span>{t(`artifactStep_${name}`)}</span>
         </div>;
       })()}
-      {Number.isNaN(startedAt) ? null : <span className="artifact__elapsed">{t("artifactElapsed", { time: formatElapsed(now - startedAt) })}</span>}
+      <span className="artifact__elapsed">{t("artifactEstimate", { minutes: ESTIMATE_MINUTES })}{Number.isNaN(startedAt) ? "" : ` · ${t("artifactElapsed", { time: formatElapsed(now - startedAt) })}`}</span>
       {error ? <InlineAlert tone="warning" title={t("artifactStatusUnavailable")}>{webChatErrorText(error, locale)}</InlineAlert> : null}
       {debug ? <div className="artifact__debug">
         <b>{report.stage}{report.attempt > 1 ? ` · attempt ${report.attempt}` : ""}</b>
@@ -138,9 +116,9 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, on
       </div> : null}
     </div> : null}
     {status === "failed" ? <InlineAlert tone="error" title={t("artifactFailedTitle")}>{report.error ?? ""}<br />{t("artifactReference", { id: conversationId })}</InlineAlert> : null}
-    {status === "ready" && report.phase === "full" ? <>
-      <PdfPages src={api.reportFileUrl(conversationId, "full.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
-    </> : null}
+    {fullReady ? (report.pages
+      ? <ReportPages pageUrl={n => api.reportFileUrl(conversationId, `pages/${n}.webp`)} count={report.pages} title={t("artifactReportTitle")} />
+      : <p className="artifact__note">{t("artifactNoPages")}</p>) : null}
     {status === "ready" && report.phase === "summary" ? <>
       <LockedSummary summaryUrl={api.reportFileUrl(conversationId, "summary.png")} onUnlock={unlock} unlocking={unlocking} t={t} />
       {unlockError ? <InlineAlert tone="error" title={t("artifactUnlockFailed")}>{webChatErrorText(unlockError, locale)}</InlineAlert> : null}

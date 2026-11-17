@@ -475,8 +475,10 @@ export async function createDashboardApp(options = {}) {
           if (!Number.isFinite(declared)) return send(response, 411, { error: { code: "length_required", message: "Upload length is required." } });
           if (declared > uploadLimit) return send(response, 413, { error: { code: "request_body_too_large", message: `Upload exceeds the ${uploadLimit}-byte limit.` } });
         }
+        // A redirect (a report file signed by the object store) goes to the browser as it is: following it here would pull the bytes through this server.
         const upstream = await fetchImpl(upstreamUrl, {
           method: request.method,
+          redirect: "manual",
           headers: {
             authorization: `Bearer ${authentication.token}`,
             ...(request.headers["idempotency-key"] ? { "idempotency-key": String(request.headers["idempotency-key"]) } : {}),
@@ -486,8 +488,12 @@ export async function createDashboardApp(options = {}) {
             : request.method !== "GET" ? { body: JSON.stringify(await readJson(request)) } : {})
         });
         response.statusCode = upstream.status;
-        response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
         response.setHeader("cache-control", "no-store");
+        if ([301, 302, 303, 307, 308].includes(upstream.status) && upstream.headers.get("location")) {
+          response.setHeader("location", upstream.headers.get("location"));
+          return response.end();
+        }
+        response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
         if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
         else response.end();
         return;

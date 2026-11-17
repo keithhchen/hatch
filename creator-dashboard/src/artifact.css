@@ -17,6 +17,7 @@
 .artifact__count { color: var(--chat-muted); font-size: 14px; }
 .artifact__generating { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 0; text-align: center; }
 .artifact__elapsed { color: var(--chat-muted); font-variant-numeric: tabular-nums; }
+.artifact__note { color: var(--chat-muted); margin: 0; }
 .artifact__summary { display: flex; flex-direction: column; gap: 16px; margin: 0; }
 .artifact__summary-page { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 18px rgb(0 0 0 / 0.08); }
 .artifact__rest { position: relative; max-height: 560px; overflow: hidden; }
@@ -27,6 +28,22 @@
 .artifact__page { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 18px rgb(0 0 0 / 0.08); }
 .artifact__debug { width: 100%; font-size: 12px; color: var(--chat-muted); }
 .artifact__debug ol { margin: 6px 0 0; padding-left: 18px; }
-.artifact__steps { width: 100%; max-width: 420px; }
+.artifact__step { display: flex; align-items: center; gap: 12px; animation: artifact-step-in 420ms ease both; }
+.artifact__glyph { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--web-yolk-soft); color: var(--chat-muted); }
+.artifact__glyph svg { transform-origin: center; }
+.artifact__glyph--reading svg { animation: glyph-turn 1.6s ease-in-out infinite; }
+.artifact__glyph--consulting svg { animation: glyph-glow 1.8s ease-in-out infinite; }
+.artifact__glyph--researching svg { animation: glyph-spin 3.2s linear infinite; }
+.artifact__glyph--writing svg { animation: glyph-write 1.2s ease-in-out infinite; }
+.artifact__glyph--proofreading svg { animation: glyph-scan 1.6s ease-in-out infinite; }
+.artifact__glyph--rendering svg { animation: glyph-stack 1.4s ease-in-out infinite; }
+@keyframes artifact-step-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes glyph-turn { 50% { transform: perspective(60px) rotateY(28deg); } }
+@keyframes glyph-glow { 50% { transform: scale(1.12); opacity: .6; } }
+@keyframes glyph-spin { to { transform: rotate(360deg); } }
+@keyframes glyph-write { 25% { transform: translate(-2px, 1px) rotate(-8deg); } 75% { transform: translate(2px, -1px) rotate(6deg); } }
+@keyframes glyph-scan { 50% { transform: translateX(4px); } }
+@keyframes glyph-stack { 50% { transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .artifact__glyph svg, .artifact__step { animation: none; } }
 .artifact__header-download { margin-left: auto; flex: none; }
 @media (max-width: 640px) { .artifact__header-download { padding-inline: 12px; } }

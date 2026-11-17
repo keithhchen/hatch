@@ -8,7 +8,8 @@ import type { AuthIdentityResolver, EntitlementResolver } from "../entitlements.
 import { requireAllowedOrigin, requireConversationBinding } from "../http/requestBinding.js";
 import { readJsonObject, writeJsonBounded } from "../http/httpSupport.js";
 import type { ArtifactMode } from "./mode.js";
-import type { ReportRecord } from "./ports.js";
+import { log } from "../observability/log.js";
+import type { ReportBlobs, ReportRecord } from "./ports.js";
 
 export type ArtifactRouteDeps = {
   artifact: ArtifactMode;
@@ -26,6 +27,36 @@ const FILES = { "summary.png": ["summaryPng", "image/png"], "summary.pdf": ["sum
 /** The report HTML is the agent's: it is shown framed, may run nothing and load nothing but inline styles and data: images. */
 const REPORT_HTML_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox allow-same-origin";
 
+const PAGE_FILE = /^pages\/(\d+)\.webp$/;
+const SIGNED_URL_SECONDS = 600;
+const FULL_PDF_DOWNLOAD = 'attachment; filename="report.pdf"';
+
+/** The object a file name stands for, if the name is one this report can have. */
+const objectOf = (record: ReportRecord, name: string): { key: string | undefined; type: string; available: boolean } | undefined => {
+  const page = name.match(PAGE_FILE);
+  if (page) {
+    const key = record.status === "ready" && record.phase === "full" ? record.keys?.fullPages?.[Number(page[1]) - 1] : undefined;
+    return { key, type: "image/webp", available: Boolean(key) };
+  }
+  const file = FILES[name as keyof typeof FILES];
+  return file && { key: record.keys?.[file[0]], type: file[1], available: availableFiles(record)[name as keyof typeof FILES] };
+};
+
+/**
+ * A GET URL straight from the object store, so the bytes skip this server's thin uplink. Only an https URL is one a browser can
+ * fetch (the local store's is not), and the HTML stays here: it is served with its Content-Security-Policy.
+ */
+async function browserUrl(blobs: ReportBlobs, key: string, type: string, contentDisposition: string | undefined): Promise<string | undefined> {
+  if (!blobs.presign || type === HTML) return undefined;
+  try {
+    const { url } = await blobs.presign(key, { method: "GET", expiresSeconds: SIGNED_URL_SECONDS, ...(contentDisposition ? { contentDisposition } : {}) });
+    return url.startsWith("https:") ? url : undefined;
+  } catch (error) {
+    log.warn("report_presign_failed", { key, error });
+    return undefined;
+  }
+}
+
 /** What a viewer may fetch: the summary files once the summary is published, the full files once the full phase is ready. */
 const availableFiles = (record: ReportRecord): Record<keyof typeof FILES, boolean> => {
   const full = record.status === "ready" && record.phase === "full";
@@ -40,7 +71,8 @@ const reportJson = (record: ReportRecord) => {
     ...(record.error ? { error: record.error } : {}),
     stage: record.stage, attempt: record.attempt, ...(record.startedAt ? { started_at: record.startedAt } : {}),
     // Development only: the waiting animation's raw steps. To be limited to the product owner or hidden once the UI is settled.
-    steps: record.steps
+    steps: record.steps,
+    ...(record.status === "ready" && record.phase === "full" && record.keys?.fullPages ? { pages: record.keys.fullPages.length } : {})
   };
 };
 
@@ -93,9 +125,9 @@ export async function handleProductArtifactRequest(req: http.IncomingMessage, re
 /** `/v1/conversations/:id/report[/files/:name | /unlock]`, for a conversation already bound and authorized by the caller. */
 export async function handleReportRequest(
   req: http.IncomingMessage, res: http.ServerResponse, rest: string, conversation: ConversationRecord,
-  artifact: ArtifactMode, maxHttpResponseBytes: number, allowedOrigins: readonly string[]
+  artifact: ArtifactMode, maxHttpResponseBytes: number, allowedOrigins: readonly string[], download = false
 ): Promise<boolean> {
-  const match = rest.match(/^\/report(?:\/files\/([^/]+)|(\/unlock))?$/);
+  const match = rest.match(/^\/report(?:\/files\/([^/]+(?:\/[^/]+)?)|(\/unlock))?$/);
   if (!match) return false;
   if (match[2]) {
     if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST.");
@@ -110,14 +142,20 @@ export async function handleReportRequest(
     writeJsonBounded(res, 200, reportJson(record), maxHttpResponseBytes);
     return true;
   }
-  const name = decodeURIComponent(match[1]) as keyof typeof FILES;
-  const file = FILES[name];
+  const name = decodeURIComponent(match[1]);
+  const file = objectOf(record, name);
   if (!file) throw new ConversationHttpError(404, "report_file_not_found", "Unknown report file.");
-  if (!availableFiles(record)[name]) throw new ConversationHttpError(404, "report_not_ready", "That file is not ready.");
-  const bytes = await artifact.blobs.get(record.keys![file[0]]!);
+  if (!file.available) throw new ConversationHttpError(404, "report_not_ready", "That file is not ready.");
+  const location = await browserUrl(artifact.blobs, file.key!, file.type, name === "full.pdf" && download ? FULL_PDF_DOWNLOAD : undefined);
+  if (location) {
+    res.writeHead(302, { location, "cache-control": "private, no-store" });
+    res.end();
+    return true;
+  }
+  const bytes = await artifact.blobs.get(file.key!);
   res.writeHead(200, {
-    "content-type": file[1], "content-length": bytes.length, "cache-control": "private, no-store",
-    ...(file[1] === HTML ? { "content-security-policy": REPORT_HTML_POLICY, "x-content-type-options": "nosniff" } : {})
+    "content-type": file.type, "content-length": bytes.length, "cache-control": "private, no-store",
+    ...(file.type === HTML ? { "content-security-policy": REPORT_HTML_POLICY, "x-content-type-options": "nosniff" } : {})
   });
   res.end(bytes);
   return true;

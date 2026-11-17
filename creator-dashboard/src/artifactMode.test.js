@@ -128,6 +128,8 @@ test("the web-chat proxy streams asset uploads up and report files down as raw b
   const account = { id: "11111111-1111-4111-8111-111111111111", email: "fixture@example.test", display_name: "Fixture" };
   const pdf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0xfe, 0x80]);
   const seen = [];
+  let ossHits = 0;
+  const oss = createServer((req, res) => { ossHits += 1; res.end(pdf); });
   const registry = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(req.url === "/v1/auth/me" ? account : {}));
@@ -137,11 +139,12 @@ test("the web-chat proxy streams asset uploads up and report files down as raw b
     for await (const chunk of req) chunks.push(chunk);
     seen.push({ method: req.method, url: req.url, authorization: req.headers.authorization, type: req.headers["content-type"], key: req.headers["idempotency-key"], body: Buffer.concat(chunks) });
     if (req.method === "POST") { res.setHeader("content-type", "application/json"); return res.end(JSON.stringify({ asset_id: "asset_1" })); }
+    if (req.url.includes("/report/files/signed.png")) { res.writeHead(302, { location: `http://127.0.0.1:${oss.address().port}/object.png?sig=1` }); return res.end(); }
     if (req.url.includes("/report/files/")) { res.setHeader("content-type", "application/pdf"); return res.end(pdf); }
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ intake: { fields: [] } }));
   });
-  await Promise.all([registry, runtime].map(server => new Promise(resolve => server.listen(0, "127.0.0.1", resolve))));
+  await Promise.all([registry, runtime, oss].map(server => new Promise(resolve => server.listen(0, "127.0.0.1", resolve))));
   const dashboard = await createDashboardApp({ ledgerPath: path.join(root, "ledger.jsonl"), registryUrl: `http://127.0.0.1:${registry.address().port}`, runtimeUrl: `http://127.0.0.1:${runtime.address().port}`, publicOrigin: "http://dashboard.test" });
   const api = createServer(dashboard.handler);
   await new Promise(resolve => api.listen(0, "127.0.0.1", resolve));
@@ -160,6 +163,10 @@ test("the web-chat proxy streams asset uploads up and report files down as raw b
     assert.equal(download.status, 200);
     assert.equal(download.headers.get("content-type"), "application/pdf");
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
+
+    const signed = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/signed.png?entitlement_id=e1`, { headers, redirect: "manual" });
+    assert.deepEqual([signed.status, signed.headers.get("location"), (await signed.arrayBuffer()).byteLength], [302, `http://127.0.0.1:${oss.address().port}/object.png?sig=1`, 0]);
+    assert.equal(ossHits, 0, "the proxy passes the redirect on and never follows it");
 
     const unlock = await fetch(`${base}/v1/web-chat/conversations/c1/report/unlock?entitlement_id=e1`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}" });
     assert.equal(unlock.status, 200);
@@ -181,8 +188,8 @@ test("the web-chat proxy streams asset uploads up and report files down as raw b
     assert.equal(oversize.status, 413);
     assert.equal(seen.length, before, "an oversize image never reaches the Runtime");
   } finally {
-    api.closeAllConnections(); registry.closeAllConnections(); runtime.closeAllConnections();
-    await Promise.all([api, registry, runtime].map(server => new Promise(resolve => server.close(resolve))));
+    api.closeAllConnections(); registry.closeAllConnections(); runtime.closeAllConnections(); oss.closeAllConnections();
+    await Promise.all([api, registry, runtime, oss].map(server => new Promise(resolve => server.close(resolve))));
   }
 });
 
