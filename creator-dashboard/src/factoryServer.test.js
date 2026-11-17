@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { createDashboardApp } from "../server.mjs";
 
-test("Dashboard BFF removes the legacy Factory API and forwards Product Node requests", async (context) => {
+test("Dashboard BFF answers retired routes with 404 and forwards Product Node requests", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-factory-"));
   const forwarded = [];
   const registry = createServer(async (request, response) => {
@@ -46,12 +46,6 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
   await listen(api);
   context.after(() => api.close());
   const token = await login(api);
-  const legacy = await fetch(`${serverUrl(api)}/v1/creator/factory-runs`, {
-    headers: { authorization: `Bearer ${token}` }
-  });
-  assert.equal(legacy.status, 404);
-  assert.equal(forwarded.length, 0);
-
   const retiredNodes = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/nodes/about-you/executions`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

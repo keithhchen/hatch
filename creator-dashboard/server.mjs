@@ -439,49 +439,6 @@ export async function createDashboardApp(options = {}) {
     payouts: await reconcilePayouts()
   });
 
-  const reconcileDeployments = async () => {
-    if (!registryDeploymentServiceToken) return [];
-    await portalState.refresh?.();
-    const results = [];
-    for (const state of portalState.listCreatorProducts()) {
-      const operation = state.publish_operation ?? state.rollback_operation;
-      if (!operation) continue;
-      try {
-        const completed = state.publish_operation
-          ? await resumePublishDeployment({
-              creatorId: state.creator_id,
-              productId: state.product_id,
-              state,
-              portalState,
-              commerce,
-              registryUrl,
-              fetchImpl,
-              registryDeploymentServiceToken
-            })
-          : await resumeRollbackDeployment({
-              creatorId: state.creator_id,
-              productId: state.product_id,
-              state,
-              portalState,
-              commerce,
-              registryUrl,
-              fetchImpl,
-              registryDeploymentServiceToken
-            });
-        results.push({ operation_id: operation.operation_id, status: completed.status });
-      } catch (error) {
-        await portalState.noteDeploymentFailure(
-          state.creator_id,
-          state.product_id,
-          operation.operation_id,
-          error
-        ).catch(() => undefined);
-        results.push({ operation_id: operation.operation_id, status: "pending", error: error.code ?? "deployment_failed" });
-      }
-    }
-    return results;
-  };
-
   const handler = observed(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://dashboard.local");
     const requestId = currentContext().request_id;
@@ -1609,81 +1566,6 @@ export async function createDashboardApp(options = {}) {
         }));
       }
 
-      if (request.method === "POST" && url.pathname === "/v1/creator/factory-drafts") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const body = await readJson(request, factoryRequestMaxBytes);
-        const commandKey = requireCommandKey(request, body);
-        const draftId = stableFactoryDraftId(authentication.profile.id, commandKey);
-        const draft = await portalState.saveFactoryDraft(
-          authentication.profile.id,
-          draftId,
-          body,
-          body.expected_version ?? 0,
-          commandKey
-        );
-        return send(response, 201, { draft });
-      }
-
-      const factoryDraftStartMatch = url.pathname.match(/^\/v1\/creator\/factory-drafts\/([^/]+)\/start$/);
-      if (request.method === "POST" && factoryDraftStartMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const body = await readJson(request, factoryRequestMaxBytes);
-        const commandKey = requireCommandKey(request, body);
-        const draftId = decodeURIComponent(factoryDraftStartMatch[1]);
-        const started = await portalState.beginFactoryDraftStart(
-          authentication.profile.id,
-          draftId,
-          body.expected_version,
-          commandKey
-        );
-        if (started.receipt.status === "completed") {
-          return send(response, 202, {
-            run: started.receipt.run,
-            draft_id: draftId,
-            draft_version: started.draft.version
-          });
-        }
-        const draft = started.draft;
-        const run = await registryRequest(registryUrl, "/v1/creator/factory-runs", {
-          method: "POST",
-          body: JSON.stringify({
-            task_name: draft.task_name,
-            task_brief: draft.task_brief,
-            sources: draft.sources
-          }),
-          fetchImpl,
-          headers: {
-            authorization: `Bearer ${bearerToken(request)}`,
-            "idempotency-key": commandKey
-          }
-        });
-        await portalState.completeFactoryDraftStart(authentication.profile.id, draftId, commandKey, run);
-        return send(response, 202, { run, draft_id: draftId, draft_version: draft.version });
-      }
-
-      const factoryDraftMatch = url.pathname.match(/^\/v1\/creator\/factory-drafts\/([^/]+)$/);
-      if (factoryDraftMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const draftId = decodeURIComponent(factoryDraftMatch[1]);
-        if (request.method === "GET") {
-          return send(response, 200, { draft: portalState.getFactoryDraft(authentication.profile.id, draftId) });
-        }
-        if (request.method === "PUT" || request.method === "PATCH") {
-          const body = await readJson(request, factoryRequestMaxBytes);
-          const draft = await portalState.saveFactoryDraft(
-            authentication.profile.id,
-            draftId,
-            body,
-            body.expected_version,
-            requireCommandKey(request, body)
-          );
-          return send(response, 200, { draft });
-        }
-      }
-
       if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/(?:assistant|connections)(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname) || (request.method === "POST" && url.pathname === "/v1/transcriptions")) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
@@ -1723,14 +1605,6 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (url.pathname.startsWith("/v1/creator/factory-runs")
-        || url.pathname.startsWith("/v1/creator/source-documents")
-        || url.pathname.startsWith("/v1/creator/source-snapshots")) {
-        return send(response, 404, {
-          error: { code: "route_not_found", message: "The legacy Factory API has been replaced by Product Nodes." }
-        });
-      }
-
       if (url.pathname.startsWith("/v1/creator/")) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
@@ -1748,29 +1622,8 @@ export async function createDashboardApp(options = {}) {
         };
         const creatorProducts = async () => {
           const agents = await creatorAgents();
-          let runs = [];
-          try {
-            const payload = await registryRequest(registryUrl, "/v1/creator/factory-runs", {
-              fetchImpl,
-              headers: { authorization: `Bearer ${bearerToken(request)}` }
-            });
-            runs = payload.runs ?? [];
-          } catch {
-            // Registry deployments predating Factory listing remain usable.
-          }
-          return creatorProductViews(
-            agents,
-            runs,
-            portalState.listCreatorProducts(profile.id),
-            profile.id
-          ).map((product) => {
-            const state = portalState.getCreatorProduct(profile.id, product.product_id);
-          return {
-              ...product,
-              readiness: publishReadiness(product, state),
-              access: { mode: "free", included_deliveries: 1 }
-            };
-          });
+          return creatorProductViews(agents, portalState.listCreatorProducts(profile.id))
+            .map((product) => ({ ...product, access: { mode: "free", included_deliveries: 1 } }));
         };
         if (request.method === "GET" && url.pathname === "/v1/creator/me") {
           return send(response, 200, publicProfile(profile));
@@ -1815,264 +1668,13 @@ export async function createDashboardApp(options = {}) {
           return send(response, 200, { product: creatorProductView(product, state), withdrawn_at: state.withdrawn_at });
         }
 
-        const candidateMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/candidates\/([^/]+)$/);
-        if (request.method === "GET" && candidateMatch) {
-          const productId = decodeURIComponent(candidateMatch[1]);
-          const candidateId = decodeURIComponent(candidateMatch[2]);
-          const run = await registryRequest(registryUrl, `/v1/creator/factory-runs/${encodeURIComponent(candidateId)}`, {
-            fetchImpl,
-            headers: { authorization: `Bearer ${bearerToken(request)}` }
-          });
-          const candidate = candidateFromFactoryRun(run, productId);
-          candidate.resource_version = portalState.getCreatorProduct(profile.id, productId)?.version ?? 0;
-          return send(response, 200, { candidate });
-        }
-
-        const candidateActionMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/candidates\/([^/]+)\/(approve|reject)$/);
-        if (request.method === "POST" && candidateActionMatch) {
-          const body = await readJson(request);
-          const commandKey = requireCommandKey(request, body);
-          const productId = decodeURIComponent(candidateActionMatch[1]);
-          const candidateId = decodeURIComponent(candidateActionMatch[2]);
-          // Factory-only products also expose their candidate digest in the
-          // merged Creator view. Only a current Registry Agent is evidence of
-          // an already-live legacy release that must be migrated into Portal
-          // and Commerce state before a new candidate is reviewed.
-          const existingPublishedAgent = (await creatorAgents()).find((entry) => (
-            entry.creator_id === profile.id && entry.product_id === productId
-          ));
-          if (existingPublishedAgent?.corpus_digest) {
-            await portalState.seedPublishedProduct(
-              profile.id,
-              productId,
-              publicAgentSnapshot(existingPublishedAgent)
-            );
-          }
-          if (candidateActionMatch[3] === "reject") {
-            const product = await portalState.rejectCandidate(profile.id, productId, candidateId, body.expected_version, {
-              reason: body.reason ?? "creator_rejection",
-              command_key: commandKey
-            });
-            return send(response, 200, {
-              product
-            });
-          }
-          const run = await registryRequest(registryUrl, `/v1/creator/factory-runs/${encodeURIComponent(candidateId)}`, {
-            fetchImpl,
-            headers: { authorization: `Bearer ${bearerToken(request)}` }
-          });
-          const candidate = candidateFromFactoryRun(run, productId);
-          const failedCritical = candidate.critical_gates.filter((gate) => gate.passed === false);
-          if (!candidate.corpus_verified || failedCritical.length) {
-            return send(response, 409, { error: { code: "candidate_incomplete", message: "Candidate has a failed critical gate." } });
-          }
-          if (String(body.report_digest ?? "") !== candidate.report_digest) {
-            return send(response, 409, { error: { code: "candidate_report_changed", message: "The evaluation report changed. Review it again before approving." } });
-          }
-          const acknowledgements = new Set(Array.isArray(body.acknowledgements) ? body.acknowledgements.map(String) : []);
-          const missingAcknowledgement = candidate.known_losses.find((loss) => !acknowledgements.has(String(loss.id)));
-          if (missingAcknowledgement) {
-            return send(response, 409, { error: { code: "candidate_loss_unacknowledged", message: "Acknowledge every known non-critical loss before approving." } });
-          }
-          const approvedProduct = await portalState.approveCandidate(profile.id, productId, candidate, body.expected_version, {
-              reason: body.reason ?? "creator_approval",
-              command_key: commandKey,
-              acknowledgements: [...acknowledgements].sort()
-            });
-          return send(response, 200, {
-            product: approvedProduct,
-            candidate
-          });
-        }
-
         const previewMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/storefront-preview$/);
         if (request.method === "GET" && previewMatch) {
           const productId = decodeURIComponent(previewMatch[1]);
           const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
           const state = portalState.getCreatorProduct(profile.id, productId);
-          return send(response, 200, storefrontPreview(product, profile, state, paymentMode));
-        }
-
-        const publishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/(publish|release)$/);
-        if (request.method === "POST" && publishMatch) {
-          const body = await readJson(request);
-          const unifiedRelease = publishMatch[2] === "release";
-          const commandKey = requireCommandKey(request, body);
-          const productId = decodeURIComponent(publishMatch[1]);
-          let current = portalState.getCreatorProduct(profile.id, productId);
-          if (current?.publish_operation) portalState.validatePublishCommand(profile.id, productId, { ...body, command_key: commandKey });
-          const replay = !current?.publish_operation
-            && current?.status === "published"
-            && current.release?.candidate_id === (body.candidate_id ?? current.release?.candidate_id);
-          if (replay) {
-            if (registryDeploymentServiceToken && current.release?.catalog_snapshot?.agent_id) {
-              await activateRegistryDeployment({
-                registryUrl,
-                fetchImpl,
-                registryDeploymentServiceToken,
-                creatorId: profile.id,
-                operation: {
-                  operation_id: current.active_deployment_id,
-                  agent_id: current.release.catalog_snapshot.agent_id,
-                  release_id: current.release.release_id,
-                  previous_corpus_digest: current.release.corpus_digest
-                },
-                corpusDigest: current.release.corpus_digest
-              });
-            }
-            const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
-            return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
-          }
-          let product = (await creatorProducts()).find((entry) => entry.product_id === productId);
-          if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
-          if (unifiedRelease && !current?.publish_operation && !approvalMatchesCandidate(current?.approval, product.candidate)) {
-            const candidateId = typeof body.candidate_id === "string" && body.candidate_id.trim()
-              ? body.candidate_id.trim()
-              : undefined;
-            if (!candidateId) return send(response, 409, { error: { code: "candidate_required", message: "Release requires a current Factory candidate." } });
-            const run = await registryRequest(registryUrl, `/v1/creator/factory-runs/${encodeURIComponent(candidateId)}`, {
-              fetchImpl,
-              headers: { authorization: `Bearer ${bearerToken(request)}` }
-            });
-            const candidate = candidateFromFactoryRun(run, productId);
-            const failedCritical = candidate.critical_gates.filter((gate) => gate.passed === false);
-            if (!candidate.corpus_verified || failedCritical.length) {
-              return send(response, 409, { error: { code: "candidate_incomplete", message: "Candidate has a failed critical gate." } });
-            }
-            if (String(body.report_digest ?? "") !== candidate.report_digest) {
-              return send(response, 409, { error: { code: "candidate_report_changed", message: "The evaluation report changed. Review it again before Release." } });
-            }
-            const acknowledgements = new Set(Array.isArray(body.acknowledgements) ? body.acknowledgements.map(String) : []);
-            const missingAcknowledgement = candidate.known_losses.find((loss) => !acknowledgements.has(String(loss.id)));
-            if (missingAcknowledgement) {
-              return send(response, 409, { error: { code: "candidate_loss_unacknowledged", message: "Acknowledge every known non-critical loss before Release." } });
-            }
-            await portalState.approveCandidate(profile.id, productId, candidate, body.expected_version ?? current?.version ?? product.resource_version ?? 0, {
-              reason: body.reason ?? "creator_release",
-              command_key: commandKey,
-              acknowledgements: [...acknowledgements].sort()
-            });
-            current = portalState.getCreatorProduct(profile.id, productId);
-            product = (await creatorProducts()).find((entry) => entry.product_id === productId) ?? product;
-          }
-          if (!current?.publish_operation
-            && current?.approval?.status === "approved"
-            && !approvalMatchesCandidate(current.approval, product.candidate)) {
-            await portalState.markCandidateChanged(profile.id, productId, product.candidate, {
-              reason: "factory_candidate_changed"
-            });
-            return send(response, 409, {
-              error: {
-                code: "candidate_changed",
-                message: "The Factory candidate changed. Review it again before publishing."
-              }
-            });
-          }
-          const readiness = current?.publish_operation ? { ready: true, blockers: [] } : publishReadiness(product, current, paymentMode);
-          if (!readiness.ready) {
-            return send(response, 409, {
-              error: {
-                code: "publish_not_ready",
-                message: `Publish is blocked: ${readiness.blockers.join(", ")}.`
-              }
-            });
-          }
-          // Persist a publish intent before the external Registry side effect.
-          // The intent locks the approved candidate and makes a retry resume
-          // the same operation instead of creating another release.
-          const publishExpectedVersion = unifiedRelease && !current?.publish_operation
-            ? current?.version ?? body.expected_version
-            : body.expected_version;
-          const pending = await portalState.beginPublishProduct(profile.id, productId, {
-            ...body,
-            expected_version: publishExpectedVersion,
-            command_key: commandKey,
-            agent_id: product.agent_id ?? product.candidate?.agent_id,
-            // The merged Factory view exposes the candidate digest as
-            // `product.corpus_digest`; it is not a serving pointer. Registry
-            // CAS must compare only against Portal's stable live release.
-            previous_corpus_digest: current?.release?.corpus_digest ?? null,
-            previous_release_id: current?.release?.release_id ?? null
-          });
-          const operation = pending.publish_operation;
-          const state = await resumePublishDeployment({
-            creatorId: profile.id,
-            productId,
-            state: pending,
-            portalState,
-            registryUrl,
-            fetchImpl,
-            registryDeploymentServiceToken,
-            creatorBearer: bearerToken(request)
-          });
-          return send(response, 201, {
-            product: creatorProductView(
-              state.release?.catalog_snapshot ?? (await creatorProducts()).find((entry) => entry.product_id === productId),
-              state
-            ),
-            release: state.release,
-            public_url: state.public_url,
-            canonical_url: canonicalPublicUrl(state.public_url)
-          });
-        }
-
-        const rollbackMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/releases\/([^/]+)\/rollback$/);
-        if (request.method === "POST" && rollbackMatch) {
-          const body = await readJson(request);
-          const commandKey = requireCommandKey(request, body);
-          const productId = decodeURIComponent(rollbackMatch[1]);
-          const releaseId = decodeURIComponent(rollbackMatch[2]);
-          const current = portalState.getCreatorProduct(profile.id, productId);
-          if (current) {
-            portalState.validateRollbackCommand(
-              profile.id,
-              productId,
-              releaseId,
-              body.expected_version,
-              { ...body, command_key: commandKey }
-            );
-          }
-          if (!current?.rollback_operation && current?.release?.release_id === releaseId) {
-            const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
-            if (registryDeploymentServiceToken && product?.agent_id) {
-              await activateRegistryDeployment({
-                registryUrl,
-                fetchImpl,
-                registryDeploymentServiceToken,
-                creatorId: profile.id,
-                operation: {
-                  operation_id: current.active_deployment_id,
-                  agent_id: product.agent_id,
-                  release_id: current.release.release_id,
-                  previous_corpus_digest: current.release.corpus_digest
-                },
-                corpusDigest: current.release.corpus_digest
-              });
-            }
-          return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
-          }
-          const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
-          if (!product?.agent_id) throw stateError("product_not_found", "Product Agent was not found.", 404);
-          const pending = await portalState.beginRollbackProduct(
-            profile.id,
-            productId,
-            releaseId,
-            body.expected_version,
-            { ...body, command_key: commandKey, agent_id: product.agent_id }
-          );
-          const state = await resumeRollbackDeployment({
-            creatorId: profile.id,
-            productId,
-            state: pending,
-            portalState,
-            registryUrl,
-            fetchImpl,
-            registryDeploymentServiceToken,
-            creatorBearer: bearerToken(request)
-          });
-          const rolledBackProduct = creatorProductView(product, state);
-          return send(response, 200, { product: rolledBackProduct, release: state.release, public_url: state.public_url, canonical_url: canonicalPublicUrl(state.public_url) });
+          return send(response, 200, storefrontPreview(product, profile, state));
         }
 
         if (request.method === "GET" && url.pathname === "/v1/creator/orders") {
@@ -2340,8 +1942,7 @@ export async function createDashboardApp(options = {}) {
     reconcilePendingCheckouts,
     dispatchCommerceOutbox,
     reconcilePayouts,
-    reconcileFinance,
-    reconcileDeployments
+    reconcileFinance
   };
 }
 
@@ -2375,11 +1976,7 @@ export async function startDashboardServer(options = {}) {
     app.reconcileFinance().catch(() => undefined);
   }, 30_000);
   financeTimer.unref?.();
-  const deploymentTimer = setInterval(() => {
-    app.reconcileDeployments().catch(() => undefined);
-  }, 5_000);
-  deploymentTimer.unref?.();
-  const stopTimers = () => [reconcileTimer, outboxTimer, financeTimer, deploymentTimer].forEach(clearInterval);
+  const stopTimers = () => [reconcileTimer, outboxTimer, financeTimer].forEach(clearInterval);
   let released;
   const release = () => released ??= (async () => {
     stopTimers();
@@ -2404,7 +2001,6 @@ export async function startDashboardServer(options = {}) {
   app.reconcilePendingCheckouts().catch(() => undefined);
   app.dispatchCommerceOutbox().catch(() => undefined);
   app.reconcileFinance().catch(() => undefined);
-  app.reconcileDeployments().catch(() => undefined);
   return { ...app, server, port, host, shutdown };
 }
 
@@ -3016,10 +2612,6 @@ function pendingPaymentOutcome(session, payment) {
   };
 }
 
-function stableFactoryDraftId(creatorId, commandKey) {
-  return `draft_${createHash("sha256").update(`${creatorId}\0${commandKey}`).digest("hex").slice(0, 24)}`;
-}
-
 function stablePaymentId(checkoutSessionId) {
   return stableAuthorityUuid(`payment:${checkoutSessionId}`);
 }
@@ -3225,188 +2817,6 @@ async function completeCheckoutAccess({ session, order, entitlement, portalState
   });
 }
 
-async function resumePublishDeployment({
-  creatorId,
-  productId,
-  state,
-  portalState,
-  registryUrl,
-  fetchImpl,
-  registryDeploymentServiceToken,
-  creatorBearer
-}) {
-  let current = state;
-  let operation = current?.publish_operation;
-  if (!operation) return current;
-  if (!operation.catalog_snapshot) {
-    let response;
-    try {
-      response = registryDeploymentServiceToken
-        ? await registryRequest(
-            registryUrl,
-            `/v1/internal/deployments/factory-runs/${encodeURIComponent(operation.candidate_id)}/stage`,
-            {
-              method: "POST",
-                body: JSON.stringify({
-                  creator_id: creatorId,
-                  operation_id: operation.operation_id,
-                  corpus_digest: operation.candidate_digest,
-                  product_id: productId
-              }),
-              fetchImpl,
-              headers: { authorization: `Bearer ${registryDeploymentServiceToken}` }
-            }
-          )
-        : await registryRequest(
-            registryUrl,
-            `/v1/creator/factory-runs/${encodeURIComponent(operation.candidate_id)}/publish`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                corpus_digest: operation.candidate_digest,
-                publish_operation_id: operation.operation_id,
-                activate: false
-              }),
-              fetchImpl,
-              headers: { authorization: `Bearer ${creatorBearer}` }
-            }
-          );
-    } catch (error) {
-      if (error.code === "candidate_changed") {
-        await portalState.abandonUnmaterializedPublish(creatorId, productId, operation.operation_id, "factory_candidate_changed");
-      }
-      throw error;
-    }
-    const staged = response.agent_corpus ?? response;
-    if (staged.creator_id !== creatorId
-      || staged.product_id !== productId
-      || staged.corpus_digest !== operation.candidate_digest
-      || (operation.agent_id && staged.agent_id !== operation.agent_id)) {
-      throw stateError("deployment_target_mismatch", "Registry materialized a different release than the approved deployment.", 409);
-    }
-    const snapshot = publicAgentSnapshot(staged);
-    current = await portalState.markPublishMaterialized(creatorId, productId, operation.operation_id, snapshot);
-    operation = current.publish_operation;
-    // A legacy Registry implementation publishes and activates in one call.
-    // Production always configures the deployment token and uses stage-only.
-    if (!registryDeploymentServiceToken && response.current !== false) {
-      current = await portalState.markPublishRegistryActivated(creatorId, productId, operation.operation_id);
-      operation = current.publish_operation;
-    }
-  }
-  if (!operation.registry_activated_at) {
-    try {
-      await activateRegistryDeployment({
-        registryUrl,
-        fetchImpl,
-        registryDeploymentServiceToken,
-        creatorBearer,
-        creatorId,
-        productId,
-        operation,
-        corpusDigest: operation.candidate_digest
-      });
-    } catch (error) {
-      const liveRelease = current?.release;
-      if (operation.materialized_at
-        && !operation.registry_activated_at
-        && error?.code === "invalid_status"
-        && liveRelease?.corpus_digest === operation.candidate_digest) {
-        return portalState.reconcileStaleMaterializedPublish(
-          creatorId,
-          productId,
-          operation.operation_id,
-          "registry_rejected_stale_factory_revision"
-        );
-      }
-      throw error;
-    }
-    current = await portalState.markPublishRegistryActivated(creatorId, productId, operation.operation_id);
-    operation = current.publish_operation;
-  }
-  return portalState.commitPublishProduct(creatorId, productId, operation.operation_id);
-}
-
-async function resumeRollbackDeployment({
-  creatorId,
-  productId,
-  state,
-  portalState,
-  registryUrl,
-  fetchImpl,
-  registryDeploymentServiceToken,
-  creatorBearer
-}) {
-  let current = state;
-  let operation = current?.rollback_operation;
-  if (!operation) return current;
-  if (!operation.registry_activated_at) {
-    await activateRegistryDeployment({
-      registryUrl,
-      fetchImpl,
-      registryDeploymentServiceToken,
-      creatorBearer,
-      creatorId,
-      productId,
-      operation,
-      corpusDigest: operation.corpus_digest
-    });
-    current = await portalState.markRollbackRegistryActivated(creatorId, productId, operation.operation_id);
-    operation = current.rollback_operation;
-  }
-  return portalState.commitRollbackProduct(creatorId, productId, operation.operation_id);
-}
-
-async function activateRegistryDeployment({
-  registryUrl,
-  fetchImpl,
-  registryDeploymentServiceToken,
-  creatorBearer,
-  creatorId,
-  productId,
-  operation,
-  corpusDigest
-}) {
-  if (!operation.agent_id) throw stateError("deployment_agent_missing", "The deployment is not bound to an Agent.", 409);
-  const body = JSON.stringify({
-    creator_id: creatorId,
-    operation_id: operation.operation_id,
-    expected_current_digest: operation.previous_corpus_digest ?? null,
-    release_id: operation.release_id,
-    ...(productId && operation.candidate_id ? {
-      product_id: productId,
-      factory_run_id: operation.candidate_id
-    } : {}),
-    ...(operation.catalog_snapshot?.brief_spec ? { brief_spec: operation.catalog_snapshot.brief_spec } : {})
-  });
-  const response = registryDeploymentServiceToken
-    ? await registryRequest(
-        registryUrl,
-        `/v1/internal/deployments/agent-corpora/${encodeURIComponent(operation.agent_id)}/releases/${encodeURIComponent(corpusDigest)}/activate`,
-        {
-          method: "POST",
-          body,
-          fetchImpl,
-          headers: { authorization: `Bearer ${registryDeploymentServiceToken}` }
-        }
-      )
-    : await registryRequest(
-        registryUrl,
-        `/v1/creator/agent-corpora/${encodeURIComponent(operation.agent_id)}/releases/${encodeURIComponent(corpusDigest)}/activate`,
-        {
-          method: "POST",
-          body,
-          fetchImpl,
-          headers: { authorization: `Bearer ${creatorBearer}` }
-        }
-      );
-  const activated = response.agent_corpus ?? response;
-  if (activated.corpus_digest !== corpusDigest) {
-    throw stateError("deployment_target_mismatch", "Registry activated a different Corpus release.", 502);
-  }
-  return activated;
-}
-
 function checkoutOutcomeBody(session, order, entitlement, payment) {
   const entitlementId = entitlement?.entitlement_id ?? session.entitlement_id ?? order?.entitlement_id ?? null;
   return {
@@ -3468,23 +2878,6 @@ async function authoritativeCatalog(registryUrl, fetchImpl, _portalState) {
     return [`${agent.creator_id}:${agent.product_id}`, agent];
   }));
   return [...byProduct.values()];
-}
-
-function publicAgentSnapshot(product) {
-  return {
-    creator_id: product.creator_id,
-    creator_name: product.creator_name,
-    product_id: product.product_id,
-    product_name: product.product_name ?? product.name,
-    product_description: product.product_description ?? product.description ?? "",
-    product_promise: product.product_promise ?? product.promise ?? "",
-    product_boundaries: [...(product.product_boundaries ?? product.boundaries ?? [])],
-    ...(product.brief_spec ? { brief_spec: structuredClone(product.brief_spec) } : {}),
-    presentation: structuredClone(product.presentation ?? {}),
-    corpus_digest: product.corpus_digest,
-    published_at: product.published_at ?? null,
-    status: "published"
-  };
 }
 
 function canonicalPublicUrl(value) {
@@ -3566,239 +2959,40 @@ function publicProductPath(agent) {
   return `/products/${encodeURIComponent(agent?.product_id)}`;
 }
 
-function creatorProductViews(agents, runs, states, creatorId) {
+function creatorProductViews(agents, states) {
   const stateByProduct = new Map(states.map((state) => [state.product_id, state]));
-  const runByProduct = new Map(runs
-    .filter((run) => run?.product?.id)
-    .map((run) => [run.product.id, run]));
-  const products = agents.map((agent) => {
-    const run = runByProduct.get(agent.product_id);
-    return creatorProductView(agent, stateByProduct.get(agent.product_id), run);
-  });
-  const existing = new Set(products.map((product) => product.product_id));
-  for (const run of runs) {
-    if (!run?.product?.id || existing.has(run.product.id)) continue;
-    products.push(creatorProductView({
-      creator_id: creatorId,
-      // Internal Registry/Portal alias; public URLs and response identity use product_id.
-      agent_id: run.product.id,
-      product_id: run.product.id,
-      product_name: run.product.name,
-      product_description: run.product.description,
-      product_promise: run.product.promise,
-      product_boundaries: run.product.boundaries,
-      ...(run.product.brief_spec ? { brief_spec: structuredClone(run.product.brief_spec) } : {}),
-      corpus_digest: run.candidate?.corpus_digest ?? run.candidate?.system_digest,
-      status: run.status === "ready" ? "candidate_ready" : "preparing"
-    }, stateByProduct.get(run.product.id), run));
-  }
-  return products.sort((left, right) => String(right.updated_at ?? right.published_at ?? "").localeCompare(String(left.updated_at ?? left.published_at ?? "")));
+  return agents
+    .map((agent) => creatorProductView(agent, stateByProduct.get(agent.product_id)))
+    .sort((left, right) => String(right.updated_at ?? right.published_at ?? "").localeCompare(String(left.updated_at ?? left.published_at ?? "")));
 }
 
-function creatorProductView(agent, state, run) {
+function creatorProductView(agent, state) {
   if (!agent) return null;
   const base = agent.name ? agent : catalogAgentToProduct(agent);
-  let runCandidate;
-  if (run?.candidate && run.status === "ready") {
-    try {
-      runCandidate = candidateFromFactoryRun(run, base.product_id);
-    } catch {
-      runCandidate = undefined;
-    }
-  }
-  const status = state?.status
-    ?? (runCandidate?.status === "ready_for_review" ? "candidate_ready" : base.status);
-  const candidate = runCandidate ?? state?.candidate ?? null;
-  const candidateApproved = approvalMatchesCandidate(state?.approval, candidate);
-  const presentedCandidate = candidateApproved
-    ? { ...candidate, status: "approved", approval_status: "approved", approved: true }
-    : candidate;
-  const presentedApproval = state?.approval?.status === "approved" && !candidateApproved
-    ? { ...state.approval, status: "stale" }
-    : state?.approval ?? null;
   return {
     ...base,
     version: state?.version ?? 0,
     resource_version: state?.version ?? 0,
-    status,
-    candidate: presentedCandidate,
-    approval: presentedApproval,
-    // The new Registry live release is authoritative. PortalState only keeps
-    // the legacy browser-side projection and must not erase a release that
-    // arrived from the Registry Product listing.
+    status: state?.status ?? base.status,
+    // The Registry live release is authoritative; PortalState only keeps the
+    // browser-side projection and must not erase a release from the Registry listing.
     release: state?.release ?? base.release ?? null,
     releases: state?.releases ?? (state?.release
       ? [state.release]
       : (base.release ? [base.release] : [])),
     public_url: canonicalPublicUrl(state?.public_url) ?? (base.status === "published" ? `/products/${encodeURIComponent(base.product_id)}` : null),
-    readiness: {
-      candidate_approved: candidateApproved,
-      publishable_corpus: Boolean(runCandidate?.corpus_verified || base.corpus_digest),
-      ready: Boolean(candidateApproved && (runCandidate?.corpus_verified || base.corpus_digest))
-    },
-    updated_at: state?.updated_at ?? base.updated_at ?? run?.updated_at ?? base.published_at
-  };
-}
-
-function candidateFromFactoryRun(run, expectedProductId) {
-  if (!run || run.status !== "ready" || !run.candidate) {
-    throw stateError("candidate_not_ready", "Factory candidate is not ready for review.", 409);
-  }
-  if (run.product?.id && run.product.id !== expectedProductId) {
-    throw stateError("candidate_product_mismatch", "Candidate does not belong to this product.", 409);
-  }
-  const digest = run.candidate.corpus_digest ?? run.candidate.system_digest;
-  const knownLosses = Array.isArray(run.candidate.known_losses)
-    ? run.candidate.known_losses.map((loss, index) => ({ ...loss, id: String(loss?.id ?? `loss_${index + 1}`) }))
-    : [];
-  const criticalGates = [
-    {
-      id: "verified_corpus",
-      label: "Verified Agent Corpus",
-      critical: true,
-      passed: Boolean(run.candidate.corpus_verified),
-      detail: "Registry verification produced an exact immutable Corpus digest."
-    },
-    {
-      id: "factory_evaluation_complete",
-      label: "Development and regression evaluation complete",
-      critical: true,
-      passed: run.status === "ready" && Boolean(run.candidate.regression_digest),
-      detail: "The candidate is bound to the final regression evaluation asset."
-    },
-    {
-      id: "sealed_held_out_passed",
-      label: "Sealed held-out evaluation passed",
-      critical: true,
-      passed: run.status === "ready"
-        && Boolean(run.candidate.held_out_digest)
-        && Number(run.candidate.failed_critical_cases ?? 0) === 0,
-      detail: `${Number(run.candidate.held_out_sample_count ?? 0)} sealed cases; no failed critical case.`
-    }
-  ];
-  const reportDigest = `sha256:${createHash("sha256").update(JSON.stringify({
-    candidate_id: run.id,
-    candidate_version: run.candidate.version,
-    corpus_digest: digest,
-    system_digest: run.candidate.system_digest,
-    reason: run.candidate.reason ?? null,
-    held_out_digest: run.candidate.held_out_digest ?? null,
-    regression_digest: run.candidate.regression_digest ?? null,
-    known_losses: knownLosses,
-    critical_gates: criticalGates.map(({ id, passed }) => ({ id, passed }))
-  })).digest("hex")}`;
-  return {
-    candidate_id: run.id,
-    // Internal deployment seam only; public candidate identity is product_id.
-    agent_id: expectedProductId,
-    product_id: expectedProductId,
-    version: run.candidate.version,
-    digest,
-    system_digest: run.candidate.system_digest,
-    corpus_verified: Boolean(run.candidate.corpus_verified),
-    status: "ready_for_review",
-    critical_gates: criticalGates,
-    critical_gates_passed: criticalGates.every((gate) => gate.passed),
-    report_digest: run.candidate.report_digest ?? reportDigest,
-    regression_digest: run.candidate.regression_digest ?? null,
-    held_out_digest: run.candidate.held_out_digest ?? null,
-    held_out_sample_count: run.candidate.held_out_sample_count ?? null,
-    failed_critical_cases: Number(run.candidate.failed_critical_cases ?? 0),
-    factory_version: run.candidate.factory_version ?? run.factory_version ?? "creator-factory-contract-1",
-    material_changes: Array.isArray(run.candidate.material_changes) ? run.candidate.material_changes : [],
-    product_boundaries: Array.isArray(run.product?.boundaries) ? run.product.boundaries : [],
-    known_losses: knownLosses,
-    created_at: run.updated_at
+    updated_at: state?.updated_at ?? base.updated_at ?? base.published_at
   };
 }
 
 function storefrontPreview(product, profile, state) {
-  const candidate = product.candidate ?? state?.candidate;
-  const presentedCandidate = approvalMatchesCandidate(state?.approval, candidate)
-    ? { ...candidate, status: "approved", approval_status: "approved", approved: true }
-    : candidate;
   return {
     product,
     creator: profile,
-    candidate: presentedCandidate,
     resource_version: state?.version ?? product.resource_version ?? 0,
     public_url: `/products/${encodeURIComponent(product.product_id)}`,
-    readiness: publishReadiness(product, state),
     preview: true
   };
-}
-
-function publishReadiness(product, state) {
-  const candidate = product?.candidate ?? state?.candidate;
-  const approval = state?.approval ?? product?.approval;
-  const gates = Array.isArray(candidate?.critical_gates) ? candidate.critical_gates : [];
-  const candidateApproved = approvalMatchesCandidate(approval, candidate);
-  const noCriticalFailures = Boolean(candidate?.corpus_verified)
-    && gates.length > 0
-    && gates.every((gate) => gate.passed !== false);
-  // Product boundaries are an optional projection of the Creator's method.
-  // Older Product-only rows (and a newly created Product before its first
-  // corpus revision) legitimately have an empty boundary list because the
-  // authoring contract has no separate boundary editor. Do not make that
-  // optional field a dead-end release gate: the promise and description are
-  // the required public copy, while any supplied boundaries still flow to
-  // Registry and the buyer storefront.
-  const copyComplete = Boolean(
-    String(product?.promise ?? product?.product_promise ?? "").trim()
-    && String(product?.description ?? product?.product_description ?? "").trim()
-  );
-  const ownershipValid = Boolean(product?.creator_id);
-  const materializationReady = Boolean(candidate?.digest && candidate?.corpus_verified);
-  const productIdentityValid = Boolean(product?.product_id && UUID_V4_PATTERN.test(product.product_id));
-  const checks = [
-    [candidateApproved, "candidate approval is stale"],
-    [noCriticalFailures, "critical candidate gates are incomplete"],
-    [copyComplete, "public promise, description, or boundaries are incomplete"],
-    [ownershipValid, "Expert ownership is missing"],
-    [materializationReady, "Registry materialization is not ready"],
-    [productIdentityValid, "canonical Product UUID is invalid"]
-  ];
-  return {
-    candidate_approved: candidateApproved,
-    no_critical_failures: noCriticalFailures,
-    public_copy_complete: copyComplete,
-    ownership_valid: ownershipValid,
-    materialization_ready: materializationReady,
-    product_identity_valid: productIdentityValid,
-    blockers: checks.filter(([ready]) => !ready).map(([, message]) => message),
-    ready: checks.every(([ready]) => ready)
-  };
-}
-
-const BRIEF_FIELD_ID_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
-
-function isPublishableBriefSpec(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)
-    || value.contract_version !== "1" || !Array.isArray(value.fields)
-    || value.fields.length < 1 || value.fields.length > 16) return false;
-  if (Object.keys(value).some((key) => key !== "contract_version" && key !== "fields")) return false;
-  const ids = new Set();
-  return value.fields.every((field) => {
-    if (!field || typeof field !== "object" || Array.isArray(field)) return false;
-    const keys = Object.keys(field);
-    if (keys.some((key) => !["id", "label", "required"].includes(key))) return false;
-    const id = typeof field.id === "string" ? field.id.trim() : "";
-    const label = typeof field.label === "string" ? field.label.trim() : "";
-    if (!BRIEF_FIELD_ID_PATTERN.test(id) || id.length > 128 || ids.has(id)) return false;
-    if (!label || label.length > 500 || label.includes("\u0000") || typeof field.required !== "boolean") return false;
-    ids.add(id);
-    return true;
-  });
-}
-
-function approvalMatchesCandidate(approval, candidate) {
-  return Boolean(
-    approval?.status === "approved"
-    && candidate
-    && approval.candidate_id === candidate.candidate_id
-    && approval.candidate_digest === candidate.digest
-    && approval.report_digest === candidate.report_digest
-  );
 }
 
 function enrichEntitlements(entitlements, catalog, deliveries = [], creatorNames = new Map()) {

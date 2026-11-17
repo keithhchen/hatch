@@ -7,7 +7,6 @@ const EMPTY_STATE = Object.freeze({
   contract_version: "1",
   checkout_sessions: {},
   creator_products: {},
-  factory_drafts: {},
   web_sessions: {},
   oauth_authorization_transactions: {},
   oauth_authorization_codes: {},
@@ -366,116 +365,6 @@ export class PortalStateStore {
     return clone(Object.values(this.#state.checkout_sessions));
   }
 
-  getFactoryDraft(creatorId, draftId = "default") {
-    const draft = this.#state.factory_drafts[factoryDraftKey(creatorId, draftId)];
-    return clone(draft ?? {
-      draft_id: draftId,
-      creator_id: creatorId,
-      version: 0,
-      task_name: "",
-      task_brief: "",
-      sources: [{ id: "S1", title: "", authority: "private_material", content: "" }],
-      saved_at: null
-    });
-  }
-
-  async saveFactoryDraft(creatorId, draftId, input, expectedVersion, commandKey) {
-    return this.#mutate((state) => {
-      const key = factoryDraftKey(creatorId, draftId);
-      const current = state.factory_drafts[key] ?? this.getFactoryDraft(creatorId, draftId);
-      const content = {
-        task_name: String(input.task_name ?? ""),
-        task_brief: String(input.task_brief ?? ""),
-        sources: Array.isArray(input.sources) ? clone(input.sources) : []
-      };
-      const payloadDigest = factoryDraftDigest(content);
-      if (commandKey && current.last_command?.key === commandKey) {
-        if (current.last_command.payload_digest !== payloadDigest) {
-          throw stateError("idempotency_conflict", "This Factory save key was already used with different content.", 409);
-        }
-        return current;
-      }
-      // If the server committed but the response was lost, a client may retry
-      // the identical snapshot with a fresh transport key and its prior
-      // expected_version. Treat that exact content as recovery, never as a
-      // stale overwrite.
-      if (Number(expectedVersion) !== Number(current.version)
-        && Number(expectedVersion) === Number(current.version) - 1
-        && factoryDraftDigest(current) === payloadDigest) {
-        return current;
-      }
-      assertExpectedVersion(current, expectedVersion);
-      const next = {
-        draft_id: draftId,
-        creator_id: creatorId,
-        version: current.version + 1,
-        ...content,
-        ...(commandKey ? { last_command: { key: commandKey, payload_digest: payloadDigest } } : {}),
-        saved_at: this.clock().toISOString()
-      };
-      state.factory_drafts[key] = next;
-      return next;
-    });
-  }
-
-  async clearFactoryDraft(creatorId, draftId = "default") {
-    await this.#mutate((state) => {
-      delete state.factory_drafts[factoryDraftKey(creatorId, draftId)];
-    });
-  }
-
-  async beginFactoryDraftStart(creatorId, draftId, expectedVersion, commandKey) {
-    return this.#mutate((state) => {
-      const key = factoryDraftKey(creatorId, draftId);
-      const draft = state.factory_drafts[key] ?? this.getFactoryDraft(creatorId, draftId);
-      if (!draft || draft.version <= 0) {
-        throw stateError("factory_draft_empty", "Save the Factory draft before starting distillation.", 422);
-      }
-      if (!commandKey) throw stateError("idempotency_required", "Factory start requires an Idempotency-Key.", 422);
-      const payloadDigest = portalCommandDigest("factory.start", {
-        draft_id: draftId,
-        expected_version: Number(expectedVersion)
-      });
-      const existing = draft.start_commands?.[commandKey];
-      if (existing) {
-        if (existing.payload_digest !== payloadDigest) {
-          throw stateError("idempotency_conflict", "This Factory start key was already used with a different draft version.", 409);
-        }
-        return { draft, receipt: existing };
-      }
-      assertExpectedVersion(draft, expectedVersion);
-      draft.start_commands ??= {};
-      draft.start_commands[commandKey] = {
-        command_key: commandKey,
-        payload_digest: payloadDigest,
-        status: "started",
-        started_at: this.clock().toISOString()
-      };
-      state.factory_drafts[key] = draft;
-      return { draft, receipt: draft.start_commands[commandKey] };
-    });
-  }
-
-  async completeFactoryDraftStart(creatorId, draftId, commandKey, run) {
-    return this.#mutate((state) => {
-      const draft = requireRecord(
-        state.factory_drafts[factoryDraftKey(creatorId, draftId)],
-        "factory_draft_empty",
-        "Factory draft was not found."
-      );
-      const receipt = requireRecord(
-        draft.start_commands?.[commandKey],
-        "factory_start_not_pending",
-        "Factory start command was not found."
-      );
-      if (receipt.status === "completed") return { draft, receipt };
-      receipt.status = "completed";
-      receipt.run = clone(run);
-      receipt.completed_at = this.clock().toISOString();
-      return { draft, receipt };
-    });
-  }
-
   listCreatorProducts(creatorId) {
     return clone(Object.values(this.#state.creator_products).filter((item) => (
       creatorId === undefined || item.creator_id === creatorId
@@ -484,444 +373,6 @@ export class PortalStateStore {
 
   getCreatorProduct(creatorId, productId) {
     return clone(this.#state.creator_products[creatorProductKey(creatorId, productId)]);
-  }
-
-  async seedPublishedProduct(creatorId, productId, catalogSnapshot) {
-    if (!catalogSnapshot?.corpus_digest) return this.getCreatorProduct(creatorId, productId);
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      if (record.release) return record;
-      const now = this.clock().toISOString();
-      const releaseId = String(catalogSnapshot.release_id ?? catalogSnapshot.corpus_digest);
-      record.release = {
-        release_id: releaseId,
-        revision: 0,
-        corpus_digest: catalogSnapshot.corpus_digest,
-        catalog_snapshot: clone(catalogSnapshot),
-        deployment_operation_id: `migration:${releaseId}`,
-        current: true,
-        published_at: catalogSnapshot.published_at ?? now
-      };
-      record.releases = [clone(record.release)];
-      record.active_deployment_id = record.release.deployment_operation_id;
-      record.public_url = `/products/${encodeURIComponent(productId)}`;
-      record.status = "published";
-      record.updated_at = now;
-      appendAudit(record, "release.migrated", creatorId, "registry_release_migration", {
-        operation_id: record.active_deployment_id,
-        release_id: releaseId,
-        corpus_digest: record.release.corpus_digest
-      }, this.clock());
-      return record;
-    });
-  }
-
-  async approveCandidate(creatorId, productId, candidate, expectedVersion, audit = {}) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const commandPayload = {
-        candidate_id: candidate.candidate_id,
-        candidate_digest: candidate.digest,
-        report_digest: candidate.report_digest ?? candidate.digest,
-        expected_version: expectedVersion,
-        acknowledgements: audit.acknowledgements ?? [],
-        reason: audit.reason ?? "creator_approval"
-      };
-      if (replayProductCommand(record, "candidate.approve", audit.command_key, commandPayload)) return record;
-      assertNoDeploymentInProgress(record);
-      assertExpectedVersion(record, expectedVersion);
-      record.version += 1;
-      record.candidate = clone(candidate);
-      record.approval = {
-        candidate_id: candidate.candidate_id,
-        candidate_digest: candidate.digest,
-        report_digest: candidate.report_digest ?? candidate.digest,
-        status: "approved",
-        approved_at: this.clock().toISOString()
-      };
-      record.status = "ready_to_preview";
-      record.updated_at = this.clock().toISOString();
-      appendAudit(record, "candidate.approved", creatorId, audit.reason ?? "creator_approval", {
-        candidate_id: candidate.candidate_id,
-        candidate_digest: candidate.digest,
-        report_digest: candidate.report_digest ?? candidate.digest
-      }, this.clock());
-      rememberProductCommand(record, "candidate.approve", audit.command_key, commandPayload);
-      return record;
-    });
-  }
-
-  async rejectCandidate(creatorId, productId, candidateId, expectedVersion, audit = {}) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const commandPayload = {
-        candidate_id: candidateId,
-        expected_version: expectedVersion,
-        reason: audit.reason ?? "creator_rejection"
-      };
-      if (replayProductCommand(record, "candidate.reject", audit.command_key, commandPayload)) return record;
-      assertNoDeploymentInProgress(record);
-      assertExpectedVersion(record, expectedVersion);
-      record.version += 1;
-      record.approval = { candidate_id: candidateId, status: "rejected", rejected_at: this.clock().toISOString() };
-      record.status = "candidate_rejected";
-      record.updated_at = this.clock().toISOString();
-      appendAudit(record, "candidate.rejected", creatorId, audit.reason ?? "creator_rejection", {
-        candidate_id: candidateId
-      }, this.clock());
-      rememberProductCommand(record, "candidate.reject", audit.command_key, commandPayload);
-      return record;
-    });
-  }
-
-  async markCandidateChanged(creatorId, productId, candidate, audit = {}) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const approval = record.approval;
-      if (approvalMatchesCandidate(approval, candidate)) return record;
-      const now = this.clock().toISOString();
-      const abandonedOperation = record.publish_operation
-        ? clone(record.publish_operation)
-        : null;
-      record.version += 1;
-      record.candidate = clone(candidate);
-      record.approval = approval ? {
-        ...approval,
-        status: "stale",
-        invalidated_at: now,
-        current_candidate_id: candidate.candidate_id,
-        current_candidate_digest: candidate.digest,
-        current_report_digest: candidate.report_digest
-      } : null;
-      delete record.publish_operation;
-      record.status = "candidate_ready";
-      record.updated_at = now;
-      appendAudit(record, "candidate.approval_stale", creatorId, audit.reason ?? "candidate_changed", {
-        previous_candidate_id: approval?.candidate_id ?? null,
-        previous_candidate_digest: approval?.candidate_digest ?? null,
-        current_candidate_id: candidate.candidate_id,
-        current_candidate_digest: candidate.digest,
-        abandoned_publish_operation_id: abandonedOperation?.operation_id ?? null
-      }, this.clock());
-      return record;
-    });
-  }
-
-  validatePublishProduct(creatorId, productId, input = {}) {
-    const record = requireRecord(
-      this.#state.creator_products[creatorProductKey(creatorId, productId)],
-      "product_not_found",
-      "Product workflow state was not found."
-    );
-    assertPublishable(record, input);
-    return clone(record);
-  }
-
-  validatePublishCommand(creatorId, productId, input = {}) {
-    const record = requireRecord(
-      this.#state.creator_products[creatorProductKey(creatorId, productId)],
-      "product_not_found",
-      "Product workflow state was not found."
-    );
-    validateDeploymentCommand(
-      record.publish_operation ?? record.last_publish_operation,
-      "release.publish",
-      input.command_key,
-      publishCommandPayload(input)
-    );
-    return clone(record);
-  }
-
-  async beginPublishProduct(creatorId, productId, input = {}) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const existing = record.publish_operation;
-      if (existing) {
-        validateDeploymentCommand(existing, "release.publish", input.command_key, publishCommandPayload(input));
-        const sameIntent = existing.candidate_id === (input.candidate_id ?? existing.candidate_id);
-        if (!sameIntent) {
-          throw stateError("publish_in_progress", "Another publish is already in progress for this product.", 409);
-        }
-        return record;
-      }
-      assertPublishable(record, input);
-      const now = this.clock().toISOString();
-      record.version += 1;
-      record.status = "publishing";
-      record.publish_operation = {
-        operation_id: this.idFactory("publish"),
-        release_id: this.idFactory("release"),
-        command_key: input.command_key ?? null,
-        payload_digest: input.command_key
-          ? portalCommandDigest("release.publish", publishCommandPayload(input))
-          : null,
-        agent_id: input.agent_id ?? record.candidate?.agent_id ?? null,
-        previous_corpus_digest: input.previous_corpus_digest ?? record.release?.corpus_digest ?? null,
-        previous_release_id: input.previous_release_id ?? record.release?.release_id ?? null,
-        previous_deployment_id: record.active_deployment_id ?? null,
-        candidate_id: record.approval.candidate_id,
-        candidate_digest: record.approval.candidate_digest,
-        report_digest: record.approval.report_digest,
-        started_at: now
-      };
-      appendAudit(record, "release.publish_started", creatorId, input.reason ?? "creator_publish", {
-        operation_id: record.publish_operation.operation_id,
-        candidate_id: record.publish_operation.candidate_id,
-        candidate_digest: record.publish_operation.candidate_digest
-      }, this.clock());
-      record.updated_at = now;
-      return record;
-    });
-  }
-
-  async markPublishMaterialized(creatorId, productId, operationId, catalogSnapshot) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = requireRecord(record.publish_operation, "publish_not_pending", "No publish operation is pending.");
-      if (operation.operation_id !== operationId) {
-        throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
-      }
-      if (operation.catalog_snapshot) {
-        if (operation.catalog_snapshot.corpus_digest !== catalogSnapshot?.corpus_digest) {
-          throw stateError("publish_operation_changed", "The materialized release changed for this publish operation.", 409);
-        }
-        return record;
-      }
-      operation.catalog_snapshot = clone(catalogSnapshot);
-      operation.agent_id = catalogSnapshot?.agent_id ?? operation.agent_id;
-      operation.materialized_at = this.clock().toISOString();
-      record.updated_at = operation.materialized_at;
-      return record;
-    });
-  }
-
-  async abandonUnmaterializedPublish(creatorId, productId, operationId, reason = "candidate_changed") {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = requireRecord(record.publish_operation, "publish_not_pending", "No publish operation is pending.");
-      if (operation.operation_id !== operationId) {
-        throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
-      }
-      if (operation.materialized_at || operation.registry_activated_at) {
-        throw stateError("deployment_in_progress", "A materialized deployment must be resumed rather than abandoned.", 409);
-      }
-      const now = this.clock().toISOString();
-      record.approval = record.approval ? { ...record.approval, status: "stale", invalidated_at: now } : null;
-      record.status = "candidate_ready";
-      record.updated_at = now;
-      delete record.publish_operation;
-      appendAudit(record, "release.publish_abandoned", creatorId, reason, {
-        operation_id: operation.operation_id,
-        candidate_id: operation.candidate_id,
-        candidate_digest: operation.candidate_digest
-      }, this.clock());
-      return record;
-    });
-  }
-
-  async reconcileStaleMaterializedPublish(creatorId, productId, operationId, reason = "stale_factory_revision") {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = requireRecord(record.publish_operation, "publish_not_pending", "No publish operation is pending.");
-      if (operation.operation_id !== operationId) {
-        throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
-      }
-      if (!operation.materialized_at || operation.registry_activated_at) {
-        throw stateError("deployment_not_stale", "Only a materialized, inactive deployment can be reconciled as stale.", 409);
-      }
-      if (record.release?.corpus_digest !== operation.candidate_digest) {
-        throw stateError("deployment_release_mismatch", "The existing release does not match the stale deployment.", 409);
-      }
-      const now = this.clock().toISOString();
-      record.last_publish_operation = {
-        ...clone(operation),
-        reconciled_at: now,
-        reconciliation_reason: reason
-      };
-      delete record.publish_operation;
-      record.status = record.release?.current ? "published" : record.status;
-      record.updated_at = now;
-      appendAudit(record, "release.publish_reconciled", creatorId, reason, {
-        operation_id: operation.operation_id,
-        candidate_id: operation.candidate_id,
-        candidate_digest: operation.candidate_digest
-      }, this.clock());
-      return record;
-    });
-  }
-
-  async markPublishRegistryActivated(creatorId, productId, operationId) {
-    return this.#markDeploymentPhase(creatorId, productId, "publish_operation", operationId, "registry_activated_at");
-  }
-
-  async commitPublishProduct(creatorId, productId, operationId) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = requireRecord(record.publish_operation, "publish_not_pending", "No publish operation is pending.");
-      if (operation.operation_id !== operationId) {
-        throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
-      }
-      if (!operation.registry_activated_at) {
-        throw stateError("deployment_not_ready", "The release is not fully activated yet.", 409);
-      }
-      const now = this.clock().toISOString();
-      record.release_revision = (record.release_revision ?? 0) + 1;
-      record.release = {
-        release_id: operation.release_id,
-        revision: record.release_revision,
-        candidate_id: operation.candidate_id,
-        corpus_digest: operation.candidate_digest,
-        report_digest: operation.report_digest,
-        catalog_snapshot: clone(operation.catalog_snapshot ?? null),
-        deployment_operation_id: operation.operation_id,
-        current: true,
-        published_at: now
-      };
-      record.releases = (record.releases ?? []).map((release) => ({ ...release, current: false }));
-      record.releases.push(clone(record.release));
-      record.active_deployment_id = operation.operation_id;
-      record.status = "published";
-      record.public_url = `/products/${encodeURIComponent(productId)}`;
-      record.published_at = now;
-      record.updated_at = now;
-      record.last_publish_operation = { ...operation, completed_at: now };
-      delete record.publish_operation;
-      appendAudit(record, "release.published", creatorId, "publish_completed", {
-        operation_id: operation.operation_id,
-        release_id: record.release.release_id,
-        corpus_digest: record.release.corpus_digest
-      }, this.clock());
-      return record;
-    });
-  }
-
-  async completePublishProduct(creatorId, productId, operationId) {
-    await this.markPublishRegistryActivated(creatorId, productId, operationId);
-    return this.commitPublishProduct(creatorId, productId, operationId);
-  }
-
-  async beginRollbackProduct(creatorId, productId, releaseId, expectedVersion, input = {}) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      if (record.release?.release_id === releaseId) return record;
-      if (record.rollback_operation) {
-        validateDeploymentCommand(
-          record.rollback_operation,
-          "release.rollback",
-          input.command_key,
-          rollbackCommandPayload(releaseId, expectedVersion, input)
-        );
-        if (record.rollback_operation.release_id !== releaseId) {
-          throw stateError("rollback_in_progress", "Another rollback is already in progress.", 409);
-        }
-        return record;
-      }
-      assertNoDeploymentInProgress(record);
-      assertExpectedVersion(record, expectedVersion);
-      const release = (record.releases ?? []).find((item) => item.release_id === releaseId);
-      if (!release) throw stateError("release_not_found", "Historical release was not found.", 404);
-      const reason = String(input.reason ?? "").trim();
-      if (!reason) throw stateError("audit_reason_required", "Explain why this release is being activated.", 422);
-      record.version += 1;
-      record.status = "rolling_back";
-      record.rollback_operation = {
-        operation_id: this.idFactory("rollback"),
-        command_key: input.command_key ?? null,
-        payload_digest: input.command_key
-          ? portalCommandDigest("release.rollback", rollbackCommandPayload(releaseId, expectedVersion, input))
-          : null,
-        agent_id: input.agent_id ?? record.release?.catalog_snapshot?.agent_id ?? null,
-        previous_corpus_digest: record.release?.corpus_digest ?? null,
-        previous_release_id: record.release?.release_id ?? null,
-        previous_deployment_id: record.active_deployment_id ?? null,
-        release_id: release.release_id,
-        corpus_digest: release.corpus_digest,
-        reason,
-        actor_id: creatorId,
-        started_at: this.clock().toISOString()
-      };
-      appendAudit(record, "release.rollback_started", creatorId, reason, {
-        operation_id: record.rollback_operation.operation_id,
-        release_id: release.release_id,
-        corpus_digest: release.corpus_digest
-      }, this.clock());
-      record.updated_at = this.clock().toISOString();
-      return record;
-    });
-  }
-
-  validateRollbackCommand(creatorId, productId, releaseId, expectedVersion, input = {}) {
-    const record = requireRecord(
-      this.#state.creator_products[creatorProductKey(creatorId, productId)],
-      "product_not_found",
-      "Product workflow state was not found."
-    );
-    validateDeploymentCommand(
-      record.rollback_operation ?? record.last_rollback_operation,
-      "release.rollback",
-      input.command_key,
-      rollbackCommandPayload(releaseId, expectedVersion, input)
-    );
-    return clone(record);
-  }
-
-  async markRollbackRegistryActivated(creatorId, productId, operationId) {
-    return this.#markDeploymentPhase(creatorId, productId, "rollback_operation", operationId, "registry_activated_at");
-  }
-
-  async noteDeploymentFailure(creatorId, productId, operationId, error) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = [record.publish_operation, record.rollback_operation]
-        .find((candidate) => candidate?.operation_id === operationId);
-      if (!operation) return record;
-      operation.attempts = Number(operation.attempts ?? 0) + 1;
-      operation.last_error = {
-        category: String(error?.code ?? "deployment_failed"),
-        occurred_at: this.clock().toISOString()
-      };
-      record.updated_at = operation.last_error.occurred_at;
-      return record;
-    });
-  }
-
-  async commitRollbackProduct(creatorId, productId, operationId) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = requireRecord(record.rollback_operation, "rollback_not_pending", "No rollback operation is pending.");
-      if (operation.operation_id !== operationId) {
-        throw stateError("rollback_operation_changed", "The rollback operation changed.", 409);
-      }
-      if (!operation.registry_activated_at) {
-        throw stateError("deployment_not_ready", "The rollback is not fully activated yet.", 409);
-      }
-      const release = (record.releases ?? []).find((item) => item.release_id === operation.release_id);
-      if (!release) throw stateError("release_not_found", "Historical release was not found.", 404);
-      const now = this.clock().toISOString();
-      record.releases = record.releases.map((item) => ({ ...item, current: item.release_id === release.release_id }));
-      record.release = {
-        ...release,
-        current: true,
-        deployment_operation_id: operation.operation_id,
-        rolled_back_at: now
-      };
-      record.active_deployment_id = operation.operation_id;
-      record.status = "published";
-      record.updated_at = now;
-      record.last_rollback_operation = { ...operation, completed_at: now };
-      delete record.rollback_operation;
-      appendAudit(record, "release.rolled_back", operation.actor_id ?? creatorId, operation.reason, {
-        operation_id: operation.operation_id,
-        release_id: record.release.release_id,
-        corpus_digest: record.release.corpus_digest
-      }, this.clock());
-      return record;
-    });
-  }
-
-  async completeRollbackProduct(creatorId, productId, operationId) {
-    await this.markRollbackRegistryActivated(creatorId, productId, operationId);
-    return this.commitRollbackProduct(creatorId, productId, operationId);
   }
 
   async withdrawProduct(creatorId, productId, expectedVersion, input = {}) {
@@ -946,31 +397,6 @@ export class PortalStateStore {
         corpus_digest: record.release?.corpus_digest ?? null
       }, this.clock());
       rememberProductCommand(record, "product.withdraw", input.command_key, commandPayload);
-      return record;
-    });
-  }
-
-  async publishProduct(creatorId, productId, input = {}) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      assertPublishable(record, input);
-      record.version += 1;
-      record.release_revision = (record.release_revision ?? 0) + 1;
-      record.release = {
-        release_id: this.idFactory("release"),
-        revision: record.release_revision,
-        candidate_id: record.approval.candidate_id,
-        corpus_digest: record.approval.candidate_digest,
-        report_digest: record.approval.report_digest,
-        current: true,
-        published_at: this.clock().toISOString()
-      };
-      record.releases = (record.releases ?? []).map((release) => ({ ...release, current: false }));
-      record.releases.push(clone(record.release));
-      record.status = "published";
-      record.public_url = `/products/${encodeURIComponent(productId)}`;
-      record.published_at = record.release.published_at;
-      record.updated_at = this.clock().toISOString();
       return record;
     });
   }
@@ -1013,20 +439,6 @@ export class PortalStateStore {
     await operation;
     return clone(result);
   }
-
-  async #markDeploymentPhase(creatorId, productId, operationKey, operationId, phaseKey) {
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      const operation = requireRecord(record[operationKey], "deployment_not_pending", "No deployment operation is pending.");
-      if (operation.operation_id !== operationId) {
-        throw stateError("deployment_operation_changed", "The deployment operation changed.", 409);
-      }
-      operation[phaseKey] ??= this.clock().toISOString();
-      operation.last_error = null;
-      record.updated_at = operation[phaseKey];
-      return record;
-    });
-  }
 }
 
 export function stateError(code, message, status = 422, details) {
@@ -1042,7 +454,6 @@ function normalizeState(value) {
     contract_version: "1",
     checkout_sessions: mapObjectValues(value?.checkout_sessions, stripRemovedCheckoutFields),
     creator_products: mapObjectValues(value?.creator_products, stripRemovedCreatorProductFields),
-    factory_drafts: objectValue(value?.factory_drafts),
     web_sessions: objectValue(value?.web_sessions),
     oauth_authorization_transactions: objectValue(value?.oauth_authorization_transactions),
     oauth_authorization_codes: objectValue(value?.oauth_authorization_codes),
@@ -1100,13 +511,6 @@ function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
-function factoryDraftDigest(value) {
-  return `sha256:${createHash("sha256").update(JSON.stringify({
-    task_name: String(value?.task_name ?? ""),
-    task_brief: String(value?.task_brief ?? ""),
-    sources: Array.isArray(value?.sources) ? value.sources : []
-  })).digest("hex")}`;
-}
 
 function checkoutView(value, now) {
   const session = clone(value);
@@ -1125,9 +529,6 @@ function creatorProductKey(creatorId, productId) {
   return `${creatorId}:${productId}`;
 }
 
-function factoryDraftKey(creatorId, draftId) {
-  return `${creatorId}:${draftId}`;
-}
 
 function appendAudit(record, action, actorId, reason, details, occurredAt) {
   record.audit_log ??= [];
@@ -1188,31 +589,8 @@ function portalCommandDigest(action, payload) {
   return `sha256:${createHash("sha256").update(canonicalJson({ action, payload })).digest("hex")}`;
 }
 
-function validateDeploymentCommand(operation, action, commandKey, payload) {
-  if (!operation || !commandKey || operation.command_key !== commandKey) return;
-  // Deployment intents persisted before the V2 command digest migration must
-  // remain resumable; every newly-created intent below stores the digest.
-  if (!operation.payload_digest) return;
-  if (operation.payload_digest !== portalCommandDigest(action, payload)) {
-    throw stateError("idempotency_conflict", "This deployment command key was already used with a different payload.", 409);
-  }
-}
 
-function publishCommandPayload(input) {
-  return {
-    candidate_id: input.candidate_id ?? null,
-    expected_version: Number(input.expected_version),
-    reason: String(input.reason ?? "creator_publish")
-  };
-}
 
-function rollbackCommandPayload(releaseId, expectedVersion, input) {
-  return {
-    release_id: releaseId,
-    expected_version: Number(expectedVersion),
-    reason: String(input.reason ?? "")
-  };
-}
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -1248,25 +626,7 @@ function assertNoDeploymentInProgress(record) {
   }
 }
 
-function assertPublishable(record, input) {
-  assertExpectedVersion(record, input.expected_version);
-  if (record.approval?.status !== "approved") {
-    throw stateError("candidate_not_approved", "Approve the current candidate before publishing.", 409);
-  }
-  if (input.candidate_id && input.candidate_id !== record.approval.candidate_id) {
-    throw stateError("candidate_changed", "The approved candidate changed. Review it again.", 409);
-  }
-}
 
-function approvalMatchesCandidate(approval, candidate) {
-  return Boolean(
-    approval?.status === "approved"
-    && candidate
-    && approval.candidate_id === candidate.candidate_id
-    && approval.candidate_digest === candidate.digest
-    && approval.report_digest === candidate.report_digest
-  );
-}
 
 async function atomicWriteJson(destination, value) {
   await mkdir(path.dirname(destination), { recursive: true });

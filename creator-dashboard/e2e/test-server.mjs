@@ -14,11 +14,6 @@ const controlToken = "hatch-commerce-v2-e2e-control";
 const CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
 const PUBLIC_PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
 const PAGINATION_PRODUCT_ID = "d4b6f3a1-2c87-4e59-9a10-6b7c8d9e0f12";
-const BLOCKED_PRODUCT_ID = "b7c1d2e3-4f56-4789-a012-3456789abcde";
-const BROWSER_PRODUCT_IDS = [
-  "c1e2f3a4-5b67-4890-ab12-3456789def01",
-  "c2e3f4a5-6b78-4901-bc23-456789def012"
-];
 const corpusDigest = `sha256:${"a".repeat(64)}`;
 const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-e2e-"));
 const accounts = new Map([
@@ -26,10 +21,7 @@ const accounts = new Map([
   ["creator@example.test", { id: CREATOR_ID, display_name: "Maya Creator", password: "creator-password", token: "creator-e2e-token" }]
 ]);
 const accountsByToken = new Map([...accounts.values()].map((account) => [account.token, account]));
-const factoryAnswerSubmissions = [];
 let dashboard;
-let lastReleaseActivation = null;
-let failNextReleaseActivation = false;
 
 const baseAgent = {
   creator_id: CREATOR_ID,
@@ -51,23 +43,6 @@ const baseAgent = {
   }
 };
 const agents = new Map([[baseAgent.product_id, baseAgent]]);
-const factoryRuns = new Map([
-  ...BROWSER_PRODUCT_IDS.flatMap((productId, retry) => {
-    return [
-      factoryRun({ productId, version: 1, retry }),
-      factoryRun({ productId, version: 2, retry })
-    ];
-  }).map((run) => [run.id, run]),
-  ["factory_blocked_browser", factoryRun({
-    productId: BLOCKED_PRODUCT_ID,
-    version: 1,
-    retry: "blocked",
-    verified: false,
-    failedCriticalCases: 1
-  })],
-  ["factory_question_replacement", factoryQuestionRun()]
-]);
-
 const registry = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", "http://registry.e2e");
@@ -96,47 +71,6 @@ const registry = createServer(async (request, response) => {
           })),
           access: dashboard?.commerce.listBuyerEntitlements(buyerId)
             .filter((entry) => entry.status === "active") ?? []
-        });
-      }
-      if (request.method === "GET" && url.pathname === "/__e2e/product-state") {
-        const productId = String(url.searchParams.get("product_id") ?? "");
-        return json(response, 200, {
-          product: dashboard?.portalState.getCreatorProduct(CREATOR_ID, productId) ?? null,
-          last_release_activation: lastReleaseActivation
-        });
-      }
-      if (request.method === "POST" && url.pathname === "/__e2e/fail-next-release-activation") {
-        failNextReleaseActivation = true;
-        return json(response, 200, { armed: true });
-      }
-      if (request.method === "POST" && url.pathname === "/__e2e/factory-question-batch") {
-        const body = await readJson(request);
-        const runId = String(body.run_id ?? "factory_question_replacement");
-        const run = factoryRuns.get(runId);
-        if (!run) return json(response, 404, { detail: "Factory run not found." });
-        const questions = Array.isArray(body.questions) ? body.questions.map((question) => ({
-          id: String(question.id),
-          question: String(question.question)
-        })) : [];
-        Object.assign(run, {
-          status: "waiting_for_creator",
-          stage: "awaiting_creator_answers",
-          version: Number(body.version ?? run.version + 1),
-          question_batch_id: String(body.question_batch_id ?? ""),
-          pending_questions: questions,
-          updated_at: new Date().toISOString()
-        });
-        if (body.reset_submissions) {
-          for (let index = factoryAnswerSubmissions.length - 1; index >= 0; index -= 1) {
-            if (factoryAnswerSubmissions[index].run_id === runId) factoryAnswerSubmissions.splice(index, 1);
-          }
-        }
-        return json(response, 200, { run });
-      }
-      if (request.method === "GET" && url.pathname === "/__e2e/factory-answer-submissions") {
-        const runId = String(url.searchParams.get("run_id") ?? "");
-        return json(response, 200, {
-          submissions: factoryAnswerSubmissions.filter((submission) => !runId || submission.run_id === runId)
         });
       }
       return json(response, 404, { detail: `E2E control route not found: ${request.method} ${url.pathname}` });
@@ -186,103 +120,6 @@ const registry = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/v1/creator/products") {
       const account = authenticatedAccount(request);
       return account ? json(response, 200, [...agents.values()].filter((entry) => entry.creator_id === account.id)) : json(response, 401, { detail: "A valid account token is required." });
-    }
-    if (request.method === "GET" && url.pathname === "/v1/creator/factory-runs") {
-      const account = authenticatedAccount(request);
-      return account ? json(response, 200, { runs: [...factoryRuns.values()] }) : json(response, 401, { detail: "A valid account token is required." });
-    }
-    if (request.method === "POST" && url.pathname === "/v1/creator/factory-runs") {
-      const account = authenticatedAccount(request);
-      if (!account) return json(response, 401, { detail: "A valid account token is required." });
-      const body = await readJson(request);
-      const productId = String(body.task_name ?? "").trim();
-      if (!productId) return json(response, 422, { detail: "task_name is required." });
-      const runId = `factory_${productId.replaceAll("-", "_")}_v1`;
-      const run = factoryRuns.get(runId) ?? factoryRun({ productId, version: 1, retry: "source" });
-      run.task_name = productId;
-      run.task_brief = String(body.task_brief ?? "");
-      run.sources = Array.isArray(body.sources) ? body.sources : [];
-      factoryRuns.set(run.id, run);
-      return json(response, 202, run);
-    }
-    const factoryRunMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)$/);
-    if (request.method === "GET" && factoryRunMatch) {
-      const account = authenticatedAccount(request);
-      if (!account) return json(response, 401, { detail: "A valid account token is required." });
-      const run = factoryRuns.get(decodeURIComponent(factoryRunMatch[1]));
-      return run ? json(response, 200, run) : json(response, 404, { detail: "Factory run not found." });
-    }
-    const factoryAnswersMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/answers$/);
-    if (request.method === "PUT" && factoryAnswersMatch) {
-      const account = authenticatedAccount(request);
-      if (!account) return json(response, 401, { detail: "A valid account token is required." });
-      const runId = decodeURIComponent(factoryAnswersMatch[1]);
-      const run = factoryRuns.get(runId);
-      if (!run) return json(response, 404, { detail: "Factory run not found." });
-      const body = await readJson(request);
-      if (Number(body.expected_version) !== Number(run.version)) {
-        return json(response, 409, { detail: "Factory run version changed." });
-      }
-      if (String(body.question_batch_id ?? "") !== String(run.question_batch_id ?? "")) {
-        return json(response, 409, { detail: "Factory question batch changed." });
-      }
-      const expectedQuestionIds = run.pending_questions.map((question) => question.id);
-      const answers = Array.isArray(body.answers) ? body.answers.map((answer) => ({
-        question_id: String(answer.question_id),
-        answer: String(answer.answer ?? "")
-      })) : [];
-      if (answers.length !== expectedQuestionIds.length || answers.some((answer, index) => answer.question_id !== expectedQuestionIds[index])) {
-        return json(response, 422, { detail: "Every current Factory question must be answered in order." });
-      }
-      factoryAnswerSubmissions.push({
-        run_id: runId,
-        expected_version: Number(body.expected_version),
-        submission_id: String(body.submission_id ?? ""),
-        question_batch_id: String(body.question_batch_id),
-        answers
-      });
-      Object.assign(run, {
-        status: "running",
-        stage: "compiling_corpus",
-        version: run.version + 1,
-        pending_questions: [],
-        updated_at: new Date().toISOString()
-      });
-      return json(response, 202, run);
-    }
-    const factoryPublishMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/publish$/);
-    if (request.method === "POST" && factoryPublishMatch) {
-      const account = authenticatedAccount(request);
-      if (!account) return json(response, 401, { detail: "A valid account token is required." });
-      const run = factoryRuns.get(decodeURIComponent(factoryPublishMatch[1]));
-      if (!run) return json(response, 404, { detail: "Factory run not found." });
-      const body = await readJson(request);
-      if (body.corpus_digest !== run.candidate.corpus_digest) return json(response, 409, { detail: "Candidate digest changed." });
-      const published = publishedAgent(run);
-      agents.set(published.product_id, published);
-      return json(response, 201, published);
-    }
-    const activateReleaseMatch = url.pathname.match(/^\/v1\/creator\/agent-corpora\/([^/]+)\/releases\/([^/]+)\/activate$/);
-    if (request.method === "POST" && activateReleaseMatch) {
-      const account = authenticatedAccount(request);
-      if (!account) return json(response, 401, { detail: "A valid account token is required." });
-      if (failNextReleaseActivation) {
-        failNextReleaseActivation = false;
-        return json(response, 503, { detail: "Injected Registry activation outage." });
-      }
-      const body = await readJson(request);
-      const agentId = decodeURIComponent(activateReleaseMatch[1]);
-      const product = [...agents.values()].find((entry) => entry.agent_id === agentId);
-      if (!product) return json(response, 404, { detail: "Published product not found." });
-      const digest = decodeURIComponent(activateReleaseMatch[2]);
-      product.corpus_digest = digest;
-      lastReleaseActivation = {
-        agent_id: agentId,
-        product_id: product.product_id,
-        release_id: body.release_id,
-        corpus_digest: digest
-      };
-      return json(response, 200, { ...lastReleaseActivation, status: "active" });
     }
     return json(response, 404, { detail: `Registry E2E route not found: ${request.method} ${url.pathname}` });
   } catch (error) {
@@ -358,84 +195,8 @@ function closeServer(server) {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
-function factoryRun({ productId, version, retry, verified = true, failedCriticalCases = 0 }) {
-  const suffix = String(retry);
-  const digestCharacter = verified ? String((Number(version) + 1) % 10) : "f";
-  return {
-    id: verified ? `factory_${productId.replaceAll("-", "_")}_v${version}` : "factory_blocked_browser",
-    agent_id: productId,
-    status: "ready",
-    factory_version: "browser-e2e-factory-v1",
-    updated_at: `2026-08-12T0${Math.min(9, Number(version) || 1)}:00:00.000Z`,
-    product: {
-      id: productId,
-      name: verified ? `Browser Commerce Flow ${suffix}` : "Blocked Browser Product",
-      description: verified
-        ? "A browser-tested Creator product with a durable release history."
-        : "A product whose candidate must remain blocked.",
-      promise: verified
-        ? "Turn an approved method into a shareable, immutable delivery."
-        : "This promise cannot be published until critical gates pass.",
-      boundaries: verified
-        ? ["Does not expose Buyer Workspace content."]
-        : ["Does not bypass failed evaluation gates."]
-    },
-    candidate: {
-      version,
-      corpus_digest: `sha256:${digestCharacter.repeat(64)}`,
-      system_digest: `sha256:${String((Number(version) + 4) % 10 || 4).repeat(64)}`,
-      corpus_verified: verified,
-      regression_digest: `sha256:${"b".repeat(64)}`,
-      held_out_digest: `sha256:${"c".repeat(64)}`,
-      held_out_sample_count: 12,
-      failed_critical_cases: failedCriticalCases,
-      factory_version: "browser-e2e-factory-v1",
-      material_changes: [`Candidate v${version} uses the reviewed Browser E2E behavior.`],
-      known_losses: verified && version === 1
-        ? [{ id: "loss-style", title: "Minor stylistic compression", description: "Some long explanations are shorter." }]
-        : []
-    }
-  };
-}
 
-function factoryQuestionRun() {
-  return {
-    id: "factory_question_replacement",
-    task_name: "Question batch replacement",
-    task_brief: "Prove that stale Creator answers never cross a Factory question-batch boundary.",
-    status: "waiting_for_creator",
-    stage: "awaiting_creator_answers",
-    version: 1,
-    question_batch_id: "browser-question-batch-1",
-    pending_questions: [{
-      id: "old-reference-answer",
-      question: "What evidence should the first draft prioritize?"
-    }],
-    updated_at: "2026-08-12T08:30:00.000Z"
-  };
-}
 
-function publishedAgent(run) {
-  return {
-    creator_id: CREATOR_ID,
-    creator_name: "Maya Creator",
-    creator_verified: true,
-    agent_id: run.agent_id,
-    product_id: run.product.id,
-    product_name: run.product.name,
-    product_description: run.product.description,
-    product_promise: run.product.promise,
-    product_boundaries: run.product.boundaries,
-    corpus_digest: run.candidate.corpus_digest,
-    status: "published",
-    published_at: new Date().toISOString(),
-    presentation: {
-      inputs: ["An approved Creator method"],
-      outputs: ["A browser-verified delivery"],
-      privacy_copy: "Buyer Workspace content remains private."
-    }
-  };
-}
 
 async function seedCreatorOrders(commerce) {
   for (let index = 1; index <= 13; index += 1) {
