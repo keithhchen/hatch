@@ -440,6 +440,16 @@ export async function createDashboardApp(options = {}) {
           return response.end();
         }
         response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
+        // The Agent's published corpus holds a placeholder creator; the chat shows the expert's current account name and avatar, as the product page does.
+        if (request.method === "GET" && upstream.ok && PRODUCT_AGENT_PATH.test(url.pathname)) {
+          const body = await upstream.json();
+          const productId = decodeURIComponent(url.pathname.split("/")[4]);
+          const listed = await authoritativeCatalog(registryUrl, fetchImpl, portalState).then((catalog) => catalog.find((entry) => entry.product_id === productId), () => undefined);
+          if (listed?.creator_name && body?.creator_agent) {
+            body.creator_agent.creator = { ...body.creator_agent.creator, name: listed.creator_name, avatar_url: listed.creator_avatar_url ?? null };
+          }
+          return response.end(JSON.stringify(body));
+        }
         if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
         else response.end();
         return;

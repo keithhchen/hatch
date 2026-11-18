@@ -15,7 +15,7 @@ const PRODUCT = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
 const CREATOR = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
 const ACCOUNT = { id: "buyer-1", email: "buyer@example.test", display_name: "Zero Buyer" };
 const guests = createGuestTokens(SECRET);
-const listing = { creator_id: CREATOR, creator_name: "Maya", agent_id: PRODUCT, product_id: PRODUCT, product_name: "Resume", product_description: "d", product_promise: "p", corpus_digest: "sha256:c", availability: "published" };
+const listing = { creator_id: CREATOR, creator_name: "Maya", creator_avatar_url: "/avatars/maya.png", agent_id: PRODUCT, product_id: PRODUCT, product_name: "Resume", product_description: "d", product_promise: "p", corpus_digest: "sha256:c", availability: "published" };
 
 const json = (response, status, body) => { response.statusCode = status; response.setHeader("content-type", "application/json"); response.end(JSON.stringify(body)); };
 const listen = (server) => new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -44,6 +44,7 @@ async function setup(context, { secret = SECRET, analytics } = {}) {
     let body = ""; for await (const chunk of request) body += chunk;
     runtimeCalls.push({ method: request.method, url: request.url, authorization: request.headers.authorization, origin: request.headers.origin, body });
     if (request.url.startsWith("/v1/creator/audience")) return json(response, 200, { audience: state.audience });
+    if (request.url.startsWith(`/v1/products/${PRODUCT}/agent`)) return json(response, 200, { creator_agent: { creator_id: CREATOR, product_id: PRODUCT, creator: { id: CREATOR, name: "Creator" }, product: { id: PRODUCT, name: "Resume" } } });
     if (request.url === "/v1/guest/carry-over") return json(response, state.carry.status, state.carry.body);
     return json(response, 200, { ok: true, url: request.url });
   });
@@ -338,4 +339,17 @@ test("signing in or up with a guest cookie carries the guest's conversations ove
   const failed = await post("/v1/auth/login", guestCookie);
   assert.equal(failed.status, 200, "a failed carry-over does not fail the sign-in");
   assert.equal(guestCookieOf(failed), undefined, "and keeps the cookie for the page to retry");
+});
+
+test("the Agent endpoint shows the expert's account name and avatar, not the corpus placeholder, for a guest and a signed-in visitor", async (context) => {
+  const { base, state, login } = await setup(context);
+  const { cookie } = await login();
+  for (const headers of [{}, { cookie }]) {
+    const body = await (await fetch(`${base}/v1/web-chat/products/${PRODUCT}/agent?product_id=${PRODUCT}`, { headers })).json();
+    assert.deepEqual(body.creator_agent.creator, { id: CREATOR, name: "Maya", avatar_url: "/avatars/maya.png" });
+    assert.equal(body.creator_agent.product.name, "Resume");
+  }
+  state.catalogFails = true;
+  const fallback = await (await fetch(`${base}/v1/web-chat/products/${PRODUCT}/agent?product_id=${PRODUCT}`)).json();
+  assert.equal(fallback.creator_agent.creator.name, "Creator", "a catalog outage leaves the Runtime answer as it is");
 });
