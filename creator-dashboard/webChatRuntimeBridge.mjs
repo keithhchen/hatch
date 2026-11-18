@@ -41,8 +41,15 @@ export class WebChatCapabilityPolicy {
   }
 }
 
+/** A browser this far behind is dropped, not buffered: it reconnects and reads what it missed. */
+const MAX_BROWSER_BUFFERED_BYTES = 8 * 1024 * 1024;
+/** One beat per this long: a ping on each leg, and a frame the browser page can see (a page cannot see pings). */
+const HEARTBEAT_MS = 10_000;
+
 export class WebChatRuntimeBridge {
-  constructor({ browser, runtimeUrl, token, requestId, policy = new WebChatCapabilityPolicy() }) {
+  constructor({ browser, runtimeUrl, token, requestId, policy = new WebChatCapabilityPolicy(), heartbeatMs = HEARTBEAT_MS, maxBrowserBufferedBytes = MAX_BROWSER_BUFFERED_BYTES }) {
+    this.heartbeatMs = heartbeatMs;
+    this.maxBrowserBufferedBytes = maxBrowserBufferedBytes;
     this.browser = browser;
     this.token = token;
     this.policy = policy;
@@ -59,17 +66,42 @@ export class WebChatRuntimeBridge {
       for (const wire of this.pending.splice(0)) this.upstream.send(wire);
     });
     this.upstream.on("message", (data, binary) => {
-      if (this.browser.readyState === WebSocket.OPEN) this.browser.send(data, { binary });
+      if (this.browser.readyState !== WebSocket.OPEN) return;
+      if (this.browser.bufferedAmount > this.maxBrowserBufferedBytes) { this.close(1013, "Browser too slow"); this.browser.terminate(); return; }
+      this.browser.send(data, { binary });
     });
+    this.beat();
     this.upstream.on("error", () => this.close(1011, "Runtime unavailable"));
     this.upstream.on("close", () => {
+      clearInterval(this.heartbeat);
       if (this.browser.readyState === WebSocket.OPEN) this.browser.close(1011, "Runtime disconnected");
     });
     this.browser.on("close", () => {
+      clearInterval(this.heartbeat);
       if (this.upstream.readyState === WebSocket.OPEN) this.upstream.close();
       else this.upstream.terminate();
     });
     this.browser.on("error", () => this.close(1011, "Browser connection failed"));
+  }
+
+  /**
+   * A leg that stopped answering without closing (a phone out of range, a NAT that forgot the connection) is ended: each leg is pinged,
+   * and one that has not answered the last ping by the next beat is terminated. The browser also gets a frame its page can see.
+   */
+  beat() {
+    const legs = [this.browser, this.upstream];
+    const waiting = new Set();
+    for (const leg of legs) leg.on("pong", () => waiting.delete(leg));
+    this.heartbeat = setInterval(() => {
+      for (const leg of legs) {
+        if (leg.readyState !== WebSocket.OPEN) continue;
+        if (waiting.has(leg)) { leg.terminate(); continue; }
+        waiting.add(leg);
+        try { leg.ping(); } catch { leg.terminate(); }
+      }
+      if (this.browser.readyState === WebSocket.OPEN) this.browser.send(JSON.stringify({ type: "session.heartbeat" }));
+    }, this.heartbeatMs);
+    this.heartbeat.unref?.();
   }
 
   receive(data, binary) {
