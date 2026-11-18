@@ -5,7 +5,7 @@ import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { AgentBoxes } from "./boxes.js";
 import { BoxliteProvider } from "./boxlite.js";
 import { PostgresProductCapabilities } from "./capabilities.js";
-import { BuyerFiles } from "./files.js";
+import { BuyerFiles, FileLinks } from "./files.js";
 import { HtmlLinks, HtmlPages, PostgresHtmlPageRepository } from "./htmlPages.js";
 import { AgentBoxMode } from "./tools.js";
 
@@ -13,7 +13,7 @@ import { AgentBoxMode } from "./tools.js";
  * Agent boxes in production: BoxLite for the boxes, the Runtime's database and object store for files and pages. Off (undefined)
  * without BOXLITE_API_KEY, or without HATCH_CREDENTIALS_KEY to sign page links.
  */
-export async function openAgentBoxMode(options: { pool: PostgresQueryExecutor; blobs: AssetBlobs; environment: NodeJS.ProcessEnv }): Promise<{ mode: AgentBoxMode; pages: HtmlPages } | undefined> {
+export async function openAgentBoxMode(options: { pool: PostgresQueryExecutor; blobs: AssetBlobs; environment: NodeJS.ProcessEnv }): Promise<{ mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles } | undefined> {
   const { environment } = options;
   const provider = BoxliteProvider.fromEnvironment(environment);
   const secret = environment.HATCH_CREDENTIALS_KEY?.trim();
@@ -24,7 +24,8 @@ export async function openAgentBoxMode(options: { pool: PostgresQueryExecutor; b
   await capabilities.initialize();
   await pageRepository.initialize();
   await assets.initialize();
-  const files = new BuyerFiles(assets, options.blobs);
-  const pages = new HtmlPages(pageRepository, files, new HtmlLinks(secret, `https://${environment.HATCH_DOMAIN_ALIAS?.trim() || "gethatchapp.com"}`));
-  return { mode: new AgentBoxMode({ capabilities, boxes: new AgentBoxes(provider), workDir: provider.workDir, pdf: new PdfParsePageRenderer(), files, pages }), pages };
+  const origin = `https://${environment.HATCH_DOMAIN_ALIAS?.trim() || "gethatchapp.com"}`;
+  const files = new BuyerFiles(assets, options.blobs, new FileLinks(secret, origin));
+  const pages = new HtmlPages(pageRepository, files, new HtmlLinks(secret, origin));
+  return { mode: new AgentBoxMode({ capabilities, boxes: new AgentBoxes(provider), workDir: provider.workDir, pdf: new PdfParsePageRenderer(), files, pages }), pages, files };
 }

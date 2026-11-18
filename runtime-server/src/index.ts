@@ -53,6 +53,7 @@ import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
 import { accountPrincipal } from "./chat/principal.js";
+import { RestartRetrier } from "./chat/restartRetry.js";
 import { clientMessageInputDigest } from "./protocol.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
@@ -76,6 +77,7 @@ import { openChatAssets } from "./chat/openChatAssets.js";
 import { openAgentBoxMode } from "./agentBox/open.js";
 import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
+import type { BuyerFiles } from "./agentBox/files.js";
 import { openSiteResearchMode } from "./siteTools/open.js";
 import type { SiteResearchMode } from "./siteTools/tools.js";
 import { GUEST_PREFIX } from "./chat/principal.js";
@@ -117,6 +119,8 @@ export type RuntimeServer = {
   /** What the channel layer calls to talk to the Chat API without a transport. */
   chat: ChatGateway;
   close: () => Promise<void>;
+  /** Looks now for Runs a restart interrupted and starts their retries (otherwise done on a timer). */
+  retryInterrupted: () => Promise<void>;
   /** Leaves production traffic to the next instance: unready, stop intake, finish the Runs held, then close. */
   shutdown: (deadlineMs: number) => Promise<{ drained: boolean }>;
 };
@@ -184,6 +188,8 @@ export type RuntimeServerOptions = {
   /** Limits checked before a customer's message becomes a Run. By default each contact may send `maxContactMessages` to a Product. */
   principalLimits?: PrincipalLimits;
   maxContactMessages?: number;
+  /** How often Runs a restart interrupted are looked for, to be answered again. */
+  restartRetryPollMs?: number;
   /** The channel layer's Connections, which a customer's messages arrive through. */
   connectionDirectory?: ConnectionDirectory;
   /** Uploads, attachments in messages, and the ls/grep/read tools over them. Without it a message takes text only. */
@@ -191,7 +197,7 @@ export type RuntimeServerOptions = {
   /** Report mode: products that offer it, and conversations that are reports. */
   artifact?: ArtifactMode;
   /** The Agent's own computer and the pages it publishes, for the Products that have it. */
-  agentBox?: { mode: AgentBoxMode; pages: HtmlPages };
+  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
@@ -468,7 +474,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         const site = report ? undefined : await options.siteResearch?.turnFor(binding.productId);
         serverTools.setSite(site?.tools);
         const productTools = [...box?.extraTools ?? [], ...site?.extraTools ?? []];
-        const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
+        const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot, Boolean(box));
         await runModelTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
@@ -503,8 +509,24 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
     ...(options.library ? { library: new RetryingLibrary(options.library) } : {}),
     ...(artifact ? { artifacts: artifact.lifecycle } : {}),
+    afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); },
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
+  });
+  // A restart is not the buyer's problem: the reply it interrupted is started again from their latest message (see RestartRetrier).
+  const restartRetrier = new RestartRetrier({
+    pollMs: options.restartRetryPollMs,
+    repository: conversationRepository,
+    skip: async (conversationId) => Boolean(await artifact?.reports.get(conversationId)),
+    start: async (run, key, runId) => {
+      const conversation = await conversationRepository.getConversation(run.conversationId);
+      if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.retry({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        key, runId, corpusDigest: scope.corpusDigest, requiresLocalTools: false
+      });
+    }
   });
   const startArtifactRun = async (record: ReportRecord, runId: string, content: string, clientMessageId: string) => {
     const conversation = await conversationRepository.getConversation(record.conversationId);
@@ -522,7 +544,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     reports: artifact.reports, lifecycle: artifact.lifecycle,
     start: (record, runId) => startArtifactRun(record, runId, ARTIFACT_RETRY_MESSAGE, `artifact-retry-${runId}`)
   }) : undefined;
-  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); }).catch(() => undefined);
+  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); restartRetrier.start(); }).catch(() => undefined);
   const edge: ChatEdge = {
     chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
@@ -578,6 +600,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       allowedOrigins,
       artifact,
       htmlPages: agentBox?.pages,
+      buyerFiles: agentBox?.files,
       guests: options.guestTokens,
       ...(options.library ? { carryOver: new GuestCarryOver({ repository: conversationRepository, library: options.library }) } : {})
     }, requestAbortController.signal);
@@ -654,7 +677,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       closeStorage: () => close(),
       onError: (step, error) => log.error("runtime_shutdown_step_failed", { step, error }),
     }),
-    close: () => close()
+    close: () => close(),
+    retryInterrupted: () => restartRetrier.tick()
   };
   async function close(): Promise<void> {
     await stopIntake();
@@ -673,6 +697,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     await Promise.allSettled([...connectionTasks]);
     // Runs are handed off, not failed: another instance continues them.
     artifactRetrier?.stop();
+    restartRetrier.stop();
     await chat.stop();
     await conversationStore.close();
     await conversationRepository.close();
@@ -754,7 +779,7 @@ function createConversationRepository(store: RuntimeStore): ConversationReposito
   return new InMemoryConversationRepository(store.localAuthority);
 }
 
-async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSkills> {
+export async function buildSessionSkills(corpusRoot?: string, hasBox = false): Promise<RuntimeSessionSkills> {
   // Both standalone Runtime Skills and published Agent Corpus Skills use the
   // same metadata-only catalog and the same explicit Skill loader. A Corpus
   // root is an explicit discovery scope, so it cannot accidentally mix in
@@ -768,7 +793,8 @@ async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSk
     ? await discoverSkills({
       roots: [{ path: runtimeSkillsRoot, scope: "custom", followSymlinks: false }]
     })
-    : await discoverSkills();
+    // The platform's document Skills run scripts on the Runtime host, which a box turn cannot reach.
+    : hasBox ? [] : await discoverSkills();
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })

@@ -20,6 +20,7 @@ import type { RuntimeStore } from "../store.js";
 import { ResponsesHttpApi } from "../responses/router.js";
 import type { ArtifactMode } from "../artifact/mode.js";
 import { handleProductArtifactRequest } from "../artifact/routes.js";
+import { handleFileRoute, type BuyerFiles } from "../agentBox/files.js";
 import { handleHtmlRoute, type HtmlPages } from "../agentBox/htmlPages.js";
 import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
@@ -61,6 +62,8 @@ export type RuntimeHttpDeps = {
   carryOver?: Pick<GuestCarryOver, "carry">;
   /** Pages the Agent published (/html/<id>), opened by their signed link. */
   htmlPages?: HtmlPages;
+  /** Files the Agent saved (/file/<id>), downloaded by their signed link. */
+  buyerFiles?: BuyerFiles;
 };
 
 export async function handleHttpRequest(
@@ -86,6 +89,7 @@ export async function handleHttpRequest(
     return;
   }
   if (url.pathname.startsWith("/html/") && await handleHtmlRoute(req, res, url, deps.htmlPages)) return;
+  if (url.pathname.startsWith("/file/") && await handleFileRoute(req, res, url, deps.buyerFiles)) return;
   if (req.method === "GET" && url.pathname === "/readyz") {
     const repository = readiness?.repository ?? "failed";
     const ready = !readiness?.draining && repository === "ready";

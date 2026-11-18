@@ -19,7 +19,7 @@ import { AttachmentFiles } from "./assets/files.js";
 import { harness, png } from "./assets/kit.test.js";
 import { ChatAssets } from "./chat/assets.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
-import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
+import { PROTOCOL_VERSION, type ConversationMessage, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore, localRuntimeAuthority } from "./store.js";
 
 useSearchFixture();
@@ -439,6 +439,144 @@ test("HTTP answers a failed Run again with POST retry: one new Run over the same
   const malformed = await json(base, `${prefix}/tool-results?${scope}`, { method: "POST", body: {} });
   assert.equal(malformed.response.status, 400);
   assert.equal((malformed.body as { error: { code: string } }).error.code, "invalid_request");
+});
+
+const toolCall = (id: string): ConversationMessage => ({ role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "file_read", arguments: "{}" } }] });
+
+test("answer again after a failed Run with tool calls and a partial reply: the first model request ends with the user message, and N clicks start one Run", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-answer-again-ctx-"));
+  const seen: Array<{ roles: string[]; lastContent: string | null | undefined; input: string }> = [];
+  runtime = createRuntimeServer({ insecureLocalMode: true,
+    conversationStore: new RuntimeStore(dataDir),
+    createRuntime: () => ({ async *run(input, ctx) {
+      seen.push({ roles: ctx.messages.map((message) => message.role), lastContent: ctx.messages.at(-1)?.content, input: input.message.content });
+      if (seen.length === 1) {
+        await ctx.persistModelMessage!(toolCall("call_1"));
+        await ctx.persistModelMessage!({ role: "tool", content: null, tool_call_id: "call_1", tool_name: "file_read", tool_content: [{ type: "text", text: "{}" }] });
+        await ctx.persistModelMessage!(toolCall("call_2"));
+        await ctx.persistModelMessage!({ role: "assistant", content: "The first half" });
+        throw new Error("fetch failed");
+      }
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "whole answer" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const conversation = (await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { client_request_id: "ctx_target" } })).body as { conversation: { id: string } };
+  const prefix = `/v1/conversations/${encodeURIComponent(conversation.conversation.id)}`;
+  const failed = await json(base, `${prefix}/messages?${scope}&wait=5`, { method: "POST", body: { client_message_id: "m-1", content: "hello" } });
+  assert.equal((failed.body as { run: { status: string } }).run.status, "failed");
+
+  const clicks = await Promise.all(["a", "a", "a", "b", "c"].map((key) => json(base, `${prefix}/retry?${scope}`, { method: "POST", body: { retry_id: key } })));
+  const started = new Set(clicks.filter((click) => click.response.status === 202).map((click) => (click.body as { run_id: string }).run_id));
+  assert.equal(started.size, 1, "one Run for all the clicks");
+  const statuses = async () => ((await json(base, `${prefix}/runs?${scope}`)).body as { runs: Array<{ id: string; status: string }> }).runs;
+  const deadline = Date.now() + 5_000;
+  while ((await statuses()).at(-1)?.status !== "completed" && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual((await statuses()).map((run) => run.status), ["failed", "completed"]);
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen[1]!.roles, ["user"], "no assistant reply, tool call or tool result of the failed attempt");
+  assert.match(String(seen[1]!.lastContent), /./);
+  assert.equal(seen[0]!.roles.at(-1), "user");
+});
+
+test("a restart mid-Run: the swept Run is answered again once, silently; the model request ends with the user message and the buyer reads only the retry's reply", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-restart-retry-")));
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.initialize();
+  const seen: Array<{ roles: string[]; lastContent: string | null | undefined }> = [];
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository,
+    createRuntime: () => ({ async *run(input, ctx) {
+      seen.push({ roles: ctx.messages.map((message) => message.role), lastContent: ctx.messages.at(-1)?.content });
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "whole answer" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const created = await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { client_request_id: "restart_target" } });
+  const publicId = (created.body as { conversation: { id: string } }).conversation.id;
+  const conversationId = durableConversationId({ creatorId: binding.creator_id, productId: binding.product_id, userId: binding.user_id }, publicId);
+  const record = (await repository.getConversation(conversationId))!;
+  // What the previous process left: an active Run whose executor is gone, with a partial reply and a tool call in the transcript.
+  const { run } = await repository.acceptSubmission({
+    binding: record,
+    run: { id: "run_before_restart", conversationId, clientMessageId: "m-1", inputDigest: "d-1", corpusDigest: record.corpusDigest, executorId: "executor_gone", executorLeaseExpiresAt: new Date(Date.now() - 1_000).toISOString() },
+    canonicalUser: { role: "user", content: "hello" }
+  });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message: toolCall("call_1") });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message: { role: "assistant", content: "The first half" } });
+
+  const prefix = `/v1/conversations/${encodeURIComponent(publicId)}`;
+  const statuses = async () => ((await json(base, `${prefix}/runs?${scope}`)).body as { runs: Array<{ id: string; status: string }> }).runs;
+  const deadline = Date.now() + 15_000;
+  while ((await statuses()).at(-1)?.status !== "completed" && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual((await statuses()).map((entry) => entry.status), ["interrupted", "completed"]);
+  assert.equal(seen.length, 1, "exactly one retry Run reached the model");
+  assert.deepEqual(seen[0]!.roles, ["user"]);
+  const visible = ((await json(base, `${prefix}/history?${scope}`)).body as { messages: Array<{ role: string; content?: string }> }).messages;
+  assert.deepEqual(visible.map((message) => [message.role, message.content]), [["user", "hello"], ["assistant", "whole answer"]]);
+});
+
+test("the buyer's snapshot in the gap after a restart: the reply is retrying with its partial text once; then the retry's Run is active; with the budget spent nothing is retrying", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-retrying-snapshot-")));
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.initialize();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository,
+    restartRetryPollMs: 60_000,
+    createRuntime: () => ({ async *run(input) {
+      await gate;
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "whole answer" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const seed = async (clientRequestId: string) => {
+    const created = await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { client_request_id: clientRequestId } });
+    const publicId = (created.body as { conversation: { id: string } }).conversation.id;
+    const conversationId = durableConversationId({ creatorId: binding.creator_id, productId: binding.product_id, userId: binding.user_id }, publicId);
+    const record = (await repository.getConversation(conversationId))!;
+    return { conversationId, record, prefix: `/v1/conversations/${encodeURIComponent(publicId)}` };
+  };
+  const snapshot = async (prefix: string) => (await json(base, `${prefix}/snapshot?${scope}&view=page`)).body as { runs: Array<{ id: string; status: string; retrying?: boolean; partial_output?: string }>; messages: Array<{ role: string; content?: string }> };
+  const interrupt = async (c: { conversationId: string; record: Awaited<ReturnType<typeof repository.getConversation>> & object }, runId: string, key: string, retry: boolean) => {
+    if (retry) await repository.acceptRetry({ binding: c.record, run: { id: runId, conversationId: c.conversationId, clientMessageId: key, corpusDigest: c.record.corpusDigest, executorId: "executor_gone" } });
+    else await repository.acceptSubmission({ binding: c.record, run: { id: runId, conversationId: c.conversationId, clientMessageId: key, inputDigest: "d-1", corpusDigest: c.record.corpusDigest, executorId: "executor_gone" }, canonicalUser: { role: "user", content: "hello" } });
+    await repository.savePartialOutput(runId, "The first half");
+    await repository.endRun(runId, { status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted" } });
+  };
+
+  // The gap: the Run is ended, its retry has not started.
+  const gap = await seed("gap_target");
+  await interrupt(gap, "run_gap_1", "m-1", false);
+  await store.append({ type: "conversation.model_message", conversation_id: gap.conversationId, run_id: "run_gap_1", message: { role: "assistant", content: "The first half" } });
+  const inGap = await snapshot(gap.prefix);
+  const reported = inGap.runs.find((run) => run.id === "run_gap_1");
+  assert.equal(reported?.retrying, true);
+  assert.equal(reported?.partial_output, undefined, "the partial text is not sent a second time");
+  assert.equal(inGap.messages.filter((message) => message.content === "The first half").length, 1);
+
+  // The retry starts (held by the gate): its Run is the active one and nothing is retrying.
+  await runtime.retryInterrupted();
+  const started = await snapshot(gap.prefix);
+  const active = started.runs.find((run) => ["queued", "running"].includes(run.status));
+  assert.ok(active && active.id !== "run_gap_1", "the retry's Run is active");
+  assert.ok(started.runs.every((run) => !run.retrying));
+  release();
+
+  // The budget is spent: two retries were interrupted too. Nothing is retrying and nothing starts.
+  const spent = await seed("spent_target");
+  await interrupt(spent, "run_spent_1", "m-1", false);
+  await interrupt(spent, "run_spent_2", "restart-retry:run_spent_1", true);
+  await interrupt(spent, "run_spent_3", "restart-retry:run_spent_2", true);
+  await runtime.retryInterrupted();
+  const exhausted = await snapshot(spent.prefix);
+  assert.ok(exhausted.runs.every((run) => !run.retrying));
+  assert.equal((await repository.listRuns(spent.conversationId)).length, 3, "no fourth Run");
 });
 
 test("HTTP without wait returns 202 with the run id, and a stream delivers the Run's events then ends", async () => {

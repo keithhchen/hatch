@@ -252,10 +252,11 @@ export class ConversationController {
       historyCursor: state.historyCursor ?? snapshot.before_cursor ?? null
     }));
     const listed = activeSnapshotRun(snapshot);
-    const running = listed && !this.endedRuns.has(listed.id) ? listed : null;
+    const running = listed && (!this.endedRuns.has(listed.id) || listed.retrying) ? listed : null;
     this.endRunLostWhileAway(snapshot, running);
     const held = this.run?.id;
-    if (running && held !== running.id) this.adoptRun(running.id);
+    // A reply being started again has no Run of its own to hold yet: the retry's Run is adopted when the server names it.
+    if (running && !running.retrying && held !== running.id) this.adoptRun(running.id);
     // The page's rows were read before the adoption: they are keyed by the Run it held, and move with it.
     let projected = running && held && held !== running.id ? rekeyRun(result.messages, held, running.id) : result.messages;
     // A message the live row showed is handed over only once the page holds its saved copy: a read that started before it was saved leaves the words where they are.
@@ -273,6 +274,7 @@ export class ConversationController {
     }
     if (handedOver && running) projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
     this.updateMessages(projected);
+    this.followRetry(id, running);
     const awaited = this.awaitedRunId();
     const terminal = this.terminalRun;
     const settled = terminal && projected.some(message => message.run_id === terminal.id && message.role === "assistant" && !message.transient);
@@ -291,6 +293,23 @@ export class ConversationController {
     if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
     this.readFailure = null;
     return { stale: false };
+  }
+
+  /**
+   * While the server is starting an interrupted reply again, the page shows it as working and reads again until the retry's Run
+   * appears (it is then adopted) or the server stops reporting it (the partial reply stays, quietly).
+   */
+  followRetry(id, running) {
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    const retrying = running?.retrying ? running.id : null;
+    if (this.retryingRun && this.retryingRun !== retrying) {
+      const gone = this.retryingRun;
+      this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === gone)));
+      if (!running) this.resetTimeline();
+    }
+    this.retryingRun = retrying;
+    if (retrying) this.retryTimer = setTimeout(() => { if (this.state.conversationId === id) this.requestRefresh(id); }, this.pollMs);
   }
 
   /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. A read that fails is tried once more before it is shown. */
@@ -349,13 +368,14 @@ export class ConversationController {
     this.run = null;
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
-    if (record.status === "failed" || record.status === "interrupted") this.failReply(run.id, record.failure);
+    // A Run a restart interrupted is answered again by the server: it is no failure to report.
+    if (record.status === "failed") this.failReply(run.id, record.failure);
   }
 
   /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
   offerAnswerAgain(snapshot, running) {
     const last = snapshot.runs.at(-1);
-    if (running || this.state.failedRun || !last || !["failed", "interrupted"].includes(last.status)) return;
+    if (running || this.state.failedRun || !last || last.status !== "failed") return;
     this.failReply(idOfRun(last), last.failure);
   }
 
@@ -452,6 +472,7 @@ export class ConversationController {
   }
 
   dispose() {
+    clearTimeout(this.retryTimer);
     this.generation += 1;
     this.closeConnection();
     clearInterval(this.pollTimer);
@@ -590,6 +611,7 @@ export class ConversationController {
       this.reveal.enqueue({ runId: event.run_id, assistantId: event.run_id, content });
       this.setState({ status: outcome.status });
     },
+    resync(_outcome, { conversationId }) { this.requestRefresh(conversationId); },
     changed(outcome, { conversationId }) {
       // The message this page sent is on the page already; only one it did not send (another tab, a channel) needs a read.
       if (outcome.committed === "user" && outcome.messageId && this.state.messages.some(message => message.id === outcome.messageId)) return;
