@@ -75,7 +75,7 @@ test("a Run that completes while the Runtime is unreachable settles by polling o
   controller.dispose();
 });
 
-test("a Run whose session died for good (retries spent, no terminal frame) is freed from its record, with the interruption shown", async () => {
+test("a Run whose session died for good (retries spent, no terminal frame) is freed from its record, with no notice: a restart's interruption is answered again by the server", async () => {
   const transport = new OutageTransport();
   transport.page = { conversation: { id: "conv" }, messages: [], runs: [], events: [], cursor: 1, has_more: false };
   const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pollMs: 20, reconnectAttempts: 0 });
@@ -104,8 +104,8 @@ test("a Run whose session died for good (retries spent, no terminal frame) is fr
   await wait(120);
   const state = controller.getState();
   assert.equal(state.activeRun, null);
-  assert.equal(state.failedRun?.id, runId);
-  assert.equal(state.error?.code, "runtime_restarted");
+  assert.equal(state.failedRun, null);
+  assert.equal(state.error, null);
   controller.dispose();
 });
 
