@@ -263,7 +263,13 @@ export async function handleConversationHttpRequest(
         conversation: publicConversation(snapshot.conversation),
         ...page,
         messages: sanitizeBoundHistory(page.messages, binding.productId),
-        runs: [...runs.values()].map(publicRun),
+        // A Run still going also tells what it has shown besides its text, so a page that joins now sees every step so far.
+        runs: await Promise.all([...runs.values()].map(async (run) => {
+          if (TERMINAL_STATUSES.has(run.status)) return publicRun(run);
+          const activity = await store.readRunActivity(conversation.id, run.id);
+          const [shown] = sanitizeBoundHistory([{ run_id: run.id, role: "assistant" as const, content: "", timestamp: "", ...activity }], binding.productId);
+          return { ...publicRun(run), activity: { tool_calls: shown?.tool_calls ?? [], skill_events: shown?.skill_events ?? [], skill_runs: shown?.skill_runs ?? [] } };
+        })),
         events: [],
         cursor: snapshot.cursor
       });

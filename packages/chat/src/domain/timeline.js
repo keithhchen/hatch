@@ -89,9 +89,8 @@ export class ChatTimeline {
   }
 
   startThinking(contentIndex) {
-    if (this.activeThinking.has(contentIndex)) {
-      throw new Error("Thinking content index started more than once: " + contentIndex);
-    }
+    // A start heard twice (a replay) begins the step again; it never stops the stream.
+    this.activeThinking.delete(contentIndex);
     const entry = { kind: "thinking", id: "thinking-" + contentIndex + "-" + ++this.sequence, contentIndex, title: "thinking", content: "", streaming: true };
     this.entries = [...this.entries, entry];
     this.activeThinking.set(contentIndex, entry.id);
@@ -99,15 +98,16 @@ export class ChatTimeline {
   }
 
   appendThinking(contentIndex, delta) {
+    // A page that joined mid-thinking (a reload) never saw the start: the step begins at the first event it hears.
+    if (!this.activeThinking.has(contentIndex)) this.startThinking(contentIndex);
     const id = this.activeThinking.get(contentIndex);
-    if (!id) throw new Error("Thinking delta arrived before start: " + contentIndex);
     if (!delta) return this.entries;
     return this.patch(id, entry => ({ ...entry, content: entry.content + delta }));
   }
 
   finishThinking(contentIndex, content) {
+    if (!this.activeThinking.has(contentIndex)) this.startThinking(contentIndex);
     const id = this.activeThinking.get(contentIndex);
-    if (!id) throw new Error("Thinking end arrived before start: " + contentIndex);
     this.activeThinking.delete(contentIndex);
     return this.patch(id, entry => ({ ...entry, content, streaming: false }));
   }
@@ -200,6 +200,14 @@ export class ChatTimeline {
 
   static streamingAssistantMessage(runId, timestamp = new Date().toISOString()) {
     return { id: `stream-${runId}`, renderKey: `${runId}-assistant`, run_id: runId, role: "assistant", content: "", timestamp, transient: true, timeline: [] };
+  }
+
+  /** What a Run in progress has shown besides its text (the server's account of it): each step is placed once, by its id. */
+  restoreActivity({ run_id: runId, tool_calls: tools = [], skill_events: skills = [], skill_runs: runs = [] }) {
+    for (const tool of tools) this.upsertTool(toolEvent(tool, runId));
+    for (const event of skills) this.upsertSkill({ run_id: runId, ...event });
+    for (const run of runs) this.upsertSkillRun({ run_id: runId, ...run });
+    return this.entries;
   }
 
   /** Project a durable assistant message (protocol 0.8 `parts`) into timeline entries. */
