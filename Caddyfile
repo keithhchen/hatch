@@ -140,6 +140,12 @@
         import upstream runtime 8400
     }
 
+    # Files the Agent saved (/file/<uuid>): a signed download link, no session. The Runtime owns them.
+    @saved_files path /file/*
+    handle @saved_files {
+        import upstream runtime 8400
+    }
+
     # All browser APIs belong to the cookie-backed Dashboard BFF. In
     # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {
