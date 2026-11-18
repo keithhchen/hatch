@@ -21,15 +21,14 @@ const unavailable = (error: unknown): never => {
 
 /** BoxLite gave up waiting for a box to start, or is still starting it: the box comes up on its own (a new image's first pull is slow). */
 const STARTING = /reach started|state change in progress/i;
-/** The connection to the box failed: the service's fault, not the command's, though BoxLite reports it as the command's error. */
-const TRANSPORT = /WS connect failed|network error|upstream connect error/i;
+/** The service failed or refused before doing anything (connection lost, rate limit, its own database down): its fault, not the command's, though BoxLite reports it as the command's error. A transient 401 "Invalid credentials" was seen on a key that worked seconds before. Seen in prod: "WS connect failed ... 503", "resource exhausted: Rate exceeded.", "internal error: Audit database connection unavailable". */
+const TRANSPORT = /WS connect failed|network error|upstream connect error|resource exhausted|Rate exceeded|Audit database|database connection unavailable|Invalid credentials/i;
 /** How long a call waits for a starting box. */
 export const START_WAIT_MS = 180_000;
 const START_POLL_MS = 3_000;
 
-/** Waits before each retry of a call whose connection failed. */
+/** Waits before each retry of a call the service failed or refused. */
 export const EXEC_BACKOFF_MS = [1_000, 3_000, 6_000];
-const COPY_BACKOFF_MS = [1_000];
 
 /** A connection failure before the call did anything: safe to run again. */
 class Transient extends Error {}
@@ -109,7 +108,7 @@ class BoxliteBox implements AgentBox {
   async readFile(file: string): Promise<Buffer> {
     const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-box-"));
     try {
-      await this.retrying("copyOut", COPY_BACKOFF_MS, () => this.copy(() => this.box.copyOut(file, path.join(directory, "file"), {})));
+      await this.retrying("copyOut", this.backoffMs, () => this.copy(() => this.box.copyOut(file, path.join(directory, "file"), {})));
       return await readFile(path.join(directory, "file"));
     } catch (error) {
       if (error instanceof BoxUnavailable) throw error;
@@ -124,7 +123,7 @@ class BoxliteBox implements AgentBox {
     const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-box-"));
     try {
       await writeFile(path.join(directory, "file"), content);
-      await this.retrying("copyIn", COPY_BACKOFF_MS, () => this.copy(() => this.box.copyIn(path.join(directory, "file"), file, { overwrite: true })));
+      await this.retrying("copyIn", this.backoffMs, () => this.copy(() => this.box.copyIn(path.join(directory, "file"), file, { overwrite: true })));
     } catch (error) {
       if (error instanceof BoxUnavailable) throw error;
       return unavailable(error);

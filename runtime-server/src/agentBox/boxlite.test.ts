@@ -86,3 +86,44 @@ test("an abort during the backoff stops the retries", async () => {
   await assert.rejects(box.exec("true", { cwd: "/", timeoutSeconds: 5, signal: controller.signal }), /stop/);
   assert.equal(sdk.runs, 2);
 });
+
+test("an exec the service refused with a rate limit or its own database error is retried", async () => {
+  for (const message of ["resource exhausted: Rate exceeded.", "internal error: Audit database connection unavailable", "unauthenticated: Invalid credentials"]) {
+    const sdk = scripted([{ exitCode: 0 }, { exitCode: 1, errorMessage: message }, { exitCode: 0, output: "ok" }]);
+    const result = await (await boxOf(sdk)).exec("echo ok", { cwd: "/", timeoutSeconds: 5 });
+    assert.equal(result.stdout, "ok", message);
+    assert.equal(sdk.runs, 3);
+  }
+});
+
+/** An SDK box whose copyOut/copyIn fail with `message` `failures` times, then succeed (copyOut writes "data"). */
+const copying = (message: string, failures: number) => {
+  const box = {
+    ...scripted([{ exitCode: 0 }]), copies: 0,
+    async copyOut(_from: string, to: string) { if (box.copies++ < failures) throw new Error(message); await (await import("node:fs/promises")).writeFile(to, "data"); },
+    async copyIn() { if (box.copies++ < failures) throw new Error(message); }
+  };
+  return box;
+};
+
+test("copies retry with the same backoff as commands: a rate limit twice, then the file", async () => {
+  const sdk = copying("resource exhausted: Rate exceeded.", 2);
+  const box = await boxOf(sdk);
+  assert.equal((await box.readFile("/w/a")).toString(), "data");
+  assert.equal(sdk.copies, 3);
+  sdk.copies = 0;
+  await box.writeFile("/w/a", Buffer.from("x"));
+  assert.equal(sdk.copies, 3);
+});
+
+test("a copy that keeps failing is BoxUnavailable after the backoff", async () => {
+  const sdk = copying("internal error: Audit database connection unavailable", 99);
+  await assert.rejects((await boxOf(sdk)).readFile("/w/a"), BoxUnavailable);
+  assert.equal(sdk.copies, 4);
+});
+
+test("a copy that failed for another reason is not retried", async () => {
+  const sdk = copying("disk full", 99);
+  await assert.rejects((await boxOf(sdk)).readFile("/w/a"), BoxUnavailable);
+  assert.equal(sdk.copies, 1);
+});
