@@ -155,7 +155,6 @@ services:
       PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       CF_API_TOKEN: ${CF_API_TOKEN:-}
-      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-27e57b5c329f0011bc44e884f741987b}
       HATCH_AGENT_BOX_IMAGE: ${HATCH_AGENT_BOX_IMAGE:-}
       # Signs the links of pages the Agent publishes (/html/<id>), which point at HATCH_DOMAIN_ALIAS.
       HATCH_CREDENTIALS_KEY: ${HATCH_CREDENTIALS_KEY:-}

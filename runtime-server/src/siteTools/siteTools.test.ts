@@ -5,7 +5,6 @@ import { IpInfo } from "./ipInfo.js";
 import { PageSpeed } from "./pageSpeed.js";
 import { PlaceSearch } from "./placeSearch.js";
 import { SITE_RESEARCH_CAPABILITY, SiteResearchMode } from "./tools.js";
-import { UrlScan } from "./urlScan.js";
 
 type Call = { url: string; init: RequestInit };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -50,31 +49,6 @@ test("ip_info resolves a host name and reports country and network per address",
   assert.deepEqual(result.ips, [{ ip: "1.2.3.4", country: "China", country_code: "CN", asn: "4134", asn_name: "CHINANET", organization: undefined }]);
   assert.match(calls[0]!.url, /ip=1\.2\.3\.4/);
   await assert.rejects(new IpInfo(fetcher, "T", async () => { throw new Error("ENOTFOUND"); }).run({ target: "nope.test" }), /no IPv4/);
-});
-
-test("url_scan always submits Unlisted, polls past 404 and summarises", async () => {
-  let polls = 0;
-  const { calls, fetcher } = fake(({ url }) => {
-    if (url.endsWith("/scan")) return reply({ uuid: "u1" });
-    return ++polls < 2 ? reply({ errors: [{ message: "not found" }] }, 404) : reply({
-      task: { url: "https://x.test/" }, page: { url: "https://x.test/en", ip: "1.2.3.4", country: "CN", asn: "4134", asnname: "CHINANET" },
-      data: { requests: [{ response: { response: { status: 200 } } }] },
-      lists: { domains: ["x.test"], urls: ["https://www.x.test/a", "https://cdn.other.com/a.js", "https://cdn.other.com/b.js"], certificates: [{ issuer: "R3", validFrom: 1, validTo: 2 }] },
-      meta: { processors: { wappa: { data: [{ app: "nginx" }] } } }
-    });
-  });
-  const result = await new UrlScan(fetcher, "T", "acc", { pollMs: 1, maxWaitMs: 50, submitGapMs: 1 }).run({ url: "https://x.test/" }) as any;
-  assert.deepEqual(JSON.parse(calls[0]!.init.body as string), { url: "https://x.test/", visibility: "Unlisted" });
-  assert.match(calls[0]!.url, /accounts\/acc\/urlscanner\/v2\/scan/);
-  assert.deepEqual(result.third_party_domains, ["cdn.other.com"]);
-  assert.equal(result.status, 200);
-  assert.deepEqual(result.technologies, ["nginx"]);
-  assert.equal(result.certificate.issuer, "R3");
-});
-
-test("url_scan gives up with a timeout error when the scan never finishes", async () => {
-  const { fetcher } = fake(({ url }) => url.endsWith("/scan") ? reply({ uuid: "u" }) : reply({ errors: [{ message: "nf" }] }, 404));
-  await assert.rejects(new UrlScan(fetcher, "T", "acc", { pollMs: 1, maxWaitMs: 5, submitGapMs: 1 }).run({ url: "https://x.test/" }), /did not finish/);
 });
 
 test("a Product without the capability has no site tools", async () => {

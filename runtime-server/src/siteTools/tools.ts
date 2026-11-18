@@ -19,7 +19,7 @@ const definition = (name: string, { description, properties, required }: Entry):
 });
 
 /** The lookups that are configured, by tool name. The key of each is its own: a lookup without one is not offered. */
-export type SiteLookups = Partial<Record<"page_speed" | "place_search" | "ip_info" | "url_scan", SiteLookup<any>>>;
+export type SiteLookups = Partial<Record<"page_speed" | "place_search" | "ip_info", SiteLookup<any>>>;
 
 const ENTRIES = (lookups: SiteLookups): Record<string, Entry | undefined> => ({
   page_speed: lookups.page_speed && { lookup: lookups.page_speed, required: ["url"],
@@ -30,10 +30,7 @@ const ENTRIES = (lookups: SiteLookups): Record<string, Entry | undefined> => ({
     properties: { query: { type: "string", description: "What to look for, e.g. a company name and its city." } } },
   ip_info: lookups.ip_info && { lookup: lookups.ip_info, required: ["target"],
     description: "Where a server is hosted: the country, network number and network name of an IP address, or of each address a host name points to.",
-    properties: { target: { type: "string", description: "An IP address or a host name." } } },
-  url_scan: lookups.url_scan && { lookup: lookups.url_scan, required: ["url"],
-    description: "Open a web page in a real browser and report what it loaded: final address, page status, server location and network, certificate issuer and validity, detected technologies, and the other domains it pulls content from. Takes up to a few minutes; the scan is not public.",
-    properties: { url: { type: "string", description: "The page's full URL." } } }
+    properties: { target: { type: "string", description: "An IP address or a host name." } } }
 });
 
 export class SiteResearchMode {
