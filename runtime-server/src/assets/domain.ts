@@ -6,7 +6,9 @@ import { randomUUID } from "node:crypto";
  */
 export type AssetScope =
   | { kind: "account"; accountId: string; conversationId: string }
-  | { kind: "contact"; connectionId: string; contactId: string; conversationId: string };
+  | { kind: "contact"; connectionId: string; contactId: string; conversationId: string }
+  /** What an Agent produced for one buyer of one Product (its files): not tied to a conversation, so it outlives them all. */
+  | { kind: "buyer"; productId: string; userId: string };
 
 const part = (value: string) => {
   if (!value) throw new Error("Asset scope parts must not be empty");
@@ -16,6 +18,7 @@ const part = (value: string) => {
 /** Injective: no two scopes share a key, and it is also the object-key prefix. */
 export const scopeKey = (scope: AssetScope): string => scope.kind === "account"
   ? `account/${part(scope.accountId)}/c/${part(scope.conversationId)}`
+  : scope.kind === "buyer" ? `product/${part(scope.productId)}/user/${part(scope.userId)}`
   : `contact/${part(scope.connectionId)}/${part(scope.contactId)}/c/${part(scope.conversationId)}`;
 
 export type AssetKind = "image" | "file" | "audio";

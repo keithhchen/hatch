@@ -18,6 +18,7 @@
     "@alicloud/green20220302": "^3.4.4",
     "@alicloud/openapi-client": "^0.4.15",
     "@alicloud/tea-util": "^1.4.11",
+    "@boxlite-ai/boxlite": "^0.13.1",
     "@earendil-works/pi-agent-core": "0.83.0",
     "@earendil-works/pi-ai": "0.83.0",
     "@google/genai": "^1.52.0",
