@@ -141,7 +141,25 @@ export async function createDashboardApp(options = {}) {
     });
     track(profile.id, created ? signupCompleted(method) : signedIn(method));
     setWebSessionCookies(request, response, webSession.session_id, webSessionMaxAge(portalState, webSession));
+    // Whatever way the visitor signed in, the guest's conversations become the account's before the first page of it loads.
+    await carryOverGuest(request, response, auth.token, profile.id).catch(() => {});
     return profile;
+  };
+  // Moves the browser's guest conversations to the account; a failure throws and keeps the cookie so it can be retried.
+  const carryOverGuest = async (request, response, token, accountId) => {
+    const guestToken = requestCookies(request).hatch_guest;
+    if (!guestTokens?.verify(guestToken)) return 0;
+    const upstream = await fetchImpl(new URL("/v1/guest/carry-over", runtimeUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ guest_token: guestToken })
+    });
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) throw Object.assign(new Error("carry_over_failed"), { status: upstream.status, payload });
+    const moved = Number(payload.moved) || 0;
+    response.setHeader("set-cookie", [[response.getHeader("set-cookie") ?? []].flat(), guestCookie(request, "", 0)].flat());
+    if (moved > 0) track(accountId, guestSignedInCarriedOver(moved));
+    return moved;
   };
   const fetchImpl = propagatingFetch(options.fetchImpl ?? fetch);
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
@@ -429,20 +447,12 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/web-chat/guest/carry-over") {
         const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const guestToken = requestCookies(request).hatch_guest;
-        if (!guestTokens?.verify(guestToken)) return send(response, 200, { moved: 0 });
-        const upstream = await fetchImpl(new URL("/v1/guest/carry-over", runtimeUrl), {
-          method: "POST",
-          headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
-          body: JSON.stringify({ guest_token: guestToken })
-        });
-        const payload = await upstream.json().catch(() => ({}));
-        // Only a completed carry-over lets go of the cookie, so a failed one can be retried.
-        if (!upstream.ok) return send(response, upstream.status, payload?.error ? payload : { error: { code: "carry_over_failed", message: "The conversations could not be moved." } });
-        const moved = Number(payload.moved) || 0;
-        response.setHeader("set-cookie", guestCookie(request, "", 0));
-        if (moved > 0) track(authentication.profile.id, guestSignedInCarriedOver(moved));
-        return send(response, 200, { moved });
+        try {
+          return send(response, 200, { moved: await carryOverGuest(request, response, authentication.token, authentication.profile.id) });
+        } catch (error) {
+          const payload = error.payload;
+          return send(response, error.status ?? 502, payload?.error ? payload : { error: { code: "carry_over_failed", message: "The conversations could not be moved." } });
+        }
       }
       if (request.method === "POST" && url.pathname === "/v1/im-link/claim") {
         const authentication = await authenticate(request);

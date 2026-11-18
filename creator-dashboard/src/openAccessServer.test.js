@@ -29,7 +29,7 @@ async function setup(context, { secret = SECRET, analytics } = {}) {
     let body = ""; for await (const chunk of request) body += chunk;
     registryCalls.push({ method: request.method, url: request.url, authorization: request.headers.authorization, body });
     const route = new URL(request.url, "http://registry.test");
-    if (route.pathname === "/v1/auth/signin") return json(response, 200, { token: "opaque-session", account: ACCOUNT });
+    if (["/v1/auth/signin", "/v1/auth/signup"].includes(route.pathname)) return json(response, 200, { token: "opaque-session", account: ACCOUNT });
     if (route.pathname === "/v1/auth/me") {
       if (request.headers.authorization === "Bearer opaque-session") return json(response, 200, ACCOUNT);
       if (request.headers.authorization === "Bearer creator-token") return json(response, 200, { id: CREATOR, email: "c@example.test", display_name: "Maya" });
@@ -310,4 +310,32 @@ test("the purchase surface is gone", async (context) => {
     const response = await fetch(`${base}${route}`, { method, headers, ...(method === "POST" ? { body: "{}" } : {}) });
     assert.equal(response.status, 404, `${method} ${route}`);
   }
+});
+
+test("signing in or up with a guest cookie carries the guest's conversations over in the same response", async (context) => {
+  const { base, runtimeCalls, state } = await setup(context);
+  const guestCookie = `hatch_guest=${encodeURIComponent(guests.mint())}`;
+  const post = (path, cookie) => fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ email: ACCOUNT.email, password: "test-only", display_name: "T" }) });
+
+  for (const path of ["/v1/auth/login", "/v1/auth/signup"]) {
+    runtimeCalls.length = 0;
+    state.carry = { status: 200, body: { moved: 2 } };
+    const done = await post(path, guestCookie);
+    assert.ok(done.ok, path);
+    assert.equal(runtimeCalls.length, 1, `${path} moves the guest once`);
+    assert.equal(runtimeCalls[0].url, "/v1/guest/carry-over");
+    assert.equal(runtimeCalls[0].authorization, "Bearer opaque-session");
+    assert.match(guestCookieOf(done), /^hatch_guest=;.*Max-Age=0/, `${path} clears the guest cookie`);
+    assert.ok(done.headers.getSetCookie().some((value) => value.startsWith("hatch_web_session=")), `${path} still sets the session`);
+
+    runtimeCalls.length = 0;
+    assert.equal(guestCookieOf(await post(path)), undefined);
+    assert.equal(runtimeCalls.length, 0, "no guest cookie, no Runtime call");
+  }
+
+  runtimeCalls.length = 0;
+  state.carry = { status: 502, body: { error: { code: "library_unavailable", message: "down" } } };
+  const failed = await post("/v1/auth/login", guestCookie);
+  assert.equal(failed.status, 200, "a failed carry-over does not fail the sign-in");
+  assert.equal(guestCookieOf(failed), undefined, "and keeps the cookie for the page to retry");
 });
