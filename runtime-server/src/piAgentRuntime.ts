@@ -231,7 +231,7 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx.allowedExternalTools,
       ctx.externalToolDefinitions
     )).map(withActivityMessage);
-    const toolCallBudget = { used: 0 };
+    const toolCallBudget = { used: 0, exhausted: false };
     const tools = toolDefinitions.map((definition) => this.createTool(
       input,
       ctx,
@@ -306,6 +306,8 @@ export class PiAgentRuntime implements AgentRuntime {
             : undefined;
         }
         : undefined,
+      // Once the budget is spent the model gets no tools, so its next call can only answer with what it has.
+      prepareNextTurnWithContext: ({ context }) => toolCallBudget.exhausted ? { context: { ...context, tools: [] } } : undefined,
       afterToolCall: async ({ result }) => {
         // Pi deliberately turns thrown tool errors into a plain-text error
         // result. Hatch needs a structured, recoverable result so the next
@@ -454,7 +456,7 @@ export class PiAgentRuntime implements AgentRuntime {
     input: RunStart,
     ctx: RunContext,
     definition: PiToolDefinition,
-    toolCallBudget: { used: number },
+    toolCallBudget: { used: number; exhausted: boolean },
     getActiveSkills: () => ActivatedSkill[],
     setActiveSkills: (skills: ActivatedSkill[]) => void,
     getResourceRoots: () => string[],
@@ -473,6 +475,7 @@ export class PiAgentRuntime implements AgentRuntime {
         const limit = ctx.toolCallLimit?.max ?? MAX_TOOL_CALLS_PER_RUN;
         const counted = !ctx.toolCallLimit?.uncounted.includes(definition.function.name);
         if (counted && toolCallBudget.used >= limit) {
+          toolCallBudget.exhausted = true;
           const result = {
             status: "error",
             error: {

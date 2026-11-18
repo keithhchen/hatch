@@ -12,6 +12,8 @@ import { BoxToolError } from "./ports.js";
 import { DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, Workspace } from "./workspace.js";
 
 export const BOX_TOOLS = ["box.bash", "box.write", "box.edit", "box.save_file", "box.publish_html"] as const;
+/** A turn with a box audits, fetches and writes over many calls: the budget of a report turn (see REPORT_TOOL_CALL_LIMIT). */
+export const BOX_TOOL_CALL_LIMIT = { max: 100, uncounted: [] as string[] };
 const MAX_SAVED_BYTES = 20 * 1024 * 1024;
 
 /** A box tool's result, or a refusal the model can act on. */

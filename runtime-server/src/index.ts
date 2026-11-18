@@ -74,7 +74,7 @@ import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { openAgentBoxMode } from "./agentBox/open.js";
-import type { AgentBoxMode } from "./agentBox/tools.js";
+import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
 import { openSiteResearchMode } from "./siteTools/open.js";
 import type { SiteResearchMode } from "./siteTools/tools.js";
@@ -475,7 +475,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
-          { usage: turn.usage, ...productTools.length ? { extraTools: productTools } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
+          { usage: turn.usage, ...productTools.length ? { extraTools: productTools } : {}, ...box ? { toolCallLimit: BOX_TOOL_CALL_LIMIT } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
       } catch (error) {
         await failRun(turn, error);
