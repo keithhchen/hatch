@@ -1,4 +1,4 @@
-// The only file that knows PostHog. The SDK is its own chunk, fetched once the page is idle, so it never weighs on the
+// The only file that knows PostHog. The SDK is its own chunk, fetched once the page has loaded and is idle, so it never weighs on the
 // first paint; calls made before it arrives wait for it. Every call is send-and-forget: a failing SDK never reaches the product.
 const OPTIONS = {
   api_host: "/relay",
@@ -14,11 +14,13 @@ const OPTIONS = {
   capture_pageleave: true
 };
 
+// The SDK starts loading only after the window `load` event, then when the browser is idle, so it never competes with the first screen.
+const afterLoad = (fn) => (globalThis.document && globalThis.document.readyState !== "complete" ? globalThis.addEventListener("load", fn, { once: true }) : fn());
 const whenIdle = (fn) => (globalThis.requestIdleCallback ? globalThis.requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(fn, 1500));
 
 /** @returns {import("./port.js").Analytics} */
 export function createPostHogAnalytics(key, load = () => import("posthog-js").then((module) => module.default)) {
-  const client = new Promise((resolve) => whenIdle(resolve))
+  const client = new Promise((resolve) => afterLoad(() => whenIdle(resolve)))
     .then(load)
     .then((posthog) => { posthog.init(key, OPTIONS); return posthog; });
   client.catch(() => undefined);

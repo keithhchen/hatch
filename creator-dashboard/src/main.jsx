@@ -11,7 +11,7 @@ import { ArtifactRoute } from "./artifactRoute.js";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
-import { captureRenderError, initSentry } from "./sentry.js";
+import { captureRenderError, startSentry } from "./sentry.js";
 import { AnalyticsProvider, useAccountIdentity, useAnalytics } from "./analytics/AnalyticsProvider.jsx";
 import { guestSignedInCarriedOver } from "./analytics/events.js";
 import { IM_LINK_PATH } from "./imLink.js";
@@ -19,7 +19,7 @@ import { createAnalytics } from "./analytics/createAnalytics.js";
 import { lazyWithReload, reloadOnStaleBuild } from "./staleBuild.js";
 import { startEarlyLoad, takeEarlyMe } from "./earlyLoad.js";
 
-initSentry(import.meta.env);
+startSentry(import.meta.env);
 const analytics = createAnalytics(import.meta.env);
 reloadOnStaleBuild();
 startEarlyLoad(window.location.pathname, dashboardRequest);

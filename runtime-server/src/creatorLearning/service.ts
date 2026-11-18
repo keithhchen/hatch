@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { DistillationGraphStore } from "./distillationGraph.js";
 import { isCreatorProductRepository, validateProductText, type CreatorProductRecord } from "./products.js";
 import { CreatorFactoryRepositoryError, type CreatorFactoryRepository } from "./repository.js";
 import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
@@ -14,7 +13,6 @@ export class CreatorFactoryService {
 
   constructor(
     private readonly repository: CreatorFactoryRepository,
-    private readonly graphStore?: DistillationGraphStore,
     analytics?: ProductAnalytics
   ) {
     this.analytics = safely(analytics);
@@ -24,10 +22,7 @@ export class CreatorFactoryService {
     const repository = this.productRepository();
     const name = validateProductText(input.name, "product.name", 240);
     const promise = validateProductText(input.promise ?? input.brief ?? "", "product.promise");
-    // Product.id is the sole stable identity. Its graph Run is created at the
-    // same boundary so Product Files/Snapshots/Revisions can all append to a
-    // valid Product-owned lineage, including an idempotent retry after a
-    // process died between the repository insert and graph event.
+    // Product.id is the sole stable identity.
     const productId = randomUUID();
     const product = await repository.createProduct({
       id: productId,
@@ -38,28 +33,6 @@ export class CreatorFactoryService {
       runId: productId,
       idempotencyKey: input.idempotencyKey
     });
-    if (this.graphStore) {
-      await this.graphStore.initialize();
-      const distillationRunId = product.runId ?? product.id;
-      await this.graphStore.ensureRun({
-        id: distillationRunId,
-        creatorId: product.creatorId,
-        productId: product.id,
-        createdAt: product.createdAt
-      });
-      await this.graphStore.appendEvent({
-        id: `evt_${randomUUID().replaceAll("-", "")}`,
-        eventKey: `${product.id}:created`,
-        productId: product.id,
-        runId: distillationRunId,
-        type: "product_created",
-        node: "intake",
-        actor: "creator",
-        parentEventIds: [],
-        artifactIds: [],
-        payload: { nameLength: product.name.length }
-      });
-    }
     this.analytics.capture(product.creatorId, agentCreated(product.id));
     return product;
   }

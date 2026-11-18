@@ -33,6 +33,8 @@ export function LocaleProvider({ children }) {
 
   useEffect(() => {
     document.documentElement.lang = documentLanguage(locale);
+    // The Chinese fallback faces are ~200 font-face slices; an English UI does not pay for them.
+    if (locale !== "en") import("@hatch/ui/fonts-cjk").catch(() => undefined);
   }, [locale]);
 
   useEffect(() => {

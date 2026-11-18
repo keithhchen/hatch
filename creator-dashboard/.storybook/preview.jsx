@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import "@hatch/ui/fonts";
+import "@hatch/ui/fonts-cjk";
 import "@hatch/ui/theme.css";
 import { AtmosphericPaper, ToastViewport, TooltipProvider } from "@hatch/ui";
 

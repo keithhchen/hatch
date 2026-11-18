@@ -51,7 +51,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
     </header>
     <div className="sx-agent__body">
       {tab === "overview" ? <ApiKeysBanner request={request} navigate={navigate} t={t} /> : null}
-      {tab === "build" || tab === "overview" ? renderBuild(product, tab)
+      {tab === "build" || tab === "overview" ? renderBuild(product, tab, resource.retry)
         : !product ? <LoadingState t={t} />
         : <PublishTab {...ctx} />}
     </div>

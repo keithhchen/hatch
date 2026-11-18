@@ -262,26 +262,39 @@ test("a report that is not found or forbidden is its own state, in every languag
   await assert.rejects(mode.api.report("unknown"), error => isMissingReport(error));
 });
 
-test("on an artifact path the Product's Agent request starts at once, once and for that Product; elsewhere nothing starts", async () => {
-  const calls = [];
-  const request = async url => { calls.push(url); return {}; };
-  const loads = [];
-  startEarlyLoad("/studio", request, async () => loads.push("x"));
-  assert.equal(takeEarlyAgent("p1"), null);
-  assert.equal(takeEarlyMe(), null);
-  startEarlyLoad("/artifact/p1", request, async () => loads.push("page"));
-  assert.deepEqual(calls, ["/v1/web-chat/products/p1/agent", "/v1/auth/me"]);
-  assert.deepEqual(loads, ["page"]);
-  assert.equal(takeEarlyAgent("p2"), null, "another Product does not take it");
-  assert.ok(takeEarlyAgent("p1") instanceof Promise);
-  assert.equal(takeEarlyAgent("p1"), null);
-  assert.ok(takeEarlyMe() instanceof Promise);
-  assert.equal(takeEarlyMe(), null);
+test("each route starts its own requests and chunks, once; the artifact page also starts its Product's Agent; public pages start nothing", async () => {
+  const artifact = ["/v1/web-chat/products/p1/agent", "/v1/auth/me"], me = ["/v1/auth/me"];
+  const table = {
+    "/artifact/p1": [artifact, ["artifact"]],
+    "/chat/product/11111111-1111-1111-1111-111111111111": [me, ["chat"]],
+    "/chat/product/11111111-1111-1111-1111-111111111111/conversation/c1": [me, ["chat"]],
+    "/studio": [["/v1/auth/me"], ["studio"]],
+    "/studio/agents/a1/build": [["/v1/auth/me"], ["studio", "studioAgent"]],
+    "/desktop/sign-in": [["/v1/auth/me"], []],
+    "/": [[], []], "/download": [[], []], "/developers": [[], []], "/help": [[], []], "/sign-in": [[], []]
+  };
+  for (const [path, [wantCalls, wantLoads]] of Object.entries(table)) {
+    const calls = [], loads = [];
+    const chunks = new Proxy({}, { get: (_, name) => async () => loads.push(name) });
+    startEarlyLoad(path, async url => { calls.push(url); return {}; }, chunks);
+    assert.deepEqual(calls, wantCalls, path);
+    assert.deepEqual(loads, wantLoads, path);
+    assert.equal(takeEarlyAgent("p1") instanceof Promise, wantCalls.includes("/v1/web-chat/products/p1/agent"), path);
+    assert.equal(takeEarlyAgent("p1"), null);
+    assert.equal(takeEarlyMe() instanceof Promise, wantCalls.includes("/v1/auth/me"), path);
+    assert.equal(takeEarlyMe(), null);
+  }
+});
+
+test("a failed early chunk or request does not throw at startup", async () => {
+  startEarlyLoad("/studio", async () => { throw new Error("down"); }, { studio: async () => { throw new Error("chunk"); } });
+  await assert.rejects(takeEarlyMe(), /down/);
+  await new Promise(resolve => setTimeout(resolve, 0));
 });
 
 test("/me and the Agent are both started before either answers", () => {
   const started = [];
-  startEarlyLoad("/artifact/p1", url => { started.push(url); return new Promise(() => {}); }, async () => {});
+  startEarlyLoad("/artifact/p1", url => { started.push(url); return new Promise(() => {}); }, { artifact: async () => {} });
   assert.deepEqual(started, ["/v1/web-chat/products/p1/agent", "/v1/auth/me"]);
   takeEarlyAgent("p1"); takeEarlyMe();
 });

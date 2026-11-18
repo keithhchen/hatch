@@ -120,7 +120,7 @@ export async function createDashboardApp(options = {}) {
     portalStatePath
   );
   const desktopSignIn = createDesktopSignIn({
-    authenticate: (request) => authenticate(request, registryUrl, fetchImpl, portalState),
+    authenticate: (request, response) => authenticateWithSlide(request, response, registryUrl, fetchImpl, portalState),
     mintSession: (token, clientType) => registryRequest(registryUrl, "/v1/auth/sessions", { method: "POST", fetchImpl, headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ client_type: clientType }) }),
     codes: portalState,
     seal: (value) => encryptOAuthSecret(value, oauthStateKey),
@@ -136,10 +136,11 @@ export async function createDashboardApp(options = {}) {
   const startWebSession = async (request, response, auth, method, created = false) => {
     const profile = publicProfile(auth.account);
     const webSession = await portalState.createWebSession(auth.token, profile, {
-      registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
+      registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey),
+      absolute_expires_at: auth.session?.expires_at
     });
     track(profile.id, created ? signupCompleted(method) : signedIn(method));
-    setWebSessionCookies(request, response, webSession.session_id);
+    setWebSessionCookies(request, response, webSession.session_id, webSessionMaxAge(portalState, webSession));
     return profile;
   };
   const fetchImpl = propagatingFetch(options.fetchImpl ?? fetch);
@@ -198,8 +199,8 @@ export async function createDashboardApp(options = {}) {
   const guestCookie = (request, token, maxAge = 365 * 24 * 3600) =>
     `hatch_guest=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
   // Chat identity: a web session wins; otherwise the browser's guest token, minted on first need (a bad cookie counts as none).
-  const chatAuthentication = async (request) => {
-    const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+  const chatAuthentication = async (request, authenticate = (req) => authenticateRequest(req, registryUrl, fetchImpl, portalState)) => {
+    const authentication = await authenticate(request);
     if (!authentication.error || authentication.error.status !== 401 || bearerTokenFromAuthorization(request)) return authentication;
     if (!guestTokens) return { error: { status: 503, body: { error: { code: "guest_unavailable", message: "Guest chat is unavailable." } } } };
     const existing = requestCookies(request).hatch_guest;
@@ -362,6 +363,7 @@ export async function createDashboardApp(options = {}) {
   });
 
   const handler = observed(async (request, response) => {
+    const authenticate = (req) => authenticateWithSlide(req, response, registryUrl, fetchImpl, portalState);
     const url = new URL(request.url ?? "/", "http://dashboard.local");
     const requestId = currentContext().request_id;
     if (url.pathname === "/v1/user/product-access" || url.pathname === DESKTOP_TOKEN_PATH) {
@@ -380,7 +382,7 @@ export async function createDashboardApp(options = {}) {
         if (!["GET", "POST", "PATCH"].includes(request.method)) {
           return send(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
         }
-        const authentication = await chatAuthentication(request);
+        const authentication = await chatAuthentication(request, authenticate);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         if (request.method !== "GET") {
           // A guest has no CSRF cookie, so its writes must come from one of our own pages.
@@ -425,7 +427,7 @@ export async function createDashboardApp(options = {}) {
         return;
       }
       if (request.method === "POST" && url.pathname === "/v1/web-chat/guest/carry-over") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const guestToken = requestCookies(request).hatch_guest;
         if (!guestTokens?.verify(guestToken)) return send(response, 200, { moved: 0 });
@@ -443,7 +445,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, { moved });
       }
       if (request.method === "POST" && url.pathname === "/v1/im-link/claim") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const token = String((await readJson(request)).token ?? "").trim();
         if (!token) return send(response, 400, { error: { code: "im_link_invalid", message: "A link token is required." } });
@@ -653,7 +655,7 @@ export async function createDashboardApp(options = {}) {
         try {
           if (!state || !expected || !safeEqual(state, expected) || url.searchParams.get("error")) throw new Error("login_state_rejected");
           // Someone already signed in keeps their account: the platform id is bound to it, and the Registry is told whose it is.
-          const current = requestCookies(request).hatch_web_session ? (await authenticate(request, registryUrl, fetchImpl, portalState)).token : undefined;
+          const current = requestCookies(request).hatch_web_session ? (await authenticate(request)).token : undefined;
           const auth = await registryRequest(registryUrl, `/v1/auth/${loginKind}/callback`, {
             method: "POST",
             ...(current ? { headers: { authorization: `Bearer ${current}` } } : {}),
@@ -711,7 +713,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 204, undefined);
       }
       if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const csrfError = cookieCsrfError(request);
         if (csrfError) return send(response, csrfError.status, csrfError.body);
@@ -727,7 +729,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, upstream.status, upstream.ok ? publicProfile(payload) : payload);
       }
       if (request.method === "PATCH" && url.pathname === "/v1/auth/me") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const csrfError = cookieCsrfError(request);
         if (csrfError) return send(response, csrfError.status, csrfError.body);
@@ -743,13 +745,13 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, { ...account, ...publicProfile(account) });
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         // One account shape for every client: Registry's account, plus the presentation fields the web adds.
         return send(response, 200, { ...authentication.account, ...authentication.profile });
       }
       if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const csrfError = cookieCsrfError(request);
         if (csrfError) return send(response, csrfError.status, csrfError.body);
@@ -770,7 +772,7 @@ export async function createDashboardApp(options = {}) {
 
       // API keys live in Registry; the cookie session reaches them through this proxy (CSRF checked by authenticate).
       if (/^\/v1\/auth\/api-keys(?:\/[^/]+)?$/.test(url.pathname) && ["GET", "POST", "DELETE"].includes(request.method)) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const body = request.method === "POST" ? await readJson(request) : undefined;
         const upstream = await fetchImpl(new URL(url.pathname, registryUrl), {
@@ -784,7 +786,7 @@ export async function createDashboardApp(options = {}) {
 
       // What the Expert has spent lives in Registry's ledger; the cookie session reads it through this proxy.
       if (request.method === "GET" && url.pathname === "/v1/creator/usage") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const upstream = await fetchImpl(new URL(`${url.pathname}${url.search}`, registryUrl), { headers: { authorization: `Bearer ${authentication.token}` } });
         response.setHeader("cache-control", "no-store");
@@ -805,7 +807,7 @@ export async function createDashboardApp(options = {}) {
         const state = String(url.searchParams.get("state") ?? "").trim();
         const requestedScopes = parseOAuthScopes(url.searchParams.get("scope"));
         validateOAuthAuthorizationRequest({ clientId, redirectUri, responseType, codeChallenge, challengeMethod, state, scopes: requestedScopes });
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const transactionId = `oauth_tx_${randomId()}`;
         const csrfToken = requestCookies(request).hatch_web_csrf ?? "";
@@ -913,7 +915,7 @@ export async function createDashboardApp(options = {}) {
 
       if (request.method === "GET" && url.pathname === "/v1/public/products") {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const buyer = await optionalAccount(request, registryUrl, fetchImpl, portalState);
+        const buyer = await optionalAccount(request, authenticate);
         const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
@@ -969,7 +971,7 @@ export async function createDashboardApp(options = {}) {
         const agent = findCatalogAgent(catalog, undefined, decodeURIComponent(detailSelectors[0]));
         const creatorState = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
         if (!agent || creatorState?.status === "withdrawn") return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-        const buyer = await optionalAccount(request, registryUrl, fetchImpl, portalState);
+        const buyer = await optionalAccount(request, authenticate);
         const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
@@ -982,7 +984,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const activeEntitlements = commerce.listBuyerEntitlements(authentication.profile.id).filter((entry) => entry.status === "active");
@@ -1070,7 +1072,7 @@ export async function createDashboardApp(options = {}) {
         || productLiveContract
       );
       if (productContractWrite || productContractRead || productContractDelete) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const isProductRoot = url.pathname === "/v1/creator/products" || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
         const requiredScope = isProductRoot
@@ -1100,7 +1102,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/creator/products") {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         requireOAuthScope(request, "creator:products:read", url.pathname);
         return send(response, 200, await registryRequest(registryUrl, "/v1/creator/products", {
@@ -1110,7 +1112,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/(?:assistant|connections)(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname) || (request.method === "POST" && url.pathname === "/v1/transcriptions")) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
         response.once("close", () => abort.abort());
@@ -1149,7 +1151,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (url.pathname.startsWith("/v1/creator/")) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const profile = authentication.profile;
         const projection = commerce.getCreatorDashboard(profile.id);
@@ -1301,7 +1303,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && ["/v1/buyer/entitlements", "/v1/user/entitlements", "/v1/library"].includes(url.pathname)) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const status = url.searchParams.get("status");
@@ -1327,7 +1329,7 @@ export async function createDashboardApp(options = {}) {
 
       const libraryIdMatch = url.pathname.match(/^\/v1\/library\/([^/]+)$/);
       if (request.method === "DELETE" && libraryIdMatch) {
-        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const productId = decodeURIComponent(libraryIdMatch[1]);
         const result = await library.removeFromLibrary({ accountId: authentication.profile.id, productId });
@@ -1373,7 +1375,7 @@ export async function createDashboardApp(options = {}) {
     }
     const authentication = apiKeyClient && !bearerTokenFromAuthorization(request)
       ? {}
-      : await authenticate(request, registryUrl, fetchImpl, portalState);
+      : await authenticateRequest(request, registryUrl, fetchImpl, portalState);
     if (authentication.error) throw Object.assign(new Error(authentication.error.body?.error?.message || "Sign in to continue."), { status: authentication.error.status });
     studioWss.handleUpgrade(request, socket, head, browser => {
       browser.on("error", () => undefined);
@@ -1707,7 +1709,8 @@ function escapeHtml(value) {
   return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
-async function authenticate(request, registryUrl, fetchImpl, portalState) {
+// Authenticates the request. A web-session login also reports its `webSessionId` so the caller that owns the response can slide it.
+async function authenticateRequest(request, registryUrl, fetchImpl, portalState) {
   const explicitToken = bearerTokenFromAuthorization(request);
   const oauthToken = explicitToken
     ? await activeOAuthAccessToken(explicitToken, portalState, request.__oauthStateKey)
@@ -1776,7 +1779,7 @@ async function authenticate(request, registryUrl, fetchImpl, portalState) {
     bindAccount(profile.id);
     request.__registryToken = token;
     request.__oauthScopes = oauthToken?.scopes;
-    return { profile, account, token };
+    return { profile, account, token, webSessionId: webSession ? webSessionId : undefined };
   } catch (error) {
     if (error?.status === 401) {
       return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
@@ -1795,9 +1798,20 @@ async function authenticate(request, registryUrl, fetchImpl, portalState) {
   }
 }
 
-async function optionalAccount(request, registryUrl, fetchImpl, portalState) {
+// Authenticates and, when a web session slid, refreshes its cookies on the response that owns them.
+async function authenticateWithSlide(request, response, registryUrl, fetchImpl, portalState) {
+  const authentication = await authenticateRequest(request, registryUrl, fetchImpl, portalState);
+  const { webSessionId } = authentication;
+  if (webSessionId && !response.headersSent) {
+    const slid = await portalState.touchWebSession(webSessionId).catch(() => undefined);
+    if (slid && !response.headersSent) setWebSessionCookies(request, response, webSessionId, webSessionMaxAge(portalState, slid), { append: true });
+  }
+  return authentication;
+}
+
+async function optionalAccount(request, authenticate) {
   if (!bearerTokenFromAuthorization(request) && !requestCookies(request).hatch_web_session) return undefined;
-  const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+  const authentication = await authenticate(request);
   return authentication.profile;
 }
 
@@ -2268,11 +2282,17 @@ function redirect(response, location) {
   response.end();
 }
 
-function setWebSessionCookies(request, response, token) {
+function webSessionMaxAge(portalState, session) {
+  return Math.max(0, Math.floor((Date.parse(session.expires_at) - portalState.clock().getTime()) / 1000));
+}
+
+function setWebSessionCookies(request, response, token, maxAge, { append = false } = {}) {
   const secure = requestIsSecure(request);
   const secureAttribute = secure ? "; Secure" : "";
-  const common = `Path=/; SameSite=Lax; Max-Age=43200${secureAttribute}`;
+  const common = `Path=/; SameSite=Lax; Max-Age=${maxAge}${secureAttribute}`;
+  const existing = append ? [response.getHeader("set-cookie") ?? []].flat() : [];
   response.setHeader("set-cookie", [
+    ...existing,
     `hatch_web_session=${encodeURIComponent(token)}; ${common}; HttpOnly`,
     `hatch_web_csrf=${encodeURIComponent(webCsrfToken(token))}; ${common}`
   ]);

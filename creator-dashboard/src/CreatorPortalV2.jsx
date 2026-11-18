@@ -178,7 +178,7 @@ function CreatorRoute({ route, request, navigate, locale, t, profile, onProfileC
   if (route.kind === "assistant") return isEarlyAccess(profile) ? lazy(<StudioAssistant request={request} t={t} />) : <Redirect to={ROOT} navigate={navigate} />;
   if (route.kind === "products") return <ProductsPage request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "product-create") return lazy(<CreatorProductFiles request={request} profile={profile} navigate={navigate} locale={locale} />);
-  if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product, tab) => <FactoryAgents productId={route.productId} tab={tab} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
+  if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product, tab, reloadProduct) => <FactoryAgents productId={route.productId} product={product} reloadProduct={reloadProduct} tab={tab} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
   if (route.kind === "users") return lazy(<StudioUsersPage {...ops} />);
   if (route.kind === "settings") return lazy(<SettingsPage request={request} t={t} locale={locale} profile={profile} onProfileChange={onProfileChange} />);
   if (route.kind === "earnings") return lazy(<StudioEarningsPage {...ops} />);
@@ -293,7 +293,7 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
   const productId = idOf(product, "product");
   const published = isProductLive(product);
   const publicHref = published ? `/products/${encodeURIComponent(idOf(product, "product"))}` : "";
-  const path = useAgentPath(request, product);
+  const path = useAgentPath(request, published ? null : product);
   const { copied, copy } = useCopy();
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);

@@ -19,6 +19,10 @@ const EMPTY_STATE = Object.freeze({
  * Orders, entitlements, deliveries, revenue, refunds, and payouts stay in the
  * Commerce ledger/repository.
  */
+export const WEB_SESSION_IDLE_MS = 30 * 24 * 60 * 60_000;
+export const WEB_SESSION_ABSOLUTE_MS = 90 * 24 * 60 * 60_000;
+const WEB_SESSION_SLIDE_INTERVAL_MS = 60 * 60_000;
+
 export class PortalStateStore {
   #state;
   #writeChain = Promise.resolve();
@@ -106,6 +110,12 @@ export class PortalStateStore {
 
   async createWebSession(registryToken, profile, options = {}) {
     const now = this.clock();
+    // Absolute cap = the Registry session's own absolute expiry (desktop: 90 days), so the web
+    // session never outlives a usable Registry token.
+    const absoluteMs = Math.min(
+      Date.parse(options.absolute_expires_at) || Infinity,
+      now.getTime() + WEB_SESSION_ABSOLUTE_MS
+    );
     const session = {
       session_id: this.idFactory("web_session"),
       ...(options.registryTokenCiphertext
@@ -114,7 +124,8 @@ export class PortalStateStore {
       account_id: String(profile?.id ?? ""),
       created_at: now.toISOString(),
       last_seen_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + Number(options.ttl_ms ?? 12 * 60 * 60_000)).toISOString()
+      absolute_expires_at: new Date(absoluteMs).toISOString(),
+      expires_at: new Date(Math.min(now.getTime() + Number(options.ttl_ms ?? WEB_SESSION_IDLE_MS), absoluteMs)).toISOString()
     };
     await this.#mutate((state) => {
       for (const [id, current] of Object.entries(state.web_sessions)) {
@@ -123,6 +134,24 @@ export class PortalStateStore {
       state.web_sessions[session.session_id] = session;
     });
     return clone(session);
+  }
+
+  // Sliding idle expiry: extends expires_at to now + 30 days (capped at the absolute expiry), at most once
+  // per hour per session. Returns the updated session only when it wrote; the re-check runs inside the
+  // serialized mutation, so concurrent slides collapse into one write.
+  async touchWebSession(sessionId) {
+    const due = (session, now) => session && Date.parse(session.expires_at) > now
+      && now - Date.parse(session.last_seen_at) >= WEB_SESSION_SLIDE_INTERVAL_MS;
+    if (!due(this.#state.web_sessions[sessionId], this.clock().getTime())) return undefined;
+    return this.#mutate((state) => {
+      const now = this.clock().getTime();
+      const session = state.web_sessions[sessionId];
+      if (!due(session, now)) return undefined;
+      const absolute = Date.parse(session.absolute_expires_at) || Date.parse(session.created_at) + WEB_SESSION_ABSOLUTE_MS;
+      session.last_seen_at = new Date(now).toISOString();
+      session.expires_at = new Date(Math.min(now + WEB_SESSION_IDLE_MS, absolute)).toISOString();
+      return clone(session);
+    });
   }
 
   async deleteWebSession(sessionId) {

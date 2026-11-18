@@ -1,27 +1,13 @@
-import { Streamdown, defaultComponents } from "streamdown";
-import { linkKind } from "../domain/form-pages.js";
-import "streamdown/styles.css";
+import { Suspense, lazy } from "react";
 
-function MarkdownTable({ children, node, ...attributes }) {
-  return <div className="web-chat__table-scroll"><table {...attributes}>{children}</table></div>;
-}
-
-// A Hatch link is a plain anchor (the chat opens it in its page panel); every other link keeps Streamdown's link-safety flow.
-function MarkdownLink({ node, children, ...attributes }) {
-  const DefaultLink = defaultComponents.a;
-  return linkKind(attributes.href ?? "", window.location.origin) === "other"
-    ? <DefaultLink node={node} {...attributes}>{children}</DefaultLink>
-    : <a href={attributes.href} className="wrap-anywhere font-medium text-primary underline">{children}</a>;
-}
-
-const markdownComponents = Object.freeze({ table: MarkdownTable, a: MarkdownLink });
-const streamingAnimation = Object.freeze({
-  animation: "fadeIn",
-  duration: 160,
-  easing: "ease-out",
-  sep: "char"
-});
+// The markdown stack (Streamdown, parse5, marked) is large and not needed for first paint: it loads on demand,
+// and until it arrives the message shows as plain text, never an empty box.
+const MarkdownBody = lazy(() => import("./MarkdownBody.jsx"));
 
 export function MessageResponse({ children, isAnimating = false }) {
-  return <Streamdown animated={streamingAnimation} components={markdownComponents} controls={{ code: false }} isAnimating={isAnimating}>{children}</Streamdown>;
+  return (
+    <Suspense fallback={<span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{children}</span>}>
+      <MarkdownBody isAnimating={isAnimating}>{children}</MarkdownBody>
+    </Suspense>
+  );
 }
