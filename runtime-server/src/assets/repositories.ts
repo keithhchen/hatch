@@ -21,6 +21,7 @@ export class InMemoryAssetRepository implements AssetRepository {
     return next;
   }
   async get(scope: AssetScope, id: string) { return this.find(scope, id); }
+  async byId(id: string) { return this.rows.get(id); }
   private find(scope: AssetScope, id: string) {
     const asset = this.rows.get(id);
     return asset && scopeKey(asset.record.scope) === scopeKey(scope) ? asset : undefined;
@@ -115,6 +116,10 @@ export class PostgresAssetRepository implements AssetRepository {
   }
   async get(scope: AssetScope, id: string) {
     const result = await this.db.query<Row>(`SELECT record FROM hatch_assets WHERE scope_key = $1 AND id = $2`, [scopeKey(scope), id]);
+    return restore(result.rows[0]);
+  }
+  async byId(id: string) {
+    const result = await this.db.query<Row>(`SELECT record FROM hatch_assets WHERE id = $1`, [id]);
     return restore(result.rows[0]);
   }
   async attach(scope: AssetScope, id: string, messageId: string) {
