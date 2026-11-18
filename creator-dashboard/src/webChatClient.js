@@ -58,6 +58,9 @@ export class WebConversationTransport extends ConversationTransport {
   }
 
   get retriesRun() { return true; }
+  /** The server steers a Run a message arrives during; a send over the socket is answered by `message.accepted` or `message.rejected`. */
+  get steerable() { return true; }
+  get requestsOutliveStream() { return false; }
 
   retryRun(conversationId, key) {
     return this.request(this.conversationUrl(conversationId, "/retry"), { method: "POST", body: JSON.stringify({ retry_id: key, client: "web" }) });
@@ -131,6 +134,7 @@ export class BrowserRuntimeConnection extends RuntimeConnection {
       type: "client.message", run_id: runId, client_message_id: clientMessageId,
       conversation_id: this.conversationId, local_tools: localTools, time_zone: browserTimeZone(),
       ...(taskStart ? { task_start: true } : {}),
+      reject_by_message: true,
       message: { role: "user", content, ...(attachments.length ? { attachments } : {}) }
     });
   }

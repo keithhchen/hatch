@@ -2387,6 +2387,33 @@ test("a message the Runtime cannot read ends its own Run with plain text; an unr
   socket.close();
 });
 
+test("a refused message that asked for reject_by_message is message.rejected, naming the message; no Run fails", async () => {
+  const dataDir = await tempWorkspace();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  const store = new RuntimeStore(dataDir);
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: await seedLocalConversations(store, ["conv_rejected"]) });
+  const serverUrl = await listen(runtimeServer);
+  const messages: OutboundMessage[] = [];
+  const socket = await openConversationSocket(serverUrl, "conv_rejected", messages);
+
+  const frame = { type: "client.message", run_id: "run_live", client_message_id: "message_a", reject_by_message: true, local_tools: [], message: { role: "user", content: "hi" } };
+  socket.send(JSON.stringify({ ...frame, conversation_id: "conv_other" }));
+  const mismatch = await waitForSocketMessage(messages, (message) => message.type === "message.rejected" && message.client_message_id === "message_a");
+  assert.ok(mismatch.type === "message.rejected");
+  assert.deepEqual([mismatch.run_id, mismatch.error.code], ["run_live", "conversation_mismatch"]);
+
+  socket.send(JSON.stringify({ type: "client.message", run_id: "run_live", client_message_id: "message_b", reject_by_message: true, conversation_id: "conv_rejected", local_tools: [], message: { role: "user" } }));
+  const unreadable = await waitForSocketMessage(messages, (message) => message.type === "message.rejected" && message.client_message_id === "message_b");
+  assert.ok(unreadable.type === "message.rejected");
+  assert.equal(unreadable.error.code, "invalid_frame");
+
+  // Without the flag the same refusal is still the end of a Run.
+  socket.send(JSON.stringify({ ...frame, reject_by_message: undefined, conversation_id: "conv_other" }));
+  await waitForSocketMessage(messages, (message) => message.type === "turn.failed" && message.run_id === "run_live");
+  assert.equal(messages.filter((message) => message.type === "turn.failed").length, 1);
+  socket.close();
+});
+
 async function openConversationSocket(serverUrl: string, conversationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
   const socket = new WebSocket(serverUrl);
   socket.on("message", (data) => {

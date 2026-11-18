@@ -485,7 +485,10 @@ export class ConversationController {
   handleClose(connection, link, conversationId) {
     if (!link.live) return;
     // A socket that dies takes an unacknowledged message with it; a request that outlives its stream does not.
-    if (!this.transport.steerable) for (const submission of [...this.pendings.values()]) if (submission.conversationId === conversationId) this.restoreSubmission(submission, true);
+    const mine = [...this.pendings.values()].filter(submission => submission.conversationId === conversationId);
+    if (!this.transport.steerable) for (const submission of mine) this.restoreSubmission(submission, true);
+    // A message sent over the socket may have died with it: it goes again when the session is back, under the same key.
+    else if (!this.transport.requestsOutliveStream) for (const submission of mine) submission.dispatched = false;
     if (this.connection === connection) this.connection = null;
     this.downSince ??= Date.now();
     if (this.attempts >= this.reconnectAttempts) {
@@ -672,6 +675,13 @@ export class ConversationController {
       if (!unaccepted) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
       // A read that fails here is taken back by the polling that the reply still syncing starts.
       await this.refresh(conversationId).catch(this.failRead);
+    },
+    // The server refused one message: its words go back to the composer, and a Run it did not start goes on as it was.
+    message_rejected(outcome) {
+      const submission = this.pendings.get(outcome.clientMessageId);
+      if (!submission) return;
+      this.restoreSubmission(submission);
+      this.fail(outcome.error ?? new ChatError("connectionFailed"));
     },
     session_error(outcome) {
       const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === this.run?.id);

@@ -275,7 +275,9 @@ export const ClientMessageSchema = z.object({
   ...ClientAttributeFields,
   message: UserMessageSchema,
   /** Requests the first Agent run; Runtime materializes its internal marked user turn. */
-  task_start: z.literal(true).optional()
+  task_start: z.literal(true).optional(),
+  /** The client takes a refusal of this message as `message.rejected` (naming the message), never as the end of a Run: it may join a live one. */
+  reject_by_message: z.literal(true).optional()
 }).strict().superRefine((message, ctx) => {
   if (message.task_start && (message.message.content.trim() || message.message.attachments?.length)) {
     ctx.addIssue({ code: "custom", path: ["message"], message: "task_start must not include user-authored message content" });
@@ -606,6 +608,14 @@ export type SessionError = {
   error: { code: string; message: string; reference?: string };
 };
 
+/** A client.message that asked for `reject_by_message` was refused. Only that message is affected; no Run ended. */
+export type MessageRejected = {
+  type: "message.rejected";
+  run_id: string;
+  client_message_id: string;
+  error: { code: string; message: string; reference?: string };
+};
+
 /** One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was. */
 export type FrameRejected = {
   type: "frame.rejected";
@@ -613,7 +623,7 @@ export type FrameRejected = {
   error: { code: string; message: string; reference?: string };
 };
 
-export type OutboundMessage = SessionError | FrameRejected | RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | CompactionEvent | RunFinal | RunError;
+export type OutboundMessage = SessionError | FrameRejected | MessageRejected | RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | CompactionEvent | RunFinal | RunError;
 
 export function contextAttachmentTextSha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");

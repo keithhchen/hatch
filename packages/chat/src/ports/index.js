@@ -21,6 +21,8 @@ export class ConversationTransport {
    * provisional until the server names the real one.
    */
   get steerable() { return false; }
+  /** Whether a send, once made, completes even if the stream drops (an HTTP request). A socket send does not: it goes again on reconnect, under the same key. */
+  get requestsOutliveStream() { return this.steerable; }
   /** Whether a Run that failed can be answered again: the transport has `retryRun`. */
   get retriesRun() { return false; }
   /** Answers the conversation again after a failed Run. The same `key` is the same Run. @returns {Promise<{run_id: string}>} */

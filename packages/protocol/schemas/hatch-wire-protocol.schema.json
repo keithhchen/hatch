@@ -209,7 +209,8 @@
             }
           }
         },
-        "task_start": { "const": true }
+        "task_start": { "const": true },
+        "reject_by_message": { "const": true }
       }
     },
     "toolCallResultOk": {
@@ -632,10 +633,23 @@
         "error": { "$ref": "#/$defs/error" }
       }
     },
+    "messageRejected": {
+      "description": "A client.message that asked for reject_by_message was refused. Only that message is affected; no Run ended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "client_message_id", "error"],
+      "properties": {
+        "type": { "const": "message.rejected" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "client_message_id": { "type": "string", "minLength": 1 },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
     "outboundMessage": {
       "oneOf": [
         { "$ref": "#/$defs/sessionError" },
         { "$ref": "#/$defs/frameRejected" },
+        { "$ref": "#/$defs/messageRejected" },
         { "$ref": "#/$defs/sessionReady" },
         { "$ref": "#/$defs/assistantDelta" },
         { "$ref": "#/$defs/toolCallRequest" },

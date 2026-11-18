@@ -7,7 +7,7 @@ import { ChatTimeline } from "./timeline.js";
  * not applied, so a host text-reveal policy can pace them.
  *
  * Outcome kinds: text, timeline, tool_request, approval_request, turn_state,
- * compacted, changed, accepted, ready, terminal, session_error, ignored.
+ * compacted, changed, accepted, ready, terminal, message_rejected, session_error, ignored.
  */
 const replying = Object.freeze({ key: "agentReplying" });
 const outcome = (kind, fields = {}) => Object.freeze({ kind, ...fields });
@@ -61,6 +61,8 @@ const sessionHandlers = Object.freeze({
   "session.error": (_timeline, event) => outcome("session_error", { error: event.error }),
   // One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was.
   "frame.rejected": () => IGNORED,
+  // One message was refused, by the key the client gave it. No Run ended: the message may have been meant to join a live one.
+  "message.rejected": (_timeline, event) => outcome("message_rejected", { clientMessageId: event.client_message_id, error: event.error }),
   // A summary of the history began or ended, in a Run or between Runs.
   "conversation.compaction": (_timeline, event) => outcome("compaction", { active: event.active === true }),
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),

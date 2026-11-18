@@ -368,9 +368,10 @@ turn.completed
 turn.failed
 session.error
 frame.rejected
+message.rejected
 ```
 
-`turn.failed` means a Run ended without a reply; a Run the user stopped ends as `turn.failed` with `error.code` `run_cancelled`, which clients show as a cancellation. `session.error` is a refused session (hello, binding, an unreadable frame). `frame.rejected {run_id, error}` is one refused frame about a Run (a stale `turn.cancel`, an unknown `tool_call.result`); the Run is as it was.
+`turn.failed` means a Run ended without a reply; a Run the user stopped ends as `turn.failed` with `error.code` `run_cancelled`, which clients show as a cancellation. `session.error` is a refused session (hello, binding, an unreadable frame). `frame.rejected {run_id, error}` is one refused frame about a Run (a stale `turn.cancel`, an unknown `tool_call.result`); the Run is as it was. `message.rejected {run_id, client_message_id, error}` answers a refused `client.message` that set `reject_by_message: true`, in place of `turn.failed`: only that message is refused and no Run ends (the message may have been meant to join a live Run). Without the flag a refused `client.message` is still `turn.failed`.
 
 Future restricted-mode outbound schema entries:
 

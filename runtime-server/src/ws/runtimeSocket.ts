@@ -138,6 +138,14 @@ export async function handleRuntimeSocket(
   // (a stale cancel, an unknown tool call) is `frame.rejected`, which leaves the Run as it was.
   const sessionError = (code: string, message: string) => send({ type: "session.error", error: { code, message } });
   const frameRejected = (runId: string, error: { code: string; message: string }) => send({ type: "frame.rejected", run_id: runId, error });
+  /**
+   * A client.message the Runtime refused. A client that asked (`reject_by_message`) is told which message, and no Run ends:
+   * the message may have meant to join a live Run. Every other client is told the Run failed, as always.
+   */
+  const refuseMessage = (frame: { run_id: string; client_message_id?: unknown; reject_by_message?: unknown }, error: { code: string; message: string }) =>
+    frame.reject_by_message === true
+      ? send({ type: "message.rejected", run_id: frame.run_id, client_message_id: typeof frame.client_message_id === "string" ? frame.client_message_id : frame.run_id, error })
+      : send({ type: "turn.failed", run_id: frame.run_id, error });
   /** Local-tool calls still waiting for a client: whoever reconnects can answer them. */
   const replayPendingToolRequests = async (conversationId: string): Promise<void> => {
     for (const request of await chat.pendingToolRequests(conversationId)) sink.push(request as unknown as Record<string, unknown>);
@@ -251,7 +259,7 @@ export async function handleRuntimeSocket(
         if (!hello || !binding || !connectionConversation) {
           const error = { code: "hello_required", message: "client.hello must be sent before run messages" };
           // A message that never reached a session never started its Run: the client takes its words back.
-          if (message.type === "client.message") await send({ type: "turn.failed", run_id: message.run_id, error });
+          if (message.type === "client.message") await refuseMessage(message, error);
           else await sessionError(error.code, error.message);
           return;
         }
@@ -290,13 +298,9 @@ export async function handleRuntimeSocket(
 
         if (message.type === "client.message") {
           if (message.conversation_id !== conversation.publicId) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "conversation_mismatch",
-                message: `This connection is bound to conversation ${conversation.publicId}.`
-              }
+            await refuseMessage(message, {
+              code: "conversation_mismatch",
+              message: `This connection is bound to conversation ${conversation.publicId}.`
             });
             return;
           }
@@ -322,18 +326,18 @@ export async function handleRuntimeSocket(
             }
           } catch (error) {
             if (submission.signal.aborted) return;
-            await send({ type: "turn.failed", run_id: message.run_id, error: chatFailure(error) });
+            await refuseMessage(message, chatFailure(error));
           } finally {
             pendingSubmissions.delete(message.run_id);
             connectionAbortController.signal.removeEventListener("abort", abortWithConnection);
           }
         }
       } catch (error) {
-        const rawMessage = raw as { type?: unknown; run_id?: unknown } | undefined;
+        const rawMessage = raw as { type?: unknown; run_id?: unknown; client_message_id?: unknown; reject_by_message?: unknown } | undefined;
         const unreadableMessage = (error instanceof SyntaxError || error instanceof ZodError) && rawMessage?.type === "client.message" && typeof rawMessage.run_id === "string";
         // A message the Runtime could not read never started its Run, so that Run ends here, with text a person may read (never the validation report).
         if (unreadableMessage) {
-          await send({ type: "turn.failed", run_id: rawMessage.run_id as string, error: { code: "invalid_frame", message: "The Runtime could not accept that message." } });
+          await refuseMessage(rawMessage as { run_id: string; client_message_id?: unknown; reject_by_message?: unknown }, { code: "invalid_frame", message: "The Runtime could not accept that message." });
           return;
         }
         if (error instanceof AgentReleaseUnavailableError) {
