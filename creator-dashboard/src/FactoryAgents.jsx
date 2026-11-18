@@ -82,9 +82,9 @@ function ErrorNotice({ error, onClose }) {
   </Snackbar>;
 }
 
-export function FactoryAgents({ productId, tab = "build", section, agent, navigate, locale = "en" }) {
+export function FactoryAgents({ productId, product = null, reloadProduct, tab = "build", section, agent, navigate, locale = "en" }) {
   const t = useMemo(() => createFactoryAgentTranslator(locale), [locale]);
-  const [sessions, setSessions] = useState([]); const [agents, setAgents] = useState([]); const [manualFiles, setManualFiles] = useState([]); const [uploadItems, setUploadItems] = useState([]); const [config, setConfig] = useState(null); const [product, setProduct] = useState(null); const [error, setError] = useState(""); const importPicker = useRef(null);
+  const [sessions, setSessions] = useState([]); const [agents, setAgents] = useState([]); const [manualFiles, setManualFiles] = useState([]); const [uploadItems, setUploadItems] = useState([]); const [config, setConfig] = useState(null); const [error, setError] = useState(""); const importPicker = useRef(null);
   const root = useMemo(() => factoryRoot(productId), [productId]);
   const stage = section ?? null;
   const selected = agent ?? (stage ? FIRST_PAGE[stage] : null);
@@ -92,10 +92,9 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const goToStep = step => step.id === "ship" ? navigate(creatorProductPath(productId, "publish")) : goToFactory(...step.items[0]);
   const applyNavigation = value => { setSessions(value.sessions || []); setAgents(value.agents || []); setManualFiles(value.manualFiles || []); };
   const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); if (value.manualFiles) setManualFiles(value.manualFiles); }).catch(e => setError(e.message));
-  const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => setProduct(value.product ?? value)).catch(e => setError(e.message));
-  useEffect(() => { refreshConfig(); refreshProduct(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onOpen: () => { refreshConfig(); refreshProduct(); } }); }, [productId, root, t]);
+  useEffect(() => { let opened = false; refreshConfig(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onOpen: () => { if (!opened) { opened = true; return; } refreshConfig(); reloadProduct?.(); } }); }, [productId, root, t]);
   const [firstAgent, setFirstAgent] = useState(false);
-  useEffect(() => { api("/v1/creator/products").then(value => { const list = value.products ?? value; setFirstAgent(Array.isArray(list) && list.length === 1); }).catch(() => setFirstAgent(false)); }, []);
+  useEffect(() => { if (!selected) return; api("/v1/creator/products").then(value => { const list = value.products ?? value; setFirstAgent(Array.isArray(list) && list.length === 1); }).catch(() => setFirstAgent(false)); }, [Boolean(selected)]);
   const agentEntry = role => agents.find(item => item.role === role);
   const agentName = role => localizeAgentText(agentEntry(role)?.name, locale);
   const agentSession = role => sessions.filter(item => item.role === role).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
