@@ -2,6 +2,7 @@ import { requireTool } from "./tools.js";
 import type { RuntimeCreatorTool } from "./creatorTools.js";
 import type { ToolOutput } from "./assets/toolOutput.js";
 import type { BoxToolRunner } from "./agentBox/tools.js";
+import type { SiteToolRunner } from "./siteTools/tools.js";
 import { assertBoundedJsonValue, readBoundedJsonObject, readBoundedResponseText } from "./boundedResponse.js";
 
 type McpServerConfig = {
@@ -19,6 +20,7 @@ export class ServerToolExecutor {
   private studio?: HostToolRunner;
   private artifact?: HostToolRunner;
   private box?: BoxToolRunner;
+  private site?: SiteToolRunner;
   private observer?: (name: string, args: Record<string, unknown>) => void;
 
   constructor(private readonly timeoutMs = 120000) {}
@@ -46,6 +48,11 @@ export class ServerToolExecutor {
   /** The Agent's own computer (`box.*`), bound to the buyer it belongs to; `read` and `ls` of a path in it go there. */
   setBox(runner: BoxToolRunner | undefined): void {
     this.box = runner;
+  }
+
+  /** Site research (`site.*`), run here with the Runtime's own keys. */
+  setSite(runner: SiteToolRunner | undefined): void {
+    this.site = runner;
   }
 
   setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
@@ -96,6 +103,13 @@ export class ServerToolExecutor {
       if (!this.box) throw new Error("This conversation has no computer.");
       // A command sets its own deadline (up to five minutes).
       const result = await this.box.run(name.slice("box.".length), parsedArgs, signal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
+    if (name.startsWith("site.")) {
+      if (!this.site) throw new Error("This conversation has no site research.");
+      const result = await this.site.run(name.slice("site.".length), parsedArgs, signal);
       assertBoundedJsonValue(result);
       return result;
     }

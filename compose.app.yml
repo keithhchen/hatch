@@ -151,10 +151,11 @@ services:
       HATCH_RUNTIME_CHAT_SERVICE_TOKEN: ${HATCH_RUNTIME_CHAT_SERVICE_TOKEN:?set HATCH_RUNTIME_CHAT_SERVICE_TOKEN in /opt/hatch/.env}
       # The Agent's own computer (BoxLite Cloud) for Products with the agent_box capability; off without a key.
       BOXLITE_API_KEY: ${BOXLITE_API_KEY:-}
-      # Keys the Agent box uses through BoxLite placeholders (never inside the box); each off when unset.
+      # Site research tools (site_research capability), run by the Runtime itself: each tool is off without its key. Never given to a box.
       PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       CF_API_TOKEN: ${CF_API_TOKEN:-}
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-27e57b5c329f0011bc44e884f741987b}
       HATCH_AGENT_BOX_IMAGE: ${HATCH_AGENT_BOX_IMAGE:-}
       # Signs the links of pages the Agent publishes (/html/<id>), which point at HATCH_DOMAIN_ALIAS.
       HATCH_CREDENTIALS_KEY: ${HATCH_CREDENTIALS_KEY:-}

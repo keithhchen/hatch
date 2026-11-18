@@ -76,6 +76,8 @@ import { openChatAssets } from "./chat/openChatAssets.js";
 import { openAgentBoxMode } from "./agentBox/open.js";
 import type { AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
+import { openSiteResearchMode } from "./siteTools/open.js";
+import type { SiteResearchMode } from "./siteTools/tools.js";
 import { GUEST_PREFIX } from "./chat/principal.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { MAX_CONSUMER_BUFFERED_BYTES } from "./chat/sinks.js";
@@ -190,6 +192,8 @@ export type RuntimeServerOptions = {
   artifact?: ArtifactMode;
   /** The Agent's own computer and the pages it publishes, for the Products that have it. */
   agentBox?: { mode: AgentBoxMode; pages: HtmlPages };
+  /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
+  siteResearch?: SiteResearchMode;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -256,6 +260,8 @@ export async function createRuntimeServerFromEnvironment(
     : undefined;
   // The Agent's own computer, for the Products that have it switched on: off without a BoxLite key.
   const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
+  // Site research, for the Products that have it switched on: off without any of its keys.
+  const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -283,6 +289,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(chatAssets ? { chatAssets } : {}),
     ...(artifact ? { artifact } : {}),
     ...(agentBox ? { agentBox } : {}),
+    ...(siteResearch ? { siteResearch } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -409,6 +416,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (artifact) for (const definition of artifactToolDefinitions()) toolRegistry.set(definition.name, definition);
   const agentBox = options.agentBox;
   if (agentBox) for (const definition of agentBox.mode.definitions()) toolRegistry.set(definition.name, definition);
+  if (options.siteResearch) for (const definition of options.siteResearch.definitions()) toolRegistry.set(definition.name, definition);
   const parts: PartsReader = chatAssets ?? new TextPartsReader();
 
   const admission: RunAdmission = {
@@ -457,6 +465,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
         const box = report ? undefined : await agentBox?.mode.turnFor({ productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX) });
         serverTools.setBox(box?.tools);
+        const site = report ? undefined : await options.siteResearch?.turnFor(binding.productId);
+        serverTools.setSite(site?.tools);
+        const productTools = [...box?.extraTools ?? [], ...site?.extraTools ?? []];
         const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
         await runModelTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
@@ -464,7 +475,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
-          { usage: turn.usage, ...box ? { extraTools: box.extraTools } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
+          { usage: turn.usage, ...productTools.length ? { extraTools: productTools } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
       } catch (error) {
         await failRun(turn, error);

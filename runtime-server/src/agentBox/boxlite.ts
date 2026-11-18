@@ -12,14 +12,6 @@ export const DEFAULT_WORK_DIR = "/home/agent/work";
 /** What one command may print, in all; the start and the end of it are kept. */
 const OUTPUT_CHARS = 30_000;
 
-/** Keys the box's programs use without holding them: they send the placeholder `<BOXLITE_SECRET:name>` in `headers`, and BoxLite swaps in the key ({value}) only on requests to these hosts. */
-const BOX_SECRETS: { env: string; name: string; hosts: string[]; headers: Record<string, string> }[] = [
-  { env: "PAGESPEED_API_KEY", name: "pagespeed", hosts: ["www.googleapis.com"], headers: { "X-Goog-Api-Key": "{value}" } },
-  { env: "GOOGLE_MAPS_API_KEY", name: "google_maps", hosts: ["places.googleapis.com", "addressvalidation.googleapis.com"], headers: { "X-Goog-Api-Key": "{value}" } },
-  { env: "CF_API_TOKEN", name: "cloudflare", hosts: ["api.cloudflare.com"], headers: { Authorization: "Bearer {value}" } }
-];
-
-type BoxSecret = { name: string; value: string; hosts: string[]; headers: Record<string, string> };
 type SdkBox = NonNullable<Awaited<ReturnType<Boxlite["get"]>>>;
 
 const unavailable = (error: unknown): never => {
@@ -105,15 +97,14 @@ class BoxliteBox implements AgentBox {
 
 /** BoxLite Cloud through its Node SDK's REST runtime: `create` is a box of its own, resumed on the next call after it idles out. */
 export class BoxliteProvider implements BoxProvider {
-  constructor(private readonly runtime: Pick<Boxlite, "get" | "create" | "getInfo">, private readonly options: { image: string; workDir: string; secrets?: BoxSecret[]; startPollMs?: number }) {}
+  constructor(private readonly runtime: Pick<Boxlite, "get" | "create" | "getInfo">, private readonly options: { image: string; workDir: string; startPollMs?: number }) {}
 
   /** Configured by BOXLITE_API_KEY (and BOXLITE_REST_URL, default the hosted API); undefined without a key. */
   static fromEnvironment(environment: NodeJS.ProcessEnv = process.env, rest: (key: string) => Pick<Boxlite, "get" | "create" | "getInfo"> = key => JsBoxlite.rest(new BoxliteRestOptions({ url: environment.BOXLITE_REST_URL?.trim() || "https://api.boxlite.ai", credential: new ApiKeyCredential(key) }))): BoxliteProvider | undefined {
     const key = environment.BOXLITE_API_KEY?.trim();
     if (!key) return undefined;
     const runtime = rest(key);
-    const secrets = BOX_SECRETS.flatMap(({ env, name, hosts, headers }) => { const value = environment[env]?.trim(); return value ? [{ name, value, hosts, headers }] : []; });
-    return new BoxliteProvider(runtime, { secrets, image: environment.HATCH_AGENT_BOX_IMAGE?.trim() || DEFAULT_BOX_IMAGE, workDir: environment.HATCH_AGENT_BOX_WORKDIR?.trim() || DEFAULT_WORK_DIR });
+    return new BoxliteProvider(runtime, { image: environment.HATCH_AGENT_BOX_IMAGE?.trim() || DEFAULT_BOX_IMAGE, workDir: environment.HATCH_AGENT_BOX_WORKDIR?.trim() || DEFAULT_WORK_DIR });
   }
 
   get workDir(): string { return this.options.workDir; }
@@ -129,7 +120,7 @@ export class BoxliteProvider implements BoxProvider {
     let box: SdkBox;
     try {
       // The box is the buyer's for good: it idles out (and resumes on use) but is never deleted.
-      box = await this.runtime.create({ image: this.options.image, cpus: 2, memoryMib: 2048, autoRemove: false, autoDelete: 0, network: { outbound: { mode: "enabled", allowNet: [] } }, secrets: this.options.secrets ?? [] }, name);
+      box = await this.runtime.create({ image: this.options.image, cpus: 2, memoryMib: 2048, autoRemove: false, autoDelete: 0, network: { outbound: { mode: "enabled", allowNet: [] } } }, name);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (/already exists/i.test(message)) throw new BoxNameTaken(name, { cause: error });
