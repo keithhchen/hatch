@@ -52,7 +52,7 @@ const call = (base: string, route: string, token: string, init: { method?: strin
   ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
 });
 
-test("a guest chats three times, is asked to sign in on the fourth, and keeps everything when they do", async () => {
+test("a guest chats without a sign-in, and keeps everything when they do", async () => {
   const { runtime, saved, base } = await startRuntime();
   try {
     const query = `product_id=${PRODUCT_ID}`;
@@ -64,9 +64,6 @@ test("a guest chats three times, is asked to sign in on the fourth, and keeps ev
     const conversation = (await created.json() as { conversation: { id: string } }).conversation.id;
     const send = (token: string, n: number) => call(base, `/v1/conversations/${conversation}/messages?${query}&wait=5`, token, { method: "POST", body: { client_message_id: `m${n}`, content: "hi" } });
     for (const n of [1, 2, 3]) assert.equal((await send(guestToken, n)).status, 200, `message ${n}`);
-    const refused = await send(guestToken, 4);
-    assert.equal(refused.status, 403);
-    assert.equal((await refused.json() as { error: { code: string } }).error.code, "login_required");
     assert.deepEqual(saved, [], "a guest has no library");
 
     // Files need an account: a visitor's would be stranded when they sign in.

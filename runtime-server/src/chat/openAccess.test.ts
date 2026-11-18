@@ -41,14 +41,20 @@ test("a user id is a guest or an account, and only an account has a library", ()
 });
 
 const conversation = { ownerAccountId: "o", creatorId: "c", agentId: "a" } as never;
-const sentLimits = (count: number, max = 1000) => new SentMessageLimits({ countSentMessages: async () => count }, max);
+const sentLimits = (count: number, max = 1000, free?: number) => new SentMessageLimits({ countSentMessages: async () => count }, max, free);
 
-test("a guest and an unlinked contact may send three messages to an Agent, then must sign in", async () => {
+test("a guest and an unlinked contact are not limited by default", async () => {
+  for (const principal of [{ kind: "guest" as const, guestId }, { kind: "contact" as const, connectionId: "c", contactId: "p" }]) {
+    await sentLimits(500).check(principal, conversation);
+  }
+});
+
+test("when a free-message limit is set, a guest and an unlinked contact may send that many, then must sign in", async () => {
   const guest = { kind: "guest" as const, guestId };
   const contact = { kind: "contact" as const, connectionId: "c", contactId: "p" };
   for (const principal of [guest, contact]) {
-    await sentLimits(2).check(principal, conversation);
-    await assert.rejects(sentLimits(3).check(principal, conversation), (error: unknown) => error instanceof ChatError && error.code === "login_required" && error.status === 403 && !error.retryable);
+    await sentLimits(2, 1000, 3).check(principal, conversation);
+    await assert.rejects(sentLimits(3, 1000, 3).check(principal, conversation), (error: unknown) => error instanceof ChatError && error.code === "login_required" && error.status === 403 && !error.retryable);
   }
 });
 

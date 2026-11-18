@@ -75,24 +75,24 @@ export class ContactBinder {
 
 const threadKey = (principal: ContactPrincipal, ref: Extract<ConversationRef, { kind: "thread" }>): ThreadKey => ({ connectionId: ref.connectionId, threadId: ref.threadId, principalId: principal.contactId });
 
-/** What anyone may send to one Agent before signing in. */
-export const FREE_MESSAGES = 3;
+/** What anyone may send to one Agent before signing in; undefined means no limit (for now). The one place to bring the limit back, e.g. 3. */
+export const FREE_MESSAGES: number | undefined = undefined;
 
 /**
- * Messages to one Product are bounded: a guest, and a contact whose person has not signed in on the web, may send a few, then must sign in
- * (`login_required`). A contact has a cap for good, signed in or not. The repository counts them.
+ * Messages to one Product are bounded: a guest, and a contact whose person has not signed in on the web, may send `FREE_MESSAGES`, then must sign in
+ * (`login_required`); unset, they are not limited. A contact has a cap for good, signed in or not. The repository counts them.
  */
 export class SentMessageLimits implements PrincipalLimits {
   constructor(
     private readonly repository: Pick<ConversationRepository, "countSentMessages">,
     private readonly maxMessages: number,
-    private readonly freeMessages = FREE_MESSAGES
+    private readonly freeMessages: number | undefined = FREE_MESSAGES
   ) {}
 
   async check(principal: Principal, conversation: ConversationRecord): Promise<void> {
     if (principal.kind === "account") return;
     const sent = await this.repository.countSentMessages(conversation);
-    if (!("accountId" in principal && principal.accountId) && sent >= this.freeMessages) {
+    if (this.freeMessages !== undefined && !("accountId" in principal && principal.accountId) && sent >= this.freeMessages) {
       throw new ChatError("login_required", "Sign in to keep talking to this Agent.", 403);
     }
     if (principal.kind === "contact" && sent >= this.maxMessages) {
