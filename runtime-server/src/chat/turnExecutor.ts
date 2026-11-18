@@ -80,8 +80,12 @@ export class TurnExecutor<Scope> implements RunExecutor {
     if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);
     const scope = registry.scopeOf(run.id) ?? await this.deps.scopes.resolve(conversation, control.signal);
     // The repository appends each claimed message to the transcript in the claim's own transaction.
-    const claimSteered = async (): Promise<ConversationMessage[]> =>
-      (await repository.claimSteeredMessages(run.id)).map(({ message }) => message);
+    const claimSteered = async (): Promise<ConversationMessage[]> => {
+      const claimed = (await repository.claimSteeredMessages(run.id)).map(({ message }) => message);
+      // A queued message is part of the Run now: every client of the conversation reads it in place of the queued row.
+      if (claimed.length) hub.publish(conversation.id, { type: "conversation.changed", committed: "claimed" });
+      return claimed;
+    };
     const partial = withPartialOutput(
       (message) => hub.publish(conversation.id, message),
       (text) => repository.savePartialOutput(run.id, text)

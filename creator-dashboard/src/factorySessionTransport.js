@@ -103,7 +103,7 @@ export class FactorySessionTransport extends ConversationTransport {
 export class FactoryConnection extends RuntimeConnection {
   constructor(transport, conversationId, { onOpen, onEvent, onClose }) {
     super();
-    Object.assign(this, { transport, conversationId, onEvent, opened: false, closed: false, thought: null, thoughts: 0, calls: [], sequence: 0, over: false, stopped: false });
+    Object.assign(this, { transport, conversationId, onEvent, opened: false, closed: false, thought: null, thoughts: 0, calls: [], sequence: 0, over: false });
     this.source = transport.openStream(`${transport.base}/events`);
     this.source.onopen = () => { this.opened = true; onOpen(); };
     this.source.onmessage = message => { for (const event of this.wire(JSON.parse(message.data))) onEvent(event); };
@@ -142,12 +142,11 @@ export class FactoryConnection extends RuntimeConnection {
       case "files": case "todos": void this.transport.reload().catch(() => undefined); return [];
       case "error": return ending([{ type: "turn.failed", ...run, error: { code: "run_failed", message: event.message } }]);
       case "run_end": {
-        // The Expert's own Stop ends the Run quietly. A Run a restart interrupted shows no notice and no "stopped": a read says where the session is.
-        if (event.status === "interrupted" && !this.stopped) return [...closing(), { type: "conversation.changed", committed: "claimed" }];
+        // A Run a restart interrupted ends quietly, with no "stopped" and no error: the next read says where the session is.
         const ended = event.status === "completed"
           ? [{ type: "turn.completed", ...run, finish_reason: "completed" }]
           : event.status === "interrupted" || event.status === "cancelled"
-            ? [{ type: "turn.failed", ...run, error: { code: "run_cancelled", message: "The reply was stopped." } }]
+            ? [{ type: "turn.failed", ...run, error: { code: `run_${event.status}`, message: "The reply was stopped." } }]
             : [{ type: "turn.failed", ...run, error: event.error ?? { code: "run_failed", message: "The reply failed." } }];
         return [...closing(), { type: "conversation.compaction", active: false }, ...ending(ended)];
       }
@@ -160,13 +159,12 @@ export class FactoryConnection extends RuntimeConnection {
   async send({ runId, clientMessageId, content = "" }) {
     this.transport.bind(runId);
     this.over = false;
-    this.stopped = false;
     await this.transport.request(`${this.transport.base}/message`, { method: "POST", headers: { "Idempotency-Key": clientMessageId }, body: JSON.stringify({ content, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     this.onEvent({ type: "message.accepted", conversation_id: this.conversationId, run_id: runId, client_message_id: clientMessageId, outcome: "started" });
   }
 
   toolResult() {}
-  cancel() { this.stopped = true; this.transport.request(`${this.transport.base}/stop`, { method: "POST", body: "{}" }).catch(() => undefined); }
+  cancel() { this.transport.request(`${this.transport.base}/stop`, { method: "POST", body: "{}" }).catch(() => undefined); }
   get ready() { return this.opened && !this.closed; }
 
   close() {

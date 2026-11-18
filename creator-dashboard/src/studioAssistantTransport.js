@@ -1,4 +1,4 @@
-import { AttachmentSource, ConversationTransport, PendingStore, RuntimeConnection } from "@hatch/chat";
+import { AttachmentSource, ConversationTransport, RuntimeConnection, SessionPendingStore as SharedSessionPendingStore } from "@hatch/chat";
 import { BrowserImageAttachments } from "./webChatClient.js";
 
 /** The conversation API, the same one the Hatch CLI and every outside client use. */
@@ -8,7 +8,8 @@ export const ASSISTANT_CONVERSATION = "assistant";
 
 const RUN_END_ERRORS = {
   failed: { code: "run_failed", message: "The reply failed. Send the message again." },
-  cancelled: { code: "run_cancelled", message: "The reply was stopped." }
+  cancelled: { code: "run_cancelled", message: "The reply was stopped." },
+  interrupted: { code: "run_interrupted", message: "The reply was interrupted. Answer again." }
 };
 
 /** What the Assistant page's event stream says, as the Runtime's wire events the shared reducer already understands. */
@@ -32,13 +33,11 @@ export function wireEventsOf(event) {
     // The history is being summarized, in a Run or after a reply: the page waits for the end.
     case "compaction_start": return [{ type: "conversation.compaction", active: true }];
     case "compaction_end": return [{ type: "conversation.compaction", active: false }];
-    // Only a completed Run is a reply. A cancelled one saved none: it ends as a failure the page need not wait on.
-    case "run_end":
-      // A Run a restart interrupted shows no notice: the server answers it again by itself, and the page keeps showing it working until that Run's events, or a terminal state, arrive.
-      if (event.status === "interrupted") return [];
-      return event.status === "completed"
-        ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
-        : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
+    // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a terminal the page settles quietly
+    // (an interrupted one is answered again by the server, which the next read says).
+    case "run_end": return event.status === "completed"
+      ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
+      : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
     default: return [];
   }
 }
@@ -196,19 +195,8 @@ export class StudioAttachments extends AttachmentSource {
   }
 }
 
-/** Unacknowledged messages kept in the tab's session storage: a reload sends them again under the same key. */
-export class SessionPendingStore extends PendingStore {
-  constructor(storage = () => globalThis.sessionStorage, key = "hatch.studio.assistant.pending") { super(); this.storage = storage; this.key = key; }
-
-  all() {
-    try { return JSON.parse(this.storage()?.getItem(this.key) ?? "[]"); } catch { return []; }
-  }
-
-  write(records) {
-    try { this.storage()?.setItem(this.key, JSON.stringify(records)); } catch { /* storage unavailable: the message is pending for this page only */ }
-  }
-
-  load(conversationId) { return this.all().filter(record => record.conversationId === conversationId); }
-  save(record) { this.write([...this.all().filter(entry => entry.clientMessageId !== record.clientMessageId), record]); }
-  settle(clientMessageId) { this.write(this.all().filter(entry => entry.clientMessageId !== clientMessageId)); }
+/** The Assistant's unacknowledged messages, in the tab's session storage. */
+export class SessionPendingStore extends SharedSessionPendingStore {
+  constructor(storage = () => globalThis.sessionStorage, key = "hatch.studio.assistant.pending") { super(storage, key); }
 }
+

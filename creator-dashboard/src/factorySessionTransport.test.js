@@ -85,15 +85,11 @@ test("a failed Run ends the page once, whichever of `error` and `run_end` comes 
   connection.close();
 });
 
-test("a Run a restart interrupted shows no stop and no error; the Expert's own Stop ends it quietly", () => {
+test("a Run a restart interrupted ends quietly: it is neither \"stopped\" nor an error", () => {
   const { connection } = connect();
-  const heard = connection.wire({ type: "run_end", status: "interrupted" });
-  assert.deepEqual(terminals(heard), []);
-  assert.deepEqual(heard.map(event => event.type), ["conversation.changed"], "a read says where the session is");
-  const stopped = connect();
-  stopped.connection.cancel();
-  assert.deepEqual(terminals(stopped.connection.wire({ type: "run_end", status: "interrupted" })).map(event => event.error.code), ["run_cancelled"]);
-  assert.equal(stopped.requests[0][0], "/r/sessions/s1/stop");
+  const [ended] = terminals(connection.wire({ type: "run_end", status: "interrupted" }));
+  assert.equal(ended.error.code, "run_interrupted");
+  assert.equal(terminals(connect().connection.wire({ type: "run_end", status: "cancelled" }))[0].error.code, "run_cancelled");
 });
 
 test("a reload mid-Run reads the text so far, and each live delta says where it sits so a gap or a replay joins exactly", async () => {
