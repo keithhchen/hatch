@@ -136,7 +136,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const creatorAuth = await creatorSignup.json() as { account: { id: string } };
     const creatorAccounts = await fetch(`${base}/v1/internal/creator-accounts?ids=${creatorAuth.account.id}`, { headers: { authorization: "Bearer deployment-test-token" } });
     assert.equal(creatorAccounts.status, 200);
-    assert.deepEqual(await creatorAccounts.json(), { accounts: [{ id: creatorAuth.account.id, display_name: "Account Creator Name" }] });
+    assert.deepEqual(await creatorAccounts.json(), { accounts: [{ id: creatorAuth.account.id, display_name: "Account Creator Name", avatar_url: null }] });
     const unauthorizedCreatorAccounts = await fetch(`${base}/v1/internal/creator-accounts?ids=${creatorAuth.account.id}`);
     assert.equal(unauthorizedCreatorAccounts.status, 401);
 

@@ -230,7 +230,7 @@ export async function createDashboardApp(options = {}) {
   const payoutReconcileAfterMs = Math.max(0, Number(options.payoutReconcileAfterMs
     ?? process.env.HATCH_PAYOUT_RECONCILE_AFTER_MS
     ?? 60_000));
-  const resolveCreatorNames = async (creatorIds) => {
+  const resolveCreatorAccounts = async (creatorIds) => {
     const ids = [...new Set(creatorIds.map((id) => String(id ?? "")).filter(Boolean))];
     if (!ids.length) return new Map();
     if (!registryDeploymentServiceToken) {
@@ -247,14 +247,14 @@ export async function createDashboardApp(options = {}) {
       if (!Array.isArray(payload?.accounts)) throw new Error("Registry account response is malformed.");
       return payload.accounts;
     });
-    const names = new Map(accounts.map((account) => {
+    return new Map(accounts.map((account) => {
       if (typeof account?.id !== "string" || typeof account.display_name !== "string" || !account.display_name.trim()) {
         throw new Error("Registry returned an invalid account name.");
       }
-      return [account.id, account.display_name];
+      return [account.id, { name: account.display_name, avatar_url: account.avatar_url ?? null }];
     }));
-    return names;
   };
+  const resolveCreatorNames = async (creatorIds) => new Map([...await resolveCreatorAccounts(creatorIds)].map(([id, account]) => [id, account.name]));
 
   const dispatchCommerceOutbox = async () => {
     if (typeof ledger.dispatchOutbox !== "function") return { claimed: 0, dispatched: 0, failed: 0, errors: [] };
@@ -443,11 +443,9 @@ export async function createDashboardApp(options = {}) {
         // The Agent's published corpus holds a placeholder creator; the chat shows the expert's current account name and avatar, as the product page does.
         if (request.method === "GET" && upstream.ok && PRODUCT_AGENT_PATH.test(url.pathname)) {
           const body = await upstream.json();
-          const productId = decodeURIComponent(url.pathname.split("/")[4]);
-          const listed = await authoritativeCatalog(registryUrl, fetchImpl, portalState).then((catalog) => catalog.find((entry) => entry.product_id === productId), () => undefined);
-          if (listed?.creator_name && body?.creator_agent) {
-            body.creator_agent.creator = { ...body.creator_agent.creator, name: listed.creator_name, avatar_url: listed.creator_avatar_url ?? null };
-          }
+          const creatorId = body?.creator_agent?.creator?.id;
+          const account = creatorId ? await resolveCreatorAccounts([creatorId]).then((accounts) => accounts.get(creatorId), () => undefined) : undefined;
+          if (account) body.creator_agent.creator = { ...body.creator_agent.creator, name: account.name, avatar_url: account.avatar_url };
           return response.end(JSON.stringify(body));
         }
         if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);

@@ -12,6 +12,7 @@ import { createGuestTokens } from "../guest.mjs";
 const SECRET = "runtime-secret";
 const ORIGIN = "http://dashboard.test";
 const PRODUCT = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
+const UNLISTED = "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8";
 const CREATOR = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
 const ACCOUNT = { id: "buyer-1", email: "buyer@example.test", display_name: "Zero Buyer" };
 const guests = createGuestTokens(SECRET);
@@ -24,7 +25,7 @@ const urlOf = (server) => `http://127.0.0.1:${server.address().port}`;
 async function setup(context, { secret = SECRET, analytics } = {}) {
   const registryCalls = [];
   const runtimeCalls = [];
-  const state = { catalogFails: false, claim: { status: 200, body: { product_id: PRODUCT, connection_id: "c1", channel: "telegram" } }, carry: { status: 200, body: { moved: 2 } }, audience: [] };
+  const state = { catalogFails: false, accountsFail: false, claim: { status: 200, body: { product_id: PRODUCT, connection_id: "c1", channel: "telegram" } }, carry: { status: 200, body: { moved: 2 } }, audience: [] };
   const registry = createServer(async (request, response) => {
     let body = ""; for await (const chunk of request) body += chunk;
     registryCalls.push({ method: request.method, url: request.url, authorization: request.headers.authorization, body });
@@ -35,7 +36,7 @@ async function setup(context, { secret = SECRET, analytics } = {}) {
       if (request.headers.authorization === "Bearer creator-token") return json(response, 200, { id: CREATOR, email: "c@example.test", display_name: "Maya" });
       return json(response, 401, { detail: "unauthorized" });
     }
-    if (route.pathname === "/v1/internal/creator-accounts") return json(response, 200, { accounts: [{ id: ACCOUNT.id, display_name: ACCOUNT.display_name }] });
+    if (route.pathname === "/v1/internal/creator-accounts") return json(response, 200, { accounts: [{ id: ACCOUNT.id, display_name: ACCOUNT.display_name }, ...(state.accountsFail ? [] : [{ id: CREATOR, display_name: "Maya", avatar_url: "/avatars/maya.png" }])] });
     if (route.pathname === "/v1/public/products") return state.catalogFails ? json(response, 500, { detail: "down" }) : json(response, 200, [listing]);
     if (route.pathname === "/v1/channels/im-link/claim") return json(response, state.claim.status, state.claim.body);
     return json(response, 404, { detail: "not found" });
@@ -44,7 +45,7 @@ async function setup(context, { secret = SECRET, analytics } = {}) {
     let body = ""; for await (const chunk of request) body += chunk;
     runtimeCalls.push({ method: request.method, url: request.url, authorization: request.headers.authorization, origin: request.headers.origin, body });
     if (request.url.startsWith("/v1/creator/audience")) return json(response, 200, { audience: state.audience });
-    if (request.url.startsWith(`/v1/products/${PRODUCT}/agent`)) return json(response, 200, { creator_agent: { creator_id: CREATOR, product_id: PRODUCT, creator: { id: CREATOR, name: "Creator" }, product: { id: PRODUCT, name: "Resume" } } });
+    if (request.url.startsWith(`/v1/products/${PRODUCT}/agent`) || request.url.startsWith(`/v1/products/${UNLISTED}/agent`)) return json(response, 200, { creator_agent: { creator_id: CREATOR, product_id: PRODUCT, creator: { id: CREATOR, name: "Creator" }, product: { id: PRODUCT, name: "Resume" } } });
     if (request.url === "/v1/guest/carry-over") return json(response, state.carry.status, state.carry.body);
     return json(response, 200, { ok: true, url: request.url });
   });
@@ -341,15 +342,17 @@ test("signing in or up with a guest cookie carries the guest's conversations ove
   assert.equal(guestCookieOf(failed), undefined, "and keeps the cookie for the page to retry");
 });
 
+// The catalog (listing) never contains the product: an unlisted Agent still gets the account's identity.
 test("the Agent endpoint shows the expert's account name and avatar, not the corpus placeholder, for a guest and a signed-in visitor", async (context) => {
   const { base, state, login } = await setup(context);
   const { cookie } = await login();
-  for (const headers of [{}, { cookie }]) {
-    const body = await (await fetch(`${base}/v1/web-chat/products/${PRODUCT}/agent?product_id=${PRODUCT}`, { headers })).json();
+  for (const [headers, id] of [[{}, PRODUCT], [{ cookie }, PRODUCT], [{}, UNLISTED]]) {
+    const body = await (await fetch(`${base}/v1/web-chat/products/${id}/agent?product_id=${id}`, { headers })).json();
     assert.deepEqual(body.creator_agent.creator, { id: CREATOR, name: "Maya", avatar_url: "/avatars/maya.png" });
     assert.equal(body.creator_agent.product.name, "Resume");
   }
   state.catalogFails = true;
+  state.accountsFail = true;
   const fallback = await (await fetch(`${base}/v1/web-chat/products/${PRODUCT}/agent?product_id=${PRODUCT}`)).json();
-  assert.equal(fallback.creator_agent.creator.name, "Creator", "a catalog outage leaves the Runtime answer as it is");
+  assert.equal(fallback.creator_agent.creator.name, "Creator", "an account lookup outage leaves the Runtime answer as it is");
 });
