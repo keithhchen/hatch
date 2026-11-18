@@ -31,6 +31,28 @@ export class HttpLibrary implements Library {
 }
 
 /**
+ * Saving is idempotent, so a failure is simply tried again after a short pause. It throws only when every attempt failed;
+ * nothing is remembered as saved, so the next Run that starts for the account asks again.
+ */
+export class RetryingLibrary implements Library {
+  constructor(
+    private readonly library: Library,
+    private readonly delaysMs: readonly number[] = [200, 1_000, 3_000],
+    private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  ) {}
+
+  async save(accountId: string, productId: string): Promise<boolean> {
+    for (let attempt = 0; ; attempt += 1) {
+      try { return await this.library.save(accountId, productId); }
+      catch (error) {
+        if (attempt >= this.delaysMs.length) throw error;
+        await this.sleep(this.delaysMs[attempt]!);
+      }
+    }
+  }
+}
+
+/**
  * A visitor who signs in brings their conversations along: first their Agents are saved to the account's library, then the
  * conversations become the account's. Each step can be repeated, and nothing moves until every Agent is saved, so a failure at any
  * point leaves the visitor as they were and doing it again finishes the job.

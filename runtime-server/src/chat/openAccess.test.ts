@@ -5,7 +5,7 @@ import { InMemoryConversationRepository } from "../conversationRepository.js";
 import { TASK_START_DIGEST } from "../protocol.js";
 import { ChatError, accountOf, userPrincipal } from "./principal.js";
 import { SentMessageLimits } from "./contactBinding.js";
-import { GuestCarryOver, type Library } from "./library.js";
+import { GuestCarryOver, RetryingLibrary, type Library } from "./library.js";
 
 const guestId = "g".repeat(22);
 const tokens = new GuestTokens("secret-a");
@@ -106,4 +106,22 @@ test("carrying a visitor over saves their Agents first; a failed save moves noth
   assert.deepEqual(await carry.carry(from, "account-1"), { moved: 2 });
   assert.deepEqual(await carry.carry(from, "account-1"), { moved: 0 });
   assert.deepEqual([...new Set(saved)].sort(), ["account-1:p1", "account-1:p2"]);
+});
+
+test("a library save is retried with backoff, fails only when every attempt failed, and a failure is not remembered as saved", async () => {
+  let down = 3;
+  const calls: string[] = [];
+  const pauses: number[] = [];
+  const inner: Library = { save: async (account, productId) => { calls.push(`${account}:${productId}`); if (down-- > 0) throw new Error("library down"); return true; } };
+  const library = new RetryingLibrary(inner, [10, 20], async (ms) => { pauses.push(ms); });
+
+  await assert.rejects(library.save("a1", "p1"), /library down/);
+  assert.equal(calls.length, 3, "the first try and two retries");
+  assert.deepEqual(pauses, [10, 20]);
+
+  // The next Run that starts asks again, because nothing was cached as saved; this time the library is back.
+  assert.equal(await library.save("a1", "p1"), true);
+  assert.equal(calls.length, 4);
+  assert.equal(await library.save("a1", "p1"), true);
+  assert.equal(calls.length, 5, "saving is asked every time; the library answers idempotently");
 });

@@ -43,7 +43,7 @@ import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { ChatError, principalKey } from "./chat/principal.js";
 import { GuestAwareIdentityResolver, GuestTokens } from "./guestToken.js";
-import { GuestCarryOver, HttpLibrary, type Library } from "./chat/library.js";
+import { GuestCarryOver, HttpLibrary, RetryingLibrary, type Library } from "./chat/library.js";
 import type { PrincipalLimits, RunAdmission } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
 import { SelfBinder } from "./chat/selfBinding.js";
@@ -227,8 +227,9 @@ export async function createRuntimeServerFromEnvironment(
       }
     )
     : undefined;
-  // The Dashboard and the Runtime already share the Commerce service token; it also signs the guest ids the Dashboard issues.
+  // Guest ids are signed with their own secret, shared by the Dashboard and the Runtime; the library is reached with the Commerce service token.
   const guestSecret = environment.HATCH_GUEST_TOKEN_SECRET?.trim();
+  const commerceServiceToken = environment.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN?.trim();
   const entitlementFile = environment.HATCH_ENTITLEMENTS_FILE?.trim();
   const fileEntitlements = config.legacyHmacEnabled && entitlementFile
     ? new FileEntitlementResolver(entitlementFile, {
@@ -255,7 +256,7 @@ export async function createRuntimeServerFromEnvironment(
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
     entitlementResolver: registryAuth ?? fileEntitlements,
     ...(guestSecret ? { guestTokens: new GuestTokens(guestSecret) } : {}),
-    ...(guestSecret && environment.HATCH_COMMERCE_URL?.trim() ? { library: new HttpLibrary(environment.HATCH_COMMERCE_URL.trim(), guestSecret) } : {}),
+    ...(commerceServiceToken && environment.HATCH_COMMERCE_URL?.trim() ? { library: new HttpLibrary(environment.HATCH_COMMERCE_URL.trim(), commerceServiceToken) } : {}),
     insecureLocalMode: config.insecureLocalMode,
     authIdentityResolver: registryAuth,
     agentCorpusResolver: runtimeRegistryToken && registryUrl
@@ -476,7 +477,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
-    ...(options.library ? { library: options.library } : {}),
+    ...(options.library ? { library: new RetryingLibrary(options.library) } : {}),
     ...(artifact ? { artifacts: artifact.lifecycle } : {}),
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
