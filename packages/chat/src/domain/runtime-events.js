@@ -67,7 +67,9 @@ const sessionHandlers = Object.freeze({
   "conversation.compaction": (_timeline, event) => outcome("compaction", { active: event.active === true }),
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
   // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
-  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id })
+  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id }),
+  // The server cannot vouch for the live stream (events were dropped or a relay connection was lost): read the conversation again.
+  resync: () => outcome("resync")
 });
 
 /** Whether the event belongs to one Run, as opposed to the session or the conversation. */

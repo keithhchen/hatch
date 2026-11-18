@@ -26,6 +26,9 @@ import type { RuntimeStore } from "../store.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 
 /** What the Runtime socket protocol needs from the rest of the Runtime; the composition root supplies it. */
+/** Why a submission was aborted by the user's stop (a closed connection aborts it too, but leaves the Run alone). */
+class UserStop extends Error {}
+
 export type RuntimeSocketDeps = {
   edge: ChatEdge;
   store: RuntimeStore;
@@ -68,8 +71,8 @@ export async function handleRuntimeSocket(
   let awaitingPong = false;
   let lastClientActivityAt = Date.now();
   const messageTasks = new Set<Promise<void>>();
-  // A message being authorized has no Run yet; a cancel with its run id stops it before one exists.
-  const pendingSubmissions = new Map<string, AbortController>();
+  // Messages being admitted, by message key: a steer shares its Run's id, so the Run id cannot tell two of them apart.
+  const pendingSubmissions = new Map<string, { controller: AbortController; runId: string }>();
 
   const terminateConnection = (reason: string): void => {
     connectionAbortController.abort(new Error(reason));
@@ -285,14 +288,14 @@ export async function handleRuntimeSocket(
 
         if (message.type === "turn.cancel") {
           const reason = message.reason ?? "Run canceled";
-          const pending = pendingSubmissions.get(message.run_id);
-          if (pending) {
-            pending.abort(new Error(reason));
-            await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
-            return;
-          }
+          // A stop ends everything of this conversation that is not yet admitted, and the Run itself when there is one.
+          const stopped = [...pendingSubmissions.values()];
+          for (const pending of stopped) pending.controller.abort(new UserStop(reason));
           const cancelled = await chat.cancel(conversation.id, message.run_id, reason);
-          if (cancelled.outcome !== "cancelled") await frameRejected(message.run_id, cancelled.error);
+          if (cancelled.outcome === "cancelled") return;
+          // No Run to cancel: the client is told its Run is cancelled only when it never started because its message was stopped.
+          if (stopped.some((pending) => pending.runId === message.run_id)) await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
+          else await frameRejected(message.run_id, cancelled.error);
           return;
         }
 
@@ -309,7 +312,8 @@ export async function handleRuntimeSocket(
           const submission = new AbortController();
           const abortWithConnection = () => submission.abort(connectionAbortController.signal.reason);
           connectionAbortController.signal.addEventListener("abort", abortWithConnection, { once: true });
-          pendingSubmissions.set(message.run_id, submission);
+          const messageKey = message.client_message_id ?? message.run_id;
+          pendingSubmissions.set(messageKey, { controller: submission, runId: message.run_id });
           try {
             const { submission: accepted, binding: current } = await submitUserMessage(edge, { authToken, binding, conversation }, {
               runId: message.run_id,
@@ -320,6 +324,8 @@ export async function handleRuntimeSocket(
               ...((message.time_zone ?? hello.time_zone) ? { timeZone: message.time_zone ?? hello.time_zone } : {})
             }, submission.signal);
             binding = current;
+            // A stop that arrived while the message was being admitted found no Run to cancel: the Run it started is cancelled now.
+            if (submission.signal.reason instanceof UserStop && accepted.outcome !== "replayed") await chat.cancel(conversation.id, accepted.run.id, submission.signal.reason.message);
             if (accepted.outcome === "replayed") {
               await send({ type: "message.accepted", conversation_id: conversation.publicId, run_id: accepted.run.id, client_message_id: accepted.clientMessageId, outcome: accepted.outcome });
               await send({ type: "turn.state", run_id: accepted.run.id, status: accepted.run.status, reason: "Idempotent client message replay" });
@@ -328,7 +334,7 @@ export async function handleRuntimeSocket(
             if (submission.signal.aborted) return;
             await refuseMessage(message, chatFailure(error));
           } finally {
-            pendingSubmissions.delete(message.run_id);
+            if (pendingSubmissions.get(messageKey)?.controller === submission) pendingSubmissions.delete(messageKey);
             connectionAbortController.signal.removeEventListener("abort", abortWithConnection);
           }
         }

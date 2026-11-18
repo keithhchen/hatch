@@ -577,6 +577,7 @@ export class ConversationController {
       this.reveal.enqueue({ runId: event.run_id, assistantId: event.run_id, content });
       this.setState({ status: outcome.status });
     },
+    resync(_outcome, { conversationId }) { this.requestRefresh(conversationId); },
     changed(outcome, { conversationId }) {
       // The message this page sent is on the page already; only one it did not send (another tab, a channel) needs a read.
       if (outcome.committed === "user" && outcome.messageId && this.state.messages.some(message => message.id === outcome.messageId)) return;

@@ -147,3 +147,20 @@ test("a read error that is shown goes away when a later read succeeds", async ()
   assert.equal(controller.getState().error, null, "the next good read takes it back");
   controller.dispose();
 });
+
+test("a resync from the server makes the page read the conversation again", async () => {
+  const transport = new OutageTransport();
+  transport.page = { conversation: { id: "conv" }, messages: [], runs: [], events: [], cursor: 1, has_more: false };
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pollMs: 20, reconnectAttempts: 0 });
+  controller.open("conv");
+  await flush();
+  transport.connections[0].emit({ type: "session.ready", conversation_id: "conv" });
+  await flush();
+  const reads = transport.reads;
+  transport.page = { ...transport.page, messages: [{ id: "u1", run_id: "r1", role: "user", content: "missed" }] };
+  transport.connections[0].emit({ type: "resync" });
+  await wait(30);
+  assert.ok(transport.reads > reads, "the conversation was read again");
+  assert.deepEqual(controller.getState().messages.map(message => message.content), ["missed"]);
+  controller.dispose();
+});

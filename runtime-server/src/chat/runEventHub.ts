@@ -1,4 +1,4 @@
-import type { EventRelay } from "./eventRelay.js";
+import { RESYNC_EVENT, type EventRelay } from "./eventRelay.js";
 import { TERMINAL_STATUSES } from "./runResult.js";
 
 /** A Run's text longer than this keeps only its tail in memory; the snapshot holds all of it. */
@@ -24,7 +24,7 @@ export class RunEventHub {
 
   /** Starts hearing the other instances; resolves to the way to stop. */
   listen(): Promise<() => Promise<void>> {
-    return this.relay?.subscribe((conversationId, event) => this.deliver(conversationId, event)) ?? Promise.resolve(async () => undefined);
+    return this.relay?.subscribe((conversationId, event) => this.deliver(conversationId, event), () => this.resyncAll()) ?? Promise.resolve(async () => undefined);
   }
 
   subscribe(conversationId: string, sink: EventSink): () => void {
@@ -58,6 +58,12 @@ export class RunEventHub {
     live.text += delta.content;
     if (live.text.length > MAX_LIVE_TEXT) { const cut = live.text.length - MAX_LIVE_TEXT; live.text = live.text.slice(cut); live.base += cut; }
     this.live.set(conversationId, live);
+  }
+
+  /** Events may have been missed on every conversation: each observer is told to read again. */
+  private resyncAll(): void {
+    this.live.clear();
+    for (const conversationId of [...this.sinks.keys()]) this.deliver(conversationId, RESYNC_EVENT);
   }
 
   /** To this instance's observers only. */

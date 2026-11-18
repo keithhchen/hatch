@@ -153,11 +153,12 @@ export class ChatService<Scope> {
     if (!joining && supervisor.holdsConversation(command.conversation.id)) {
       throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
     }
-    let release = joining ? () => undefined : admission.reserve(command.principal);
+    let release = joining ? () => undefined : once(admission.reserve(command.principal));
+    let accepted: Awaited<ReturnType<typeof repository.acceptSubmission>>;
     try {
       // The new message aborts a compaction running after the last reply, and waits until it has ended.
       if (!joining) await compaction?.waitForCompaction(command.conversation.id);
-      const accepted = await repository.acceptSubmission({
+      accepted = await repository.acceptSubmission({
         binding: command.conversation,
         run: {
           id: command.runId,
@@ -170,15 +171,20 @@ export class ChatService<Scope> {
         canonicalUser: known ? { role: "user", content: "" } : await command.message(),
         ...(command.mode ? { mode: command.mode } : {})
       }, known ? undefined : command.bind);
-      const outcome = accepted.created ? "started" : accepted.steered ? "steered" : "replayed";
+    } catch (error) {
+      release();
+      throw refused(error);
+    }
+    // From here the message is stored, so what follows is never a refusal: a Run that cannot go on ends failed, and the message is answered with that.
+    const outcome = accepted.created ? "started" : accepted.steered ? "steered" : "replayed";
+    const failureOf = (error: unknown) => error instanceof ChatError ? { code: error.code, message: error.message } : failures.translate(error, { run: accepted.run.id, conversation: command.conversation.id });
+    let failure: { code: string; message: string } | undefined;
+    let adopted = false;
+    try {
       if (outcome === "started" && joining) {
         // The Run we meant to join ended first, so this one starts a Run after all: admit it now.
-        try { await cap?.(command.scope); release = admission.reserve(command.principal); }
-        catch (error) {
-          const failure = error instanceof ChatError ? { code: error.code, message: error.message } : failures.translate(error, { run: accepted.run.id, conversation: command.conversation.id });
-          await terminator.end(accepted.run.id, { status: "failed", failure });
-          throw error;
-        }
+        try { await cap?.(command.scope); release = once(admission.reserve(command.principal)); }
+        catch (error) { failure = failureOf(error); }
       }
       if (outcome !== "replayed") {
         registry.rememberClient(command.conversation.id, command.client, command.timeZone);
@@ -189,9 +195,10 @@ export class ChatService<Scope> {
           library.save(account, command.conversation.productId).catch((error: unknown) => log.error("library_save_failed", { error: error instanceof Error ? error.message : String(error) }));
         }
       }
-      if (outcome === "started") {
+      if (outcome === "started" && !failure) {
         registry.rememberScope(accepted.run.id, command.scope);
         supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });
+        adopted = true;
       } else {
         release();
       }
@@ -201,12 +208,23 @@ export class ChatService<Scope> {
         // The message is recorded: wake whoever executes the Run.
         if (outcome === "steered") supervisor.steered(accepted.run.id);
       }
-      return { outcome, run: accepted.run, clientMessageId: command.clientMessageId, acceptedAt: accepted.receipt.accepted_at };
+      if (failure) await terminator.end(accepted.run.id, { status: "failed", failure });
     } catch (error) {
-      release();
-      throw refused(error);
+      log.error("chat_submit_after_accept_failed", { run: accepted.run.id, conversation: command.conversation.id, error: error instanceof Error ? error.message : String(error) });
+      if (!adopted) {
+        release();
+        // A started Run nobody will execute is ended now; if even that fails the sweeper takes it.
+        if (outcome === "started") await terminator.end(accepted.run.id, { status: "failed", failure: failureOf(error) }).catch((endError: unknown) => log.error("chat_submit_end_failed", { run: accepted.run.id, error: endError instanceof Error ? endError.message : String(endError) }));
+      }
     }
+    return { outcome, run: accepted.run, clientMessageId: command.clientMessageId, acceptedAt: accepted.receipt.accepted_at };
   }
+}
+
+/** A release that frees a reservation once, however many paths reach it. */
+function once(release: () => void): () => void {
+  let released = false;
+  return () => { if (!released) { released = true; release(); } };
 }
 
 /** A refusal of the repository, as the Chat API tells it. */
