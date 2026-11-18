@@ -330,3 +330,58 @@ test("a Run id the server has not acknowledged is not looked up while the page r
   assert.equal(controller.getState().error, null);
   controller.dispose();
 });
+
+test("a reload mid-thinking: the end of a thinking block whose start was never heard still draws, and later events arrive", async () => {
+  const { transport, controller } = setup();
+  transport.page = page([], [{ id: "run_live", status: "running", partial_output: "Hel" }]);
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "thinking_delta", contentIndex: 1, delta: "so far" } });
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "thinking_end", contentIndex: 1, content: "so far, done" } });
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "thinking_end", contentIndex: 0, content: "whole" } });
+  connection.emit({ type: "tool_call.delta", run_id: "run_live", tool_call_id: "t1", name: "box.bash", status: "requested", locality: "server", arguments: {} });
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "text", content: "lo", offset: 3 } });
+  await flush();
+  const state = controller.getState();
+  assert.equal(state.error, null);
+  const timeline = state.messages.at(-1).timeline;
+  assert.deepEqual(timeline.filter(entry => entry.kind === "thinking").map(entry => [entry.content, entry.streaming]), [["so far, done", false], ["whole", false]]);
+  assert.ok(timeline.some(entry => entry.kind === "tool"));
+  assert.equal(timeline.filter(entry => entry.kind === "text").map(entry => entry.content).join(""), "Hello");
+  controller.dispose();
+});
+
+test("a reload mid-Run shows the server's steps so far, then the live events continue", async () => {
+  const { transport, controller } = setup();
+  const tool = (id, status) => ({ run_id: "run_live", tool_call_id: id, name: "box.bash", arguments: {}, status, locality: "server", first_timestamp: "t", timestamp: "t" });
+  transport.page = page([], [{ id: "run_live", status: "running", partial_output: "Hello.", activity: { tool_calls: [tool("t1", "completed"), tool("t2", "requested")], skill_events: [], skill_runs: [] } }]);
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  const kinds = () => controller.getState().messages.at(-1).timeline.map(entry => entry.kind);
+  assert.deepEqual(kinds(), ["text", "tool", "tool"]);
+  connection.emit({ type: "tool_call.delta", run_id: "run_live", tool_call_id: "t2", name: "box.bash", status: "completed", locality: "server", arguments: {}, result: {} });
+  connection.emit({ type: "tool_call.delta", run_id: "run_live", tool_call_id: "t3", name: "box.bash", status: "requested", locality: "server", arguments: {} });
+  const tools = controller.getState().messages.at(-1).timeline.filter(entry => entry.kind === "tool");
+  assert.deepEqual(tools.map(entry => [entry.id, entry.status]), [["tool-t1", "completed"], ["tool-t2", "completed"], ["tool-t3", "requested"]]);
+  controller.dispose();
+});
+
+test("an event that does not fit the page never stops the stream: it is skipped and a read corrects the page", async () => {
+  const { transport, controller } = setup();
+  transport.page = page([], [{ id: "run_live", status: "running", partial_output: "Hel" }]);
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  const reduce = controller.reducer.reduce.bind(controller.reducer);
+  let broken = true;
+  controller.reducer.reduce = (...args) => { if (broken) { broken = false; throw new Error("does not fit"); } return reduce(...args); };
+  const reads = transport.snapshots ?? 0;
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "thinking_end", contentIndex: 0, content: "x" } });
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "text", content: "lo", offset: 3 } });
+  await flush();
+  assert.equal(controller.getState().error, null);
+  assert.equal(controller.getState().messages.at(-1).timeline.map(entry => entry.content).join(""), "Hello");
+  controller.dispose();
+});

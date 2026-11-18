@@ -255,9 +255,11 @@ export class ConversationController {
     if (running) {
       const tail = typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
       if (tail) this.timeline.appendText(tail);
+      // The steps the Run has taken so far come from the server, so a page that joined mid-Run shows them all.
+      const steps = running.activity ? this.timeline.restoreActivity({ run_id: running.id, ...running.activity }) : null;
       if (!projected.some(message => message.transient && message.run_id === running.id)) {
         projected = [...projected, { ...this.liveRow(running.id, projected), timeline: this.timeline.snapshot() }];
-      } else if (tail) {
+      } else if (tail || steps) {
         projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
       }
     }
@@ -557,7 +559,10 @@ export class ConversationController {
     const boundary = textRevealBoundary(event);
     if (boundary === "flush") this.reveal.flush(event.run_id);
     else if (boundary === "discard") this.reveal.discard(event.run_id);
-    const outcome = this.reducer.reduce(this.timeline, event, this.run?.id ?? null);
+    // The page only displays the server's state: an event that does not fit what it holds is skipped, and a read puts it right.
+    let outcome;
+    try { outcome = this.reducer.reduce(this.timeline, event, this.run?.id ?? null); }
+    catch { this.requestRefresh(conversationId); return; }
     const handler = this.outcomes[outcome.kind];
     if (handler) await handler.call(this, outcome, { event, connection, link, conversationId });
   }
