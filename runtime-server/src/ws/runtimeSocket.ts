@@ -19,6 +19,7 @@ import {
   type LegacyHmacAuth,
   type SessionBinding
 } from "../chat/sessionBinding.js";
+import { DESKTOP_RETIRED_CODE, DESKTOP_RETIRED_NOTICE, isDesktopFrame } from "../chat/desktopRetired.js";
 import { chatFailure, submitUserMessage, type ChatEdge } from "../chat/turnSubmission.js";
 import { clientAttributesOf, parseInboundMessage, type ClientHello, type OutboundMessage } from "../protocol.js";
 import type { RuntimeStore } from "../store.js";
@@ -148,6 +149,14 @@ export async function handleRuntimeSocket(
       let raw: unknown;
       try {
         raw = JSON.parse(String(data));
+        // Desktop is retired: whatever it sends is answered with the notice, before authentication, validation, any Run, usage or guest count.
+        if (isDesktopFrame(raw)) {
+          const { type, run_id: runId } = raw as { type: string; run_id?: unknown };
+          const error = { code: DESKTOP_RETIRED_CODE, message: DESKTOP_RETIRED_NOTICE };
+          if (type === "client.message" && typeof runId === "string") await send({ type: "turn.failed", run_id: runId, error });
+          else await sessionError(error.code, error.message);
+          return;
+        }
         const message = parseInboundMessage(withUpgradeToken(raw, upgradeToken));
 
         if (message.type === "client.hello") {

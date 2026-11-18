@@ -19,6 +19,7 @@ import { AuthorizationError, type AuthIdentityResolver } from "../entitlements.j
 import { toProblem } from "../errors/problem.js";
 import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import { sessionTokenFromCookie } from "../chat/originPolicy.js";
+import { DESKTOP_RETIRED_CODE, DESKTOP_RETIRED_NOTICE } from "../chat/desktopRetired.js";
 import { bearerToken } from "./httpSupport.js";
 
 export async function bindingFromHistoryRequest(
@@ -29,6 +30,8 @@ export async function bindingFromHistoryRequest(
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
   signal?: AbortSignal
 ): Promise<SessionBinding | undefined> {
+  // Only a released Desktop build selects an Agent by entitlement_id.
+  if (url.searchParams.has("entitlement_id")) throw new ConversationHttpError(403, DESKTOP_RETIRED_CODE, DESKTOP_RETIRED_NOTICE);
   const authToken = bearerToken(req);
   const authIdentity = await resolveAuthIdentity(authToken, authIdentityResolver, signal);
   const selectedProduct = url.searchParams.get("product_id");
