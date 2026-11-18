@@ -228,7 +228,7 @@ export async function createRuntimeServerFromEnvironment(
     )
     : undefined;
   // The Dashboard and the Runtime already share the Commerce service token; it also signs the guest ids the Dashboard issues.
-  const guestSecret = environment.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN?.trim();
+  const guestSecret = environment.HATCH_GUEST_TOKEN_SECRET?.trim();
   const entitlementFile = environment.HATCH_ENTITLEMENTS_FILE?.trim();
   const fileEntitlements = config.legacyHmacEnabled && entitlementFile
     ? new FileEntitlementResolver(entitlementFile, {

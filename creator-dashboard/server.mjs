@@ -192,8 +192,9 @@ export async function createDashboardApp(options = {}) {
   const commerceRuntimeServiceToken = options.commerceRuntimeServiceToken
     ?? process.env.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN
     ?? "";
-  // Guest chat needs the Runtime's shared secret; without it there is no guest, and the answer says so.
-  const guestTokens = commerceRuntimeServiceToken ? createGuestTokens(commerceRuntimeServiceToken) : undefined;
+  // Guest chat needs its own signing secret, shared with the Runtime; without it there is no guest, and the answer says so.
+  const guestTokenSecret = String(options.guestTokenSecret ?? process.env.HATCH_GUEST_TOKEN_SECRET ?? "").trim();
+  const guestTokens = guestTokenSecret ? createGuestTokens(guestTokenSecret) : undefined;
   const guestCookie = (request, token, maxAge = 365 * 24 * 3600) =>
     `hatch_guest=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
   // Chat identity: a web session wins; otherwise the browser's guest token, minted on first need (a bad cookie counts as none).

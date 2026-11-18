@@ -39,6 +39,7 @@ HATCH_COMMERCE_LEDGER_PATH=.local-uat/ledger.jsonl \
 HATCH_PORTAL_STATE_PATH=.local-uat/portal-state.json \
 HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=local-deployment-service \
 HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=local-runtime-commerce \
+HATCH_GUEST_TOKEN_SECRET=local-guest-secret \
 npm run api
 ```
 

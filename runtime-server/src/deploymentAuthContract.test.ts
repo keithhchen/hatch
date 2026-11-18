@@ -55,6 +55,7 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   assert.doesNotMatch(requiredKeys, /HATCH_AUTH_SIGNING_SECRET/);
   assert.match(requiredKeys, /HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN/);
   assert.match(requiredKeys, /HATCH_RUNTIME_CHAT_SERVICE_TOKEN/);
+  assert.match(requiredKeys, /HATCH_GUEST_TOKEN_SECRET/);
   assert.doesNotMatch(requiredKeys, /HATCH_RUNTIME_DB_PASSWORD/);
   assert.match(deployWorkflow, /^  verify-server:\n/m);
   assert.match(
@@ -90,6 +91,8 @@ test("production trusts forwarded client IP only on the private Registry network
   assert.ok(dashboardService, "compose.app.yml must declare the Dashboard service");
   assert.doesNotMatch(registryService, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
   assert.match(dashboardService, /HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:/);
+  assert.match(dashboardService, /HATCH_GUEST_TOKEN_SECRET:/);
+  assert.match(runtimeService, /HATCH_GUEST_TOKEN_SECRET:/);
 });
 
 test("production Compose gives every service only its required secrets", async () => {

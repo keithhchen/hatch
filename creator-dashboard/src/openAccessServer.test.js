@@ -59,7 +59,8 @@ async function setup(context, { secret = SECRET, analytics } = {}) {
     runtimeUrl: urlOf(runtime),
     publicOrigin: ORIGIN,
     registryDeploymentServiceToken: "deploy-secret",
-    commerceRuntimeServiceToken: secret,
+    commerceRuntimeServiceToken: "service-token",
+    guestTokenSecret: secret,
     analytics: analytics ?? { capture: (distinctId, event) => captured.push({ distinctId, ...event }), shutdown: async () => {} }
   });
   const api = createServer(dashboard.handler);
@@ -141,7 +142,7 @@ test("a guest's writes need an allowed Origin, a session's still need CSRF", asy
   assert.equal((await post({ cookie })).status, 403, "a session without CSRF is refused even with no Origin");
 });
 
-test("guest chat is unavailable, not silently faked, without the Runtime secret", async (context) => {
+test("guest chat is unavailable, not silently faked, without the guest signing secret", async (context) => {
   const { base, runtimeCalls } = await setup(context, { secret: "" });
   const response = await fetch(`${base}/v1/web-chat/conversations`);
   assert.equal(response.status, 503);

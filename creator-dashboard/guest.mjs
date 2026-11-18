@@ -4,7 +4,7 @@ const PREFIX = "hatch_guest.";
 
 /**
  * A guest is a browser that has not signed in. Its id travels as a signed token `hatch_guest.<id>.<signature>` that the Runtime
- * verifies with the same shared secret (runtime-server/src/guestToken.ts); the two implementations share a test vector.
+ * verifies with the same shared secret, HATCH_GUEST_TOKEN_SECRET (runtime-server/src/guestToken.ts); the two implementations share a test vector.
  */
 export function createGuestTokens(secret) {
   if (!String(secret ?? "").trim()) throw new Error("Guest tokens need a signing secret");
