@@ -8,8 +8,7 @@ export const ASSISTANT_CONVERSATION = "assistant";
 
 const RUN_END_ERRORS = {
   failed: { code: "run_failed", message: "The reply failed. Send the message again." },
-  cancelled: { code: "run_cancelled", message: "The reply was stopped." },
-  interrupted: { code: "run_interrupted", message: "The reply was interrupted. Answer again." }
+  cancelled: { code: "run_cancelled", message: "The reply was stopped." }
 };
 
 /** What the Assistant page's event stream says, as the Runtime's wire events the shared reducer already understands. */
@@ -33,11 +32,13 @@ export function wireEventsOf(event) {
     // The history is being summarized, in a Run or after a reply: the page waits for the end.
     case "compaction_start": return [{ type: "conversation.compaction", active: true }];
     case "compaction_end": return [{ type: "conversation.compaction", active: false }];
-    // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a failure the page need not wait on
-    // (the server lets an interrupted Run be answered again, which the failed state offers).
-    case "run_end": return event.status === "completed"
-      ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
-      : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
+    // Only a completed Run is a reply. A cancelled one saved none: it ends as a failure the page need not wait on.
+    case "run_end":
+      // A Run a restart interrupted shows no notice: the server answers it again by itself, and the page keeps showing it working until that Run's events, or a terminal state, arrive.
+      if (event.status === "interrupted") return [];
+      return event.status === "completed"
+        ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
+        : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
     default: return [];
   }
 }
@@ -116,7 +117,7 @@ export class StudioAssistantTransport extends ConversationTransport {
       messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
       compacting: view.status?.compacting === true, has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
       // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
-      runs: view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }]
+      runs: view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}), ...(view.activity ? { activity: { tool_calls: view.activity.tool_calls.map(call => ({ ...call, locality: "server" })), skill_events: [], skill_runs: [] } } : {}) }]
         : failed ? [{ id: view.status.runId, status: "failed", failure: view.status.error }] : []
     };
   }

@@ -19,7 +19,7 @@ import { ChatError, accountPrincipal } from "../chat/principal.js";
 import type { Retried } from "../chat/chatService.js";
 import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway.js";
 import type { ScopeResolver, TurnRunner } from "../chat/turnExecutor.js";
-import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
+import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type ReplySteps, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
 import { ChatConversationReadModel, type ConversationReadModel } from "../chat/conversationReadModel.js";
 import { PassThroughOutputGuard, type OutputGuard } from "../outputGuard.js";
 import { ServerToolExecutor } from "../serverTools.js";
@@ -370,6 +370,14 @@ export class AssistantChat implements AssistantHost {
     const conversation = await this.conversation(accountId);
     const live = this.runtime.hub.catchUp(conversation.id)?.delta as { content?: string } | undefined;
     return live?.content ?? (await this.deps.repository.getActiveRun(conversation.id))?.partialOutput ?? "";
+  }
+
+  /** The steps the running turn has taken so far (never a tool's arguments or result), as a reply keeps them; nothing when no Run is active. */
+  async activity(accountId: string): Promise<ReplySteps | undefined> {
+    const run = await this.activeRun(accountId);
+    if (!run) return undefined;
+    const { tool_calls = [] } = await this.deps.store.readRunActivity(run.conversationId, run.id);
+    return { tool_calls: tool_calls.map(({ tool_call_id, name, status, activity_message }) => ({ tool_call_id, name, status, activity_message })) };
   }
 
   accountOf(conversationId: string): string | undefined { return accountOfConversation(conversationId); }

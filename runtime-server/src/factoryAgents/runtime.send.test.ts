@@ -379,3 +379,17 @@ test("stop: pressing Stop again and again does not keep a dead owner's session a
     assert.equal((await h.store.get(h.session.id)).status, "interrupted");
   } finally { await h.close(); }
 });
+
+test("emit: each text delta says where it sits in the Run's text, a joining page reads the text so far, and the Run's end clears it", async () => {
+  const h = await harness();
+  try {
+    const id = h.session.id;
+    h.runtime.emit(id, "delta", { text: "Hel" });
+    h.runtime.emit(id, "message_end");
+    h.runtime.emit(id, "delta", { text: "lo" });
+    assert.deepEqual(h.events.filter(event => event.type === "delta").map(event => (event as { offset?: number }).offset), [0, 3], "offsets run across the Run's replies");
+    assert.equal(h.runtime.partial(id), "Hello");
+    h.runtime.emit(id, "run_end", { status: "completed" });
+    assert.equal(h.runtime.partial(id), "");
+  } finally { await h.close(); }
+});

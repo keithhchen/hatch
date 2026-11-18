@@ -84,10 +84,12 @@ export class FactorySessionTransport extends ConversationTransport {
     // A message sent and not yet saved still names the Run; otherwise the Run is the last message's.
     if (!(this.runId && this.runUsers >= users)) this.runId = last?.run_id ?? null;
     const running = session.status === "running" && this.runId;
+    // What the Run has said so far, for a page that joins mid-Run.
+    const partial = running && typeof session.partial === "string" && session.partial ? { partial_output: session.partial } : {};
     const failed = session.status === "failed" && this.runId;
     return {
       conversation: { id: session.id }, messages, events: [], cursor: 0, has_more: false,
-      runs: running ? [{ id: this.runId, status: "running" }] : failed ? [{ id: this.runId, status: "failed", failure: { code: session.errorCode ?? "run_failed", message: session.error } }] : []
+      runs: running ? [{ id: this.runId, status: "running", ...partial }] : failed ? [{ id: this.runId, status: "failed", failure: { code: session.errorCode ?? "run_failed", message: session.error } }] : []
     };
   }
 
@@ -101,7 +103,7 @@ export class FactorySessionTransport extends ConversationTransport {
 export class FactoryConnection extends RuntimeConnection {
   constructor(transport, conversationId, { onOpen, onEvent, onClose }) {
     super();
-    Object.assign(this, { transport, conversationId, onEvent, opened: false, closed: false, thought: null, thoughts: 0, calls: [], sequence: 0 });
+    Object.assign(this, { transport, conversationId, onEvent, opened: false, closed: false, thought: null, thoughts: 0, calls: [], sequence: 0, over: false, stopped: false });
     this.source = transport.openStream(`${transport.base}/events`);
     this.source.onopen = () => { this.opened = true; onOpen(); };
     this.source.onmessage = message => { for (const event of this.wire(JSON.parse(message.data))) onEvent(event); };
@@ -116,8 +118,11 @@ export class FactoryConnection extends RuntimeConnection {
       const index = this.thought; this.thought = null;
       return [{ type: "assistant.delta", ...run, delta: { kind: "thinking_end", contentIndex: index, content: "" } }];
     };
+    // A Run ends once: its failure is told by `error` and by `run_end`, and the page hears whichever comes first.
+    const ending = events => this.over ? [] : (this.over = true, events);
+    if (["delta", "thinking", "tool", "tool_end"].includes(event.type)) this.over = false;
     switch (event.type) {
-      case "delta": return [...closing(), { type: "assistant.delta", ...run, delta: { kind: "text", content: event.text } }];
+      case "delta": return [...closing(), { type: "assistant.delta", ...run, delta: { kind: "text", content: event.text, ...(typeof event.offset === "number" ? { offset: event.offset } : {}) } }];
       case "thinking": return [...closing(), { type: "assistant.delta", ...run, delta: { kind: "thinking_start", contentIndex: this.thought = ++this.thoughts } }];
       case "tool": {
         const id = `live-${++this.sequence}`;
@@ -135,14 +140,16 @@ export class FactoryConnection extends RuntimeConnection {
       case "compacting": return [{ type: "conversation.compaction", active: true }];
       case "compacted": case "compaction_degraded": return [{ type: "conversation.compaction", active: false }];
       case "files": case "todos": void this.transport.reload().catch(() => undefined); return [];
-      case "error": return [{ type: "turn.failed", ...run, error: { code: "run_failed", message: event.message } }];
+      case "error": return ending([{ type: "turn.failed", ...run, error: { code: "run_failed", message: event.message } }]);
       case "run_end": {
+        // The Expert's own Stop ends the Run quietly. A Run a restart interrupted shows no notice and no "stopped": a read says where the session is.
+        if (event.status === "interrupted" && !this.stopped) return [...closing(), { type: "conversation.changed", committed: "claimed" }];
         const ended = event.status === "completed"
           ? [{ type: "turn.completed", ...run, finish_reason: "completed" }]
           : event.status === "interrupted" || event.status === "cancelled"
             ? [{ type: "turn.failed", ...run, error: { code: "run_cancelled", message: "The reply was stopped." } }]
             : [{ type: "turn.failed", ...run, error: event.error ?? { code: "run_failed", message: "The reply failed." } }];
-        return [...closing(), { type: "conversation.compaction", active: false }, ...ended];
+        return [...closing(), { type: "conversation.compaction", active: false }, ...ending(ended)];
       }
       default: return [];
     }
@@ -152,12 +159,14 @@ export class FactoryConnection extends RuntimeConnection {
 
   async send({ runId, clientMessageId, content = "" }) {
     this.transport.bind(runId);
+    this.over = false;
+    this.stopped = false;
     await this.transport.request(`${this.transport.base}/message`, { method: "POST", headers: { "Idempotency-Key": clientMessageId }, body: JSON.stringify({ content, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     this.onEvent({ type: "message.accepted", conversation_id: this.conversationId, run_id: runId, client_message_id: clientMessageId, outcome: "started" });
   }
 
   toolResult() {}
-  cancel() { this.transport.request(`${this.transport.base}/stop`, { method: "POST", body: "{}" }).catch(() => undefined); }
+  cancel() { this.stopped = true; this.transport.request(`${this.transport.base}/stop`, { method: "POST", body: "{}" }).catch(() => undefined); }
   get ready() { return this.opened && !this.closed; }
 
   close() {

@@ -70,6 +70,8 @@ export interface Conversation {
   retry?(key: string, client: ClientAttributes): Promise<{ runId: string; outcome: "started" | "replayed" }>;
   /** What the running turn has said so far, when the conversation knows it without its event log. */
   partial?(): Promise<string>;
+  /** The steps the running turn has taken so far, for a page that joins mid-Run. */
+  activity?(): Promise<ReplySteps | undefined>;
 }
 
 /** An error the API shows as is: status, machine-readable code and a message for people. */

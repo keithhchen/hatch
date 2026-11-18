@@ -80,6 +80,8 @@ export class WorkbenchRuntime {
   private scribeRuns = new Map<string, Promise<void>>();
   private scribeControllers = new Set<AbortController>();
   private runIds = new Map<string, string>();
+  /** What each running session has said so far, in all its replies: a delta says where it sits in it (`offset`), and a page that joins mid-Run reads it whole. */
+  private runTexts = new Map<string, string>();
   /** The API key behind the request that started each session's latest Run, if any: its calls are Studio API usage. */
   private runKeys = new Map<string, string>();
   private liveAgents = new Map<string, Agent>();
@@ -131,10 +133,17 @@ export class WorkbenchRuntime {
   rememberTimeZone(id: string, timeZone: string | undefined): void { if (timeZone) this.timeZones.set(id, timeZone); }
   private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void {
+    if (type === "delta") {
+      const said = this.runTexts.get(id) ?? "";
+      data = { ...data, offset: said.length };
+      this.runTexts.set(id, said + String(data.text ?? ""));
+    } else if (type === "run_end") this.runTexts.delete(id);
     const event = { sessionId: id, type, ...data };
     this.options.journal?.append(event);
     this.events.emit("event", event);
   }
+  /** What the Run in progress has said so far; nothing when this process holds none. */
+  partial(id: string): string { return this.runTexts.get(id) ?? ""; }
   /** The Run in progress, if any. */
   runId(id: string): string | undefined { return this.runIds.get(id); }
   /** Persists a message and announces it as one step, so no reader sees the message without its event or the reverse. */

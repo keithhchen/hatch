@@ -1,5 +1,5 @@
 import type { EventCursor } from "../surfaces/contract.js";
-import { MAX_PAGE, type Conversation, type ConversationStatus, type HistoryPage, type PublicMessage } from "./conversation.js";
+import { MAX_PAGE, type Conversation, type ConversationStatus, type HistoryPage, type PublicMessage, type ReplySteps } from "./conversation.js";
 import { START, type EventLog } from "./eventLog.js";
 
 export type Snapshot = {
@@ -10,6 +10,8 @@ export type Snapshot = {
   run_id?: string;
   /** What the running turn has said so far and not yet finished saying. */
   partial: string;
+  /** The steps the running turn has taken so far, when the conversation knows them. */
+  activity?: ReplySteps;
 };
 
 /** A snapshot of a conversation that pages back: whether earlier messages exist, and where they begin. */
@@ -37,7 +39,8 @@ async function consistentRead(conversation: Conversation, log: EventLog, read: R
   return log.consistent(key, async cursor => {
     const { status, messages, ...paging } = await read();
     const partial = status.state !== "running" ? "" : conversation.partial ? await conversation.partial() : await partialOutput(log, key, cursor);
-    return { cursor, status, messages, ...(status.runId ? { run_id: status.runId } : {}), partial, ...paging };
+    const activity = status.state === "running" ? await conversation.activity?.() : undefined;
+    return { cursor, status, messages, ...(status.runId ? { run_id: status.runId } : {}), partial, ...(activity ? { activity } : {}), ...paging };
   });
 }
 

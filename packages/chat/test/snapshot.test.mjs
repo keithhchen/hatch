@@ -128,7 +128,7 @@ test("journal reconciliation de-duplicates retries and rejects corrupt events", 
   assert.equal(reconcileConversationSnapshot({ messages: [], runs, events: [event(1), created, created], cursor: 2 }, { afterCursor: 1 }).events.length, 1);
   assert.throws(() => reconcileConversationSnapshot({ messages: [], runs, events: [created, { ...created, payload: { changed: true } }], cursor: 2 }));
   assert.throws(() => reconcileConversationSnapshot({ messages: [], runs, events: [{ ...created, run_id: "run_unknown" }], cursor: 2 }));
-  assert.throws(() => reconcileConversationSnapshot({ messages: [], runs, events: [{ ...created, type: "mystery" }], cursor: 2 }));
+  assert.equal(reconcileConversationSnapshot({ messages: [], runs, events: [{ ...created, type: "mystery" }], cursor: 2 }).events.length, 0, "a type a newer server added is skipped");
   assert.throws(() => reconcileConversationSnapshot({ messages: [], runs, events: [{ ...created, cursor: 5 }], cursor: 2 }));
 });
 

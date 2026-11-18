@@ -47,6 +47,20 @@ test("the page's snapshot reads as a conversation page: stable ids, run ids, ste
   assert.equal(transport.getView().tasks.length, 0);
 });
 
+test("a reload mid-Run shows the steps the Run has taken so far, and a live event after them keeps going", async () => {
+  FakeSource.all = [];
+  const activity = { tool_calls: [{ tool_call_id: "t1", name: "list_agents", status: "completed" }, { tool_call_id: "t2", name: "start_task", status: "requested" }] };
+  const { controller } = setup(async () => view({ status: { state: "running", runId: "run_2" }, run_id: "run_2", partial: "so far", activity, messages: [] }));
+  controller.open(ASSISTANT_CONVERSATION);
+  await flush();
+  await flush();
+  const steps = () => controller.state.messages.at(-1).timeline.filter(entry => entry.kind === "tool").map(entry => [entry.id, entry.status]);
+  assert.deepEqual(steps(), [["tool-t1", "completed"], ["tool-t2", "requested"]]);
+  FakeSource.all.at(-1).emit({ type: "tool_end", id: "t2", name: "start_task", run_id: "run_2" }, "8");
+  assert.deepEqual(steps(), [["tool-t1", "completed"], ["tool-t2", "completed"]]);
+  controller.dispose();
+});
+
 test("the view's tasks and channels reach the page, and a failed Run is listed with why it failed", async () => {
   const failure = { code: "upstream_error", message: "The model is unavailable." };
   const { transport } = setup(async () => view({ status: { state: "failed", runId: "run_3", error: failure }, tasks: [{ id: "t1", status: "needs_you" }], channels: [{ kind: "lark", own_app: true }] }));
@@ -94,7 +108,9 @@ test("Studio's events are the Runtime's: words keep their offset, steps their ca
   assert.equal(wireEventsOf({ type: "run_end", status: "failed", error: { code: "x", message: "m", reference: "ref" }, run_id: "r" })[0].error.reference, "ref");
   assert.equal(wireEventsOf({ type: "run_end", status: "completed", run_id: "r" })[0].type, "turn.completed");
   // A Run that saved no reply must end as a terminal the page can settle, never as a success it waits on.
-  for (const status of ["cancelled", "interrupted"]) assert.deepEqual(wireEventsOf({ type: "run_end", status, run_id: "r" }).map(event => [event.type, event.error.code]), [["turn.failed", `run_${status}`]]);
+  assert.deepEqual(wireEventsOf({ type: "run_end", status: "cancelled", run_id: "r" }).map(event => [event.type, event.error.code]), [["turn.failed", "run_cancelled"]]);
+  // A Run a restart interrupted is no terminal: the server answers it again, and nothing is shown meanwhile.
+  assert.deepEqual(wireEventsOf({ type: "run_end", status: "interrupted", run_id: "r" }), []);
   assert.equal(wireEventsOf({ type: "tool_end", id: "t", name: "n", cancelled: true, run_id: "r" })[0].status, "cancelled");
   assert.deepEqual(wireEventsOf({ type: "message_end" }), [{ type: "conversation.changed", committed: "assistant" }]);
 });
@@ -154,7 +170,7 @@ test("a file goes up as its own bytes with its name in the query, and the upload
   assert.deepEqual([ready.asset_id, ready.type, ready.display_name], ["a-9", "file", "my notes.txt"]);
 });
 
-test("an interrupted Run ends the page's wait and offers to answer again; Stop posts to /stop", async () => {
+test("an interrupted Run shows no notice and no stop: the page keeps it working until the retry's events arrive; Stop posts to /stop", async () => {
   FakeSource.all = [];
   const { controller } = setup(async () => view({ status: { state: "running" }, run_id: "run_1", messages: [] }));
   controller.open(ASSISTANT_CONVERSATION);
@@ -163,9 +179,14 @@ test("an interrupted Run ends the page's wait and offers to answer again; Stop p
   FakeSource.all.at(-1).emit({ type: "run_end", status: "interrupted", run_id: "run_1" }, "8");
   await flush();
   await flush();
-  assert.notEqual(controller.state.status.key, "syncingReply");
-  assert.equal(controller.state.failedRun?.id, "run_1");
-  assert.equal(controller.canRetryRun, true);
+  assert.equal(controller.state.error, null);
+  assert.equal(controller.state.failedRun, null);
+  assert.equal(controller.state.activeRun, "run_1", "still working");
+  FakeSource.all.at(-1).emit({ type: "delta", text: "again", offset: 0, run_id: "run_1" }, "9");
+  FakeSource.all.at(-1).emit({ type: "run_end", status: "failed", run_id: "run_1" }, "10");
+  await flush();
+  await flush();
+  assert.equal(controller.state.failedRun?.id, "run_1", "a terminal state still ends it");
   controller.dispose();
 
   const stopped = setup(async () => view({ status: { state: "running" }, run_id: "run_2", messages: [] }));

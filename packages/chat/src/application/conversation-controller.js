@@ -224,12 +224,20 @@ export class ConversationController {
   async refresh(id) {
     const generation = this.generation;
     const epoch = this.compactionEpoch;
-    const result = await this.sync.refresh(id, {
+    const context = {
       current: () => this.state.messages,
       // A Run id the page minted for a message the server has not acknowledged is not the server's to know yet.
       activeRunId: () => this.run && !this.run.provisional && ![...this.pendings.values()].some(entry => entry.runId === this.run.id) ? this.run.id : null,
       isCurrent: () => generation === this.generation && this.state.conversationId === id
-    });
+    };
+    let result;
+    try { result = await this.sync.refresh(id, context); }
+    catch (cause) {
+      if (!(cause instanceof ConversationSnapshotError)) throw cause;
+      // A journal this page cannot follow (its cursor is stale, or the server moved on) is read again from the latest page, once; a second refusal is the error.
+      this.sync.reset();
+      result = await this.sync.refresh(id, context);
+    }
     if (!result) return { stale: true };
     const { snapshot } = result;
     const firstSnapshot = this.state.snapshotConversationId !== id;
@@ -556,9 +564,14 @@ export class ConversationController {
 
   async handleEvent(event, connection, link, conversationId) {
     if (!link.live) return;
-    // The server said which Run a message joined: when that is not the Run this page minted for it (another tab's Run was live), the page follows the server.
-    const rival = event.type === "message.accepted" && this.run && event.run_id !== this.run.id && this.pendings.get(event.client_message_id)?.runId === this.run.id;
-    if ((this.run?.provisional || rival) && event.run_id && event.run_id !== this.run.id && isRunEvent(event)) this.adoptRun(event.run_id);
+    // The page follows the server's Run, but only one it can tell is its own: the ack of a message it sent names the Run that message joined, and a Run not ended yet is newer than the ones that are. A late event of an earlier Run adopts nothing.
+    const held = this.run;
+    if (held && event.run_id && event.run_id !== held.id && isRunEvent(event)) {
+      const mine = event.type === "message.accepted" && (event.client_message_id
+        ? this.pendings.get(event.client_message_id)?.runId === held.id
+        : this.pendings.size === 1 && [...this.pendings.values()][0].runId === held.id);
+      if (mine || (held.provisional && event.type !== "message.accepted" && !this.endedRuns.has(event.run_id))) this.adoptRun(event.run_id);
+    }
     const boundary = textRevealBoundary(event);
     if (boundary === "flush") this.reveal.flush(event.run_id);
     else if (boundary === "discard") this.reveal.discard(event.run_id);

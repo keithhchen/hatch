@@ -68,13 +68,14 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
       continue;
     }
     if (cursor < previousCursor) invalid("The Conversation journal is out of order.");
-    if (!SNAPSHOT_EVENT_TYPES.has(String(event.type || ""))) invalid("The Conversation journal contains an unknown event.");
+    // A type this client does not know (a newer server) is skipped: the journal is integrity evidence, and the cursor still moves past it.
+    const known = SNAPSHOT_EVENT_TYPES.has(String(event.type || ""));
     const eventRunId = String(event.run_id ?? event.runId ?? "").trim();
     if (eventRunId && !runIds.has(eventRunId)) invalid("The Conversation journal references an unknown Run.");
     if (!isObject(event.payload)) invalid("The Conversation journal payload is invalid.");
     fingerprints.set(cursor, fingerprint);
     previousCursor = cursor;
-    events.push(event);
+    if (known) events.push(event);
   }
   if (events.length && previousCursor > reportedCursor) invalid("The Conversation journal exceeds its snapshot cursor.");
   return {
