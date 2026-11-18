@@ -62,6 +62,7 @@ export async function handleRuntimeSocket(
   let authToken: string | undefined;
   let client: ClientAttributes = { client: "web" };
   let helloPending = false;
+  let desktopSocket = false;
   let detach: (() => void) | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let awaitingPong = false;
@@ -150,7 +151,7 @@ export async function handleRuntimeSocket(
       try {
         raw = JSON.parse(String(data));
         // Desktop is retired: whatever it sends is answered with the notice, before authentication, validation, any Run, usage or guest count.
-        if (isDesktopFrame(raw)) {
+        if (desktopSocket ||= isDesktopFrame(raw)) {
           const { type, run_id: runId } = raw as { type: string; run_id?: unknown };
           const error = { code: DESKTOP_RETIRED_CODE, message: DESKTOP_RETIRED_NOTICE };
           if (type === "client.message" && typeof runId === "string") await send({ type: "turn.failed", run_id: runId, error });

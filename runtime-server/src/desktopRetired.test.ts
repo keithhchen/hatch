@@ -17,11 +17,15 @@ test("the notice says it in Chinese, English and Japanese, with the web address"
 
 test("a Desktop frame is told apart from web, with or without `client`", () => {
   assert.equal(isDesktopFrame(OLD_DESKTOP_HELLO), true);
-  assert.equal(isDesktopFrame({ ...OLD_DESKTOP_HELLO, entitlement_id: undefined }), true, "released builds send local tools and no client");
-  assert.equal(isDesktopFrame({ ...OLD_DESKTOP_HELLO, local_tools: [] }), true, "an entitlement_id alone is a released Desktop");
+  assert.equal(isDesktopFrame({ ...OLD_DESKTOP_HELLO, entitlement_id: undefined }), true, "released builds send their app version and no client");
+  assert.equal(isDesktopFrame({ ...OLD_DESKTOP_HELLO, client_version: undefined }), true, "an entitlement_id alone is a released Desktop");
   assert.equal(isDesktopFrame({ type: "client.hello", client: "desktop", local_tools: [] }), true);
   assert.equal(isDesktopFrame({ type: "client.hello", local_tools: [], client_version: "hatch-web" }), false);
   assert.equal(isDesktopFrame({ type: "client.message", client: "web", local_tools: ["file_read"] }), false);
+  assert.equal(isDesktopFrame({ type: "client.hello", local_tools: ["file_read"] }), false, "local tools alone are not a Desktop");
+  // The other real clients of the socket: the dashboard's web chat (client_version "hatch-web", time_zone) and the Factory's Hatch tool (none).
+  assert.equal(isDesktopFrame({ type: "client.hello", protocol_version: "0.8", conversation_id: "c", product_id: ID, client_version: "hatch-web", local_tools: [], time_zone: "Asia/Tokyo" }), false);
+  assert.equal(isDesktopFrame({ type: "client.hello", protocol_version: "0.8", conversation_id: "c", auth_token: "t", product_id: ID, local_tools: [] }), false);
   assert.equal(isDesktopFrame({ type: "tool_call.result", client: "desktop" }), false);
   assert.equal(isDesktopFrame(null), false);
 });
