@@ -1,4 +1,4 @@
-import { AttachmentSource, ConversationTransport, PendingStore, RuntimeConnection } from "@hatch/chat";
+import { AttachmentSource, ConversationTransport, RuntimeConnection, SessionPendingStore as SharedSessionPendingStore } from "@hatch/chat";
 import { BrowserImageAttachments } from "./webChatClient.js";
 
 /** The conversation API, the same one the Hatch CLI and every outside client use. */
@@ -194,19 +194,8 @@ export class StudioAttachments extends AttachmentSource {
   }
 }
 
-/** Unacknowledged messages kept in the tab's session storage: a reload sends them again under the same key. */
-export class SessionPendingStore extends PendingStore {
-  constructor(storage = () => globalThis.sessionStorage, key = "hatch.studio.assistant.pending") { super(); this.storage = storage; this.key = key; }
-
-  all() {
-    try { return JSON.parse(this.storage()?.getItem(this.key) ?? "[]"); } catch { return []; }
-  }
-
-  write(records) {
-    try { this.storage()?.setItem(this.key, JSON.stringify(records)); } catch { /* storage unavailable: the message is pending for this page only */ }
-  }
-
-  load(conversationId) { return this.all().filter(record => record.conversationId === conversationId); }
-  save(record) { this.write([...this.all().filter(entry => entry.clientMessageId !== record.clientMessageId), record]); }
-  settle(clientMessageId) { this.write(this.all().filter(entry => entry.clientMessageId !== clientMessageId)); }
+/** The Assistant's unacknowledged messages, in the tab's session storage. */
+export class SessionPendingStore extends SharedSessionPendingStore {
+  constructor(storage = () => globalThis.sessionStorage, key = "hatch.studio.assistant.pending") { super(storage, key); }
 }
+

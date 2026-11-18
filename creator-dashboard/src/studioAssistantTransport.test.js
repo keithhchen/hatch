@@ -154,18 +154,28 @@ test("a file goes up as its own bytes with its name in the query, and the upload
   assert.deepEqual([ready.asset_id, ready.type, ready.display_name], ["a-9", "file", "my notes.txt"]);
 });
 
-test("an interrupted Run ends the page's wait and offers to answer again; Stop posts to /stop", async () => {
+test("an interrupted Run shows no error and no answer-again offer, the page keeps working and adopts the retry's Run; Stop posts to /stop", async () => {
   FakeSource.all = [];
-  const { controller } = setup(async () => view({ status: { state: "running" }, run_id: "run_1", messages: [] }));
+  let running = "run_1";
+  const { controller } = setup(async () => view({ status: { state: "running" }, run_id: running, messages: [] }));
   controller.open(ASSISTANT_CONVERSATION);
   await flush();
   await flush();
   FakeSource.all.at(-1).emit({ type: "run_end", status: "interrupted", run_id: "run_1" }, "8");
   await flush();
   await flush();
-  assert.notEqual(controller.state.status.key, "syncingReply");
-  assert.equal(controller.state.failedRun?.id, "run_1");
-  assert.equal(controller.canRetryRun, true);
+  assert.equal(controller.state.error, null, "no error is shown");
+  assert.equal(controller.state.failedRun, null, "no answer-again offer");
+  assert.equal(controller.state.activeRun, null, "the server reports no retry: the page goes idle, quietly");
+
+  // The server's automatic retry starts a new Run: the page adopts it, still with no error.
+  running = "run_2";
+  FakeSource.all.at(-1).emit({ type: "state" }, "9");
+  await flush();
+  await flush();
+  assert.equal(controller.state.activeRun, "run_2");
+  assert.equal(controller.state.error, null);
+  assert.equal(controller.state.failedRun, null);
   controller.dispose();
 
   const stopped = setup(async () => view({ status: { state: "running" }, run_id: "run_2", messages: [] }));

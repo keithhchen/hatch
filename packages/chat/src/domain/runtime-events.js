@@ -66,6 +66,8 @@ const sessionHandlers = Object.freeze({
   "message.rejected": (_timeline, event) => outcome("message_rejected", { clientMessageId: event.client_message_id, error: event.error }),
   // A summary of the history began or ended, in a Run or between Runs.
   "conversation.compaction": (_timeline, event) => outcome("compaction", { active: event.active === true }),
+  // A reply of a Run was saved (the Run may go on for a message that joined it): the page reads it.
+  "assistant.message": () => outcome("changed", { committed: "assistant" }),
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
   // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
   "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id }),

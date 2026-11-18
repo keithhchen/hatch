@@ -7,7 +7,7 @@ import { OutputCapture } from "./output.js";
 import { BoxFileMissing, BoxNameTaken, BoxUnavailable, type AgentBox, type BoxProvider, type ExecResult } from "./ports.js";
 
 /** Pinned: a new image is a code change, so BoxLite never pulls one under a live buyer. Built by keithhchen/hatch-agent-box. */
-export const DEFAULT_BOX_IMAGE = "docker.io/keithchen/hatch-agent-box:703c048708152a2f7a40feeeef6e8443b8a9d4e8";
+export const DEFAULT_BOX_IMAGE = "docker.io/keithchen/hatch-agent-box:d6a5ac301a14fd1051daf84bdf4e06926546bf9d";
 export const DEFAULT_WORK_DIR = "/home/agent/work";
 /** What one command may print, in all; the start and the end of it are kept. */
 const OUTPUT_CHARS = 30_000;
