@@ -29,8 +29,6 @@ import {
   UploadFile
 } from "@mui/icons-material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
 import { ArrowRight, ArrowUpRight, Play, Sparkles, Check, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Paperclip, Pin, PinOff, X as CloseIcon } from "lucide-react";
 import { ConversationController } from "@hatch/chat";
@@ -64,17 +62,6 @@ const FIRST_PAGE = { sources: "uploads", build: "generation", evaluate: "case-ge
 const STEP_STATE_KEY = { done: "stepDone", running: "stepRunning", todo: "stepReady", locked: "stepLocked" };
 
 const theme = createTheme({ ...hatchMuiThemeOptions, components: { ...hatchMuiThemeOptions.components, MuiTextField: { defaultProps: { size: "small" } } } });
-
-function Markdown({ children, filePath = "output/chat.md", files = [], onOpenFile, t }) {
-  const link = ({ href, ...props }) => {
-    let local;
-    if (href && !/^(?:[a-z][\w+.-]*:|\/\/|#)/i.test(href)) {
-      try { const relative = /^(input|output)\//.test(href) ? `/${href}` : href; const path = decodeURIComponent(new URL(relative, `https://workspace.invalid/${filePath}`).pathname.slice(1)); local = files.find(file => file.path === path)?.path; } catch { /* keep unsupported links normal */ }
-    }
-    return local && onOpenFile ? <a {...props} href={href} onClick={event => { event.preventDefault(); onOpenFile(local); }} /> : <a {...props} href={href} target="_blank" rel="noreferrer" />;
-  };
-  return <div className="factory-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: link, img: ({ alt }) => <Typography component="span" color="text.secondary">{t("imageAlt", alt || t("externalImage"))}</Typography> }}>{children || ""}</ReactMarkdown></div>;
-}
 
 function ErrorNotice({ error, onClose }) {
   return <Snackbar open={Boolean(error)} anchorOrigin={{ vertical: "bottom", horizontal: "right" }} onClose={onClose} sx={{ maxWidth: "min(420px, calc(100vw - 32px))" }}>

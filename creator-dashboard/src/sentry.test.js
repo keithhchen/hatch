@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 globalThis.location = { origin: "https://hatch.example" };
-const { initSentry } = await import("./sentry.js");
+const { initSentry, startSentry } = await import("./sentry.js");
 const { dashboardRequest, SERVICE_UNAVAILABLE_MESSAGE } = await import("./data.js");
 
 function fakeSentry() {
@@ -16,6 +16,20 @@ function fakeSentry() {
     captureException: (error) => calls.captured.push(error)
   };
 }
+
+test("errors before the SDK arrives are queued and replayed once it loads", async () => {
+  const listeners = {};
+  const target = { addEventListener: (name, fn) => { listeners[name] = fn; }, removeEventListener: (name) => { delete listeners[name]; } };
+  const sentry = fakeSentry();
+  const started = startSentry({ VITE_SENTRY_DSN: "https://k@o.ingest.sentry.io/1" }, async () => sentry, target);
+  const early = new Error("before sdk");
+  listeners.error({ error: early });
+  listeners.unhandledrejection({ reason: "rejected" });
+  assert.equal(sentry.calls.init.length, 0);
+  assert.equal(await started, true);
+  assert.deepEqual(sentry.calls.captured, [early, "rejected"]);
+  assert.deepEqual(listeners, {}, "own listeners are removed once the SDK's handlers are installed");
+});
 
 test("Sentry is not initialized without a DSN", () => {
   const sentry = fakeSentry();

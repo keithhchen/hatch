@@ -8,13 +8,15 @@
   },
   "sideEffects": [
     "./src/hatch-ui.css",
-    "./src/fonts.js"
+    "./src/fonts.js",
+    "./src/fonts-cjk.js"
   ],
   "exports": {
     ".": "./src/index.js",
     "./mui-theme": "./src/muiTheme.js",
     "./product": "./src/product/index.js",
     "./fonts": "./src/fonts.js",
+    "./fonts-cjk": "./src/fonts-cjk.js",
     "./theme.css": "./src/hatch-ui.css"
   },
   "dependencies": {
