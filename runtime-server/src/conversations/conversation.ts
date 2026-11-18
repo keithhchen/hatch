@@ -41,7 +41,7 @@ export type SendInput = {
 export type ConversationState = "idle" | "running" | "failed";
 /** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. `error` is why the last Run failed. */
 /** `compacting` is set while history is being summarized: inside the running Run, or in the background after a reply. */
-export type ConversationStatus = { state: ConversationState; error?: RunFailure; runId?: string; compacting?: true };
+export type ConversationStatus = { state: ConversationState; error?: RunFailure; runId?: string; compacting?: true; /** The Run a restart interrupted is being answered again: still working, as far as the page goes. */ retrying?: true };
 /** `runId` is the Run that took the message, when the conversation can say. */
 export type Sent = { conversationId: string; message: PublicMessage; queued: boolean; runId?: string };
 export type ConversationEvent = { type: string; [key: string]: unknown };
@@ -70,6 +70,8 @@ export interface Conversation {
   retry?(key: string, client: ClientAttributes): Promise<{ runId: string; outcome: "started" | "replayed" }>;
   /** What the running turn has said so far, when the conversation knows it without its event log. */
   partial?(): Promise<string>;
+  /** The steps the running turn has taken so far, for a page that joins mid-Run. */
+  activity?(): Promise<ReplySteps | undefined>;
 }
 
 /** An error the API shows as is: status, machine-readable code and a message for people. */

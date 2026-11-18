@@ -1,4 +1,4 @@
-import type { EventRelay } from "./eventRelay.js";
+import { RESYNC_EVENT, type EventRelay } from "./eventRelay.js";
 import { TERMINAL_STATUSES } from "./runResult.js";
 import { RunLedger, type LiveRun } from "./runLedger.js";
 
@@ -26,7 +26,7 @@ export class RunEventHub {
 
   /** Starts hearing the other instances; resolves to the way to stop. */
   listen(): Promise<() => Promise<void>> {
-    return this.relay?.subscribe((conversationId, event) => this.deliver(conversationId, event)) ?? Promise.resolve(async () => undefined);
+    return this.relay?.subscribe((conversationId, event) => this.deliver(conversationId, event), () => this.resyncAll()) ?? Promise.resolve(async () => undefined);
   }
 
   subscribe(conversationId: string, sink: EventSink): () => void {
@@ -64,7 +64,7 @@ export class RunEventHub {
   }
 
   private track(conversationId: string, event: Record<string, unknown>): void {
-    if (event.type === "turn.state" && TERMINAL_STATUSES.has(String(event.status))) { this.live.delete(conversationId); const ledger = this.ledgers.get(conversationId); if (ledger?.runId === event.run_id) ledger.end(); return; }
+    if (event.type === "turn.state" && TERMINAL_STATUSES.has(String(event.status))) { this.live.delete(conversationId); const ended = this.ledgers.get(conversationId); if (ended && ended.runId === event.run_id) ended.end(); return; }
     if (typeof event.run_id === "string") {
       let ledger = this.ledgers.get(conversationId);
       if (ledger?.runId !== event.run_id) { ledger = new RunLedger(event.run_id); this.ledgers.set(conversationId, ledger); }
@@ -78,6 +78,12 @@ export class RunEventHub {
     live.text += delta.content;
     if (live.text.length > MAX_LIVE_TEXT) { const cut = live.text.length - MAX_LIVE_TEXT; live.text = live.text.slice(cut); live.base += cut; }
     this.live.set(conversationId, live);
+  }
+
+  /** Events may have been missed on every conversation: each observer is told to read again. */
+  private resyncAll(): void {
+    this.live.clear();
+    for (const conversationId of [...this.sinks.keys()]) this.deliver(conversationId, RESYNC_EVENT);
   }
 
   /** To this instance's observers only. */

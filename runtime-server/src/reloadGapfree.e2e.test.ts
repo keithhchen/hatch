@@ -628,9 +628,10 @@ test("d3. a Run interrupted by a restart: the reopened page shows the same parts
   await fixture.runtime.close();
   const restarted = await boot({}, { dir: fixture.dir, conversationId: fixture.conversationId });
   await waitFor(async () => (await restarted.repository.getRun(conversation.id, run!.id))?.status === "interrupted", "the restart to end the Run as interrupted");
-  const reopened = await openPage(restarted);
-  await finished(reopened);
-  samePartList(reopened.parts(), live, "the page opened after the restart");
+  // The restart also answers the reply again, and the page shows the interrupted partial only once no retry is owed (restartRetry): the stored reply is what it will then show.
+  const stored = (await restarted.store.readVisibleConversation(conversation.id)).find((message) => message.run_id === run!.id && message.role === "assistant");
+  assert.ok(stored, "the interrupted Run kept a reply");
+  samePartList(partsOfEntries(chat.ChatTimeline.fromHistory(stored)), live, "the reply the interrupted Run kept");
   assert.equal(oracle.parts().length, live.length);
 });
 

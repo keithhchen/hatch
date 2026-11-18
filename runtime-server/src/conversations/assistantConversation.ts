@@ -1,7 +1,7 @@
 import type { AssetDesk } from "./assets.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 import { ChatError } from "../chat/principal.js";
-import { ConversationError, type Conversation, type ConversationStatus, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
+import { ConversationError, type Conversation, type ReplySteps, type ConversationStatus, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
 
 /** The part of the Assistant an account-level conversation needs: its conversation on Chat, and where uploads for it go. */
 export interface AssistantHost {
@@ -17,6 +17,8 @@ export interface AssistantHost {
   retry(accountId: string, input: { id: string; client: ClientAttributes }): Promise<{ run: { id: string }; outcome: "started" | "replayed" }>;
   /** What the running turn has said so far. */
   partial(accountId: string): Promise<string>;
+  /** The steps the running turn has taken so far. */
+  activity(accountId: string): Promise<ReplySteps | undefined>;
   feedKey(accountId: string): string;
   /** The conversation's id, which is also the scope its attachments live in. */
   conversationId(accountId: string): string;
@@ -53,4 +55,6 @@ export class AssistantConversation implements Conversation {
   }
 
   partial(): Promise<string> { return this.assistant.partial(this.accountId); }
+
+  activity(): Promise<ReplySteps | undefined> { return this.assistant.activity(this.accountId); }
 }

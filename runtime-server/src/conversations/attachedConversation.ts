@@ -15,6 +15,7 @@ export class AttachedConversation implements Conversation {
   get history() { return this.inner.history?.bind(this.inner); }
   feedKey() { return this.inner.feedKey(); }
   get partial() { return this.inner.partial?.bind(this.inner); }
+  get activity() { return this.inner.activity?.bind(this.inner); }
   get retry() { return this.inner.retry?.bind(this.inner); }
   stop() { return this.inner.stop(); }
 

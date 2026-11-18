@@ -18,6 +18,7 @@ import {
 } from "../chat/sessionBinding.js";
 import { projecting, SseSink, type EventProjection } from "../chat/sinks.js";
 import type { Submission } from "../chat/chatService.js";
+import { retryPending } from "../chat/restartRetry.js";
 import { retryRun, submitUserMessage, type ChatEdge } from "../chat/turnSubmission.js";
 import { handleReportRequest } from "../artifact/routes.js";
 import type { ArtifactMode } from "../artifact/mode.js";
@@ -260,12 +261,15 @@ export async function handleConversationHttpRequest(
       const pageRuns = await Promise.all(page.run_ids.map((id) => repository.getRun(conversation.id, id)));
       const runs = new Map(snapshot.runs.map((run) => [run.id, run]));
       for (const run of pageRuns) if (run) runs.set(run.id, run);
+      const everyRun = await repository.listRuns(conversation.id);
       writeResponse(200, {
         conversation: publicConversation(snapshot.conversation),
         ...page,
         messages: sanitizeBoundHistory(page.messages, binding.productId),
         // A Run still going also tells everything it has shown so far, in order, and where in its events that stands: the page then skips those and hears the rest.
         runs: [...runs.values()].map((run) => {
+          // A Run a restart interrupted is being answered again: the buyer's page shows it as still working, with nothing of its own to show.
+          if (retryPending(everyRun, run)) { const { partial_output: _partial, ...pending } = publicRun(run); return { ...pending, retrying: true }; }
           const live = TERMINAL_STATUSES.has(run.status) ? undefined : edge?.chat.hub.liveRun(conversation.id, run.id);
           return { ...publicRun(run), ...(live ? { live: protectedLiveRun(live, binding.productId) } : {}) };
         }),

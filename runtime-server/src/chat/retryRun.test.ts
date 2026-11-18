@@ -84,7 +84,7 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.equal(retried.outcome, "started");
     assert.equal(retried.run.status, "queued");
     assert.deepEqual(h.adopted, ["run-for-retry-1"]);
-    assert.deepEqual(h.heard.filter((event) => event.run_id === retried.run.id), [{ type: "turn.state", run_id: retried.run.id, status: "queued" }]);
+    assert.deepEqual(h.heard.filter((event) => event.run_id === retried.run.id), [{ type: "turn.state", run_id: retried.run.id, status: "queued", seq: 1 }]);
     // No new user message: the transcript is what the failed Run left, partial reply included.
     assert.deepEqual((await h.store.readConversation(id)).map((entry) => [entry.role, entry.content]), before);
     assert.deepEqual(before, [["user", "question 1"], ["assistant", "The first half of an answer"]]);

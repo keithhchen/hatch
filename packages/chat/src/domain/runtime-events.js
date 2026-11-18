@@ -51,7 +51,8 @@ const runHandlers = Object.freeze({
   "message.accepted": (_timeline, event) => outcome("accepted", { receipt: event }),
   "turn.completed": (_timeline, event) => outcome("terminal", { failed: false, finishReason: event.finish_reason }),
   // A Run the user stopped ends as `turn.failed` with this code: it is a cancellation, never a failure to report.
-  "turn.failed": (_timeline, event) => event.error?.code === "run_cancelled"
+  // A Run a service restart cut off is started again by the server: the buyer is told of nothing and sees no failure.
+  "turn.failed": (_timeline, event) => event.error?.code === "run_cancelled" || event.error?.code === "run_interrupted"
     ? outcome("terminal", { failed: false, cancelled: true })
     : outcome("terminal", { failed: true, error: event.error })
 });
@@ -67,9 +68,13 @@ const sessionHandlers = Object.freeze({
   "message.rejected": (_timeline, event) => outcome("message_rejected", { clientMessageId: event.client_message_id, error: event.error }),
   // A summary of the history began or ended, in a Run or between Runs.
   "conversation.compaction": (_timeline, event) => outcome("compaction", { active: event.active === true }),
+  // A reply of a Run was saved (the Run may go on for a message that joined it): the page reads it.
+  "assistant.message": () => outcome("changed", { committed: "assistant" }),
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
   // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
-  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id })
+  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id }),
+  // The server cannot vouch for the live stream (events were dropped or a relay connection was lost): read the conversation again.
+  resync: () => outcome("resync")
 });
 
 /** Whether the event belongs to one Run, as opposed to the session or the conversation. */

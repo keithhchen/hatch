@@ -205,7 +205,7 @@ test("postgres: a write that races a stop is refused atomically, not checked and
   assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0"]);
 }));
 
-test("a message refused at admission ends its Run through the terminator: the journal and the observers both hear a failure", async () => withBackend("memory", async ({ repository }) => {
+test("a message whose Run capacity is refused after it was stored is answered by a failed Run through the terminator: the journal and the observers both hear a failure, and the message is not refused", async () => withBackend("memory", async ({ repository }) => {
   const hub = new RunEventHub();
   const events = heard(hub);
   let reserved = 0;
@@ -222,14 +222,15 @@ test("a message refused at admission ends its Run through the terminator: the jo
     registry: new RunRegistry<object>()
   });
   const conversation = (await repository.getConversation(id))!;
-  await assert.rejects(service.submit({
+  const submission = await service.submit({
     principal: { kind: "account", accountId: "owner" } as never, conversation, scope: {}, client: { client: "web" },
     clientMessageId: "m-0", message: async () => ({ role: "user", content: "question 0" }), digest: "d-0", runId: "run-0", corpusDigest: "corpus", requiresLocalTools: false
-  }), { code: "capacity" });
+  });
+  assert.equal(submission.outcome, "started", "the message is stored, so it is answered, not refused");
   const run = (await repository.getRun(id, "run-0"))!;
   assert.equal(run.status, "failed");
   assert.deepEqual(run.failure, { code: "capacity", message: "The server is at capacity." });
-  assert.deepEqual(events.filter((event) => event.run_id === "run-0").map((event) => event.type), ["turn.failed", "turn.state"]);
+  assert.deepEqual(events.filter((event) => event.run_id === "run-0").map((event) => event.type), ["message.accepted", "turn.state", "turn.failed", "turn.state"]);
   const state = (await repository.snapshot(id)).events.filter((event) => event.type === "run.state").at(-1)!;
   assert.equal(state.payload.status, "failed");
 }));

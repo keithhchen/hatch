@@ -1,4 +1,4 @@
-import { AttachmentSource, ConversationTransport, PendingStore, RuntimeConnection } from "@hatch/chat";
+import { AttachmentSource, ConversationTransport, RuntimeConnection, SessionPendingStore as SharedSessionPendingStore } from "@hatch/chat";
 import { BrowserImageAttachments } from "./webChatClient.js";
 
 /** The conversation API, the same one the Hatch CLI and every outside client use. */
@@ -33,8 +33,8 @@ export function wireEventsOf(event) {
     // The history is being summarized, in a Run or after a reply: the page waits for the end.
     case "compaction_start": return [{ type: "conversation.compaction", active: true }];
     case "compaction_end": return [{ type: "conversation.compaction", active: false }];
-    // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a failure the page need not wait on
-    // (the server lets an interrupted Run be answered again, which the failed state offers).
+    // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a terminal the page settles quietly
+    // (an interrupted one is answered again by the server, which the next read says).
     case "run_end": return event.status === "completed"
       ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
       : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
@@ -116,7 +116,8 @@ export class StudioAssistantTransport extends ConversationTransport {
       messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
       compacting: view.status?.compacting === true, has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
       // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
-      runs: view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }]
+      runs: view.status?.state === "running" && view.status.retrying ? [{ id: view.run_id, status: "running", retrying: true }]
+        : view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}), ...(view.activity ? { activity: { tool_calls: view.activity.tool_calls.map(call => ({ ...call, locality: "server" })), skill_events: [], skill_runs: [] } } : {}) }]
         : failed ? [{ id: view.status.runId, status: "failed", failure: view.status.error }] : []
     };
   }
@@ -194,19 +195,8 @@ export class StudioAttachments extends AttachmentSource {
   }
 }
 
-/** Unacknowledged messages kept in the tab's session storage: a reload sends them again under the same key. */
-export class SessionPendingStore extends PendingStore {
-  constructor(storage = () => globalThis.sessionStorage, key = "hatch.studio.assistant.pending") { super(); this.storage = storage; this.key = key; }
-
-  all() {
-    try { return JSON.parse(this.storage()?.getItem(this.key) ?? "[]"); } catch { return []; }
-  }
-
-  write(records) {
-    try { this.storage()?.setItem(this.key, JSON.stringify(records)); } catch { /* storage unavailable: the message is pending for this page only */ }
-  }
-
-  load(conversationId) { return this.all().filter(record => record.conversationId === conversationId); }
-  save(record) { this.write([...this.all().filter(entry => entry.clientMessageId !== record.clientMessageId), record]); }
-  settle(clientMessageId) { this.write(this.all().filter(entry => entry.clientMessageId !== clientMessageId)); }
+/** The Assistant's unacknowledged messages, in the tab's session storage. */
+export class SessionPendingStore extends SharedSessionPendingStore {
+  constructor(storage = () => globalThis.sessionStorage, key = "hatch.studio.assistant.pending") { super(storage, key); }
 }
+

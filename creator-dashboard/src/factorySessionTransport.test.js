@@ -61,3 +61,43 @@ test("a reload reads only the messages after the ones the page holds, and all of
   assert.equal(urls[2], "/r/sessions/s1?after=2&tail=2");
   assert.deepEqual(transport.getSession().messages.map(message => message.timestamp), [9]);
 });
+
+const connect = () => {
+  const transport = new FactorySessionTransport(async () => session, { root: "/r", id: "s1", activityOf, stream: () => ({ close() {} }) });
+  transport.runId = "run_x";
+  const requests = [];
+  transport.request = async (path, init) => { requests.push([path, init?.method]); return {}; };
+  return { transport, requests, connection: new FactoryConnection(transport, "s1", { onOpen() {}, onEvent() {}, onClose() {} }) };
+};
+const terminals = events => events.filter(event => event.type === "turn.completed" || event.type === "turn.failed");
+
+test("a failed Run ends the page once, whichever of `error` and `run_end` comes first", () => {
+  for (const order of [["error", "run_end"], ["run_end", "error"]]) {
+    const { connection } = connect();
+    const heard = order.flatMap(type => connection.wire(type === "error" ? { type, message: "boom" } : { type, status: "failed", error: { code: "x", message: "m" } }));
+    assert.equal(terminals(heard).length, 1, order.join(" then "));
+    connection.close();
+  }
+  const { connection } = connect();
+  assert.equal(terminals(connection.wire({ type: "run_end", status: "failed" })).length, 1);
+  connection.wire({ type: "delta", text: "next Run" });
+  assert.equal(terminals(connection.wire({ type: "run_end", status: "completed" })).length, 1, "the next Run ends on its own");
+  connection.close();
+});
+
+test("a Run a restart interrupted ends quietly: it is neither \"stopped\" nor an error", () => {
+  const { connection } = connect();
+  const [ended] = terminals(connection.wire({ type: "run_end", status: "interrupted" }));
+  assert.equal(ended.error.code, "run_interrupted");
+  assert.equal(terminals(connect().connection.wire({ type: "run_end", status: "cancelled" }))[0].error.code, "run_cancelled");
+});
+
+test("a reload mid-Run reads the text so far, and each live delta says where it sits so a gap or a replay joins exactly", async () => {
+  const { transport, connection } = connect();
+  transport.request = async () => ({ id: "s1", status: "running", partial: "Hello wor", messages: [{ role: "user", content: "hi", timestamp: 1 }] });
+  const page = await transport.snapshot();
+  assert.deepEqual(page.runs.map(run => [run.status, run.partial_output]), [["running", "Hello wor"]]);
+  assert.equal(connection.wire({ type: "delta", text: "ld", offset: 9 })[0].delta.offset, 9);
+  assert.equal("offset" in connection.wire({ type: "delta", text: "ld" })[0].delta, false, "a server that sends none is still read");
+  transport.request = async () => ({ id: "s1", status: "completed", partial: "", messages: [] });
+});

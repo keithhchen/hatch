@@ -9,7 +9,7 @@ import { WebChatEgg } from "./webChatGate.jsx";
 import { GuestAuthButtons, ProductAgentGate, useProductAgent } from "./productAgent.jsx";
 import { WebChatShell, useFocusTrap } from "./WebChatShell.jsx";
 import { useLocale } from "./locale.jsx";
-import { BrowserImageAttachments, UnavailableToolExecutor, WebConversationTransport, browserDictation } from "./webChatClient.js";
+import { BrowserImageAttachments, UnavailableToolExecutor, WebConversationTransport, browserDictation, webChatControllerOptions } from "./webChatClient.js";
 import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import "./webChat.css";
@@ -127,14 +127,21 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       tools: new UnavailableToolExecutor(),
       drafts,
       draftScope: productId,
+      ...webChatControllerOptions(productId),
       describeError: cause => webChatErrorText(cause, localeRef.current)
     });
     controller.open(routedConversationRef.current ?? "");
+    // The network or the tab came back: retry now, not after the backoff.
+    const wake = () => { if (document.visibilityState !== "hidden") controller.nudge(); };
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
     controller.loadLibrary()
       .then(() => { if (live) setWorkspace({ controller, agent, dictate: browserDictation(request) }); })
       .catch(cause => { if (live) setChatError(cause); });
     return () => {
       live = false;
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
       controller.dispose();
     };
   }, [agent, productId, request]);

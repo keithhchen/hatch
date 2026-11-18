@@ -41,6 +41,7 @@ import { idempotencyId, type OutboundMessage as ChannelMessage } from "../channe
 import { TelegramChannel } from "../channels/telegramChannel.js";
 import { guarded } from "../channels/eligibility.js";
 import { MemoryTaskRepository } from "./tasks.js";
+import { endingOf } from "../testSupport.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
@@ -60,6 +61,8 @@ type Step = {
   delayMs?: number;
   /** The provider's error: the turn ends in it. */
   fail?: string;
+  /** Tells the Run's events about each tool call, as the real runtime does. */
+  announce?: boolean;
 };
 type Turn = { input: RunStart; ctx: RunContext; /** Everything the Expert said in this turn, in order. */ said: string[]; /** What the Run claimed after it began: the messages the model reads next. */ claimed: ConversationMessage[]; live: string | undefined };
 
@@ -74,6 +77,7 @@ function scriptedModel(script: (turn: Turn, call: number) => Step | Promise<Step
       const step = await script(turn, call);
       if (step.delayMs) await sleep(step.delayMs);
       for (const [index, tool] of (step.tools ?? []).entries()) {
+        if (step.announce) yield { type: "tool_call.delta", run_id: input.run_id, tool_call_id: `t${call}-${index}`, name: `studio.${tool.name}`, locality: "server", approval: "none", status: "requested", arguments: tool.arguments };
         await ctx.toolBridge!.execute({ scope: "main", runId: input.run_id, toolCallId: `t${call}-${index}`, name: `studio.${tool.name}`, arguments: tool.arguments, clientTools: ctx.clientTools, state: ctx.state });
       }
       for (let more = await ctx.claimSteered?.(); more?.length; more = await ctx.claimSteered?.()) { turn.claimed.push(...more); turn.said.push(...more.map(message => message.content ?? "")); }
@@ -888,6 +892,37 @@ test("A voice message that cannot be transcribed is answered in the chat with a 
     assert.deepEqual(env.notices, ["语音暂时转不成文字，请先发文字。\nVoice messages cannot be transcribed right now. Please send text instead."]);
     assert.equal(env.model.state.calls, 0);
   } finally { console.error = log; await env.close(); }
+});
+
+test("A page that joins a running turn reads the steps it has taken so far, without arguments or results, and none once it ended", async () => {
+  const env = await setup({ model: (_turn, call) => call === 1 ? { tools: [{ name: "list_tasks", arguments: {} }], announce: true, text: () => { probe = env.chat.activity(ACCOUNT); return "好"; } } : { text: "好" } });
+  let probe: Promise<unknown> | undefined;
+  try {
+    assert.equal(await env.chat.activity(ACCOUNT), undefined, "no Run, no steps");
+    await env.say("看看任务", "m-steps");
+    await env.idle();
+    const during = await probe as { tool_calls: Array<Record<string, unknown>> };
+    assert.deepEqual(during.tool_calls.map(call => [call.name, "arguments" in call, "result" in call]), [["studio.list_tasks", false, false]]);
+    assert.equal(await env.chat.activity(ACCOUNT), undefined, "the Run ended");
+  } finally { await env.close(); }
+});
+
+test("A reply a restart interrupted is answered again by itself; until then the Expert's page sees it working, never failed", async () => {
+  const env = await setup({ model: (_turn, call) => call === 1 ? { delayMs: 500, text: "旧" } : { text: "新的答复" } });
+  try {
+    await env.say("问题", "m-q");
+    await sleep(80);
+    const conversationId = assistantConversationId(ACCOUNT);
+    const [run] = await env.repository.listRuns(conversationId);
+    const interrupted = (await env.repository.endRun(run!.id, endingOf("interrupted", "The Runtime restarted"))).run;
+    assert.deepEqual(await env.chat.status(ACCOUNT), { state: "running", runId: run!.id, retrying: true });
+    await sleep(600); // the process that held the Run is gone in production; here its model call runs out first
+    await (env.chat as unknown as { retrier: { afterInterrupted(run: unknown): Promise<void> } }).retrier.afterInterrupted(interrupted);
+    await env.idle();
+    const lines = await env.chat.lines(ACCOUNT);
+    assert.deepEqual(lines.map(line => [line.role, line.text]), [["user", "问题"], ["assistant", "新的答复"]]);
+    assert.equal((await env.chat.status(ACCOUNT)).state, "idle");
+  } finally { await env.close(); }
 });
 
 test("The Expert's page reads the conversation by page: never the whole of it, and a message sent into a running reply is already there, queued", async () => {

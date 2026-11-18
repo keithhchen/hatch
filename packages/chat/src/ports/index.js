@@ -23,6 +23,8 @@ export class ConversationTransport {
   get steerable() { return false; }
   /** Whether a send, once made, completes even if the stream drops (an HTTP request). A socket send does not: it goes again on reconnect, under the same key. */
   get requestsOutliveStream() { return this.steerable; }
+  /** Whether other clients write to the same conversation and the session carries their Runs (Product Chat): a Run heard of while this page holds none is adopted. */
+  get adoptsForeignRuns() { return false; }
   /** Whether a Run that failed can be answered again: the transport has `retryRun`. */
   get retriesRun() { return false; }
   /** Answers the conversation again after a failed Run. The same `key` is the same Run. @returns {Promise<{run_id: string}>} */
@@ -147,4 +149,21 @@ export class MemoryDraftStore extends DraftStore {
   constructor() { super(); this.drafts = new Map(); }
   read(scope) { return this.drafts.get(scope) ?? { text: "", files: [] }; }
   write(scope, draft) { this.drafts.set(scope, draft); }
+}
+
+/** Unacknowledged messages kept in the tab's session storage: a reload sends them again under the same key. */
+export class SessionPendingStore extends PendingStore {
+  constructor(storage = () => globalThis.sessionStorage, key = "hatch.pending") { super(); this.storage = storage; this.key = key; }
+
+  all() {
+    try { return JSON.parse(this.storage()?.getItem(this.key) ?? "[]"); } catch { return []; }
+  }
+
+  write(records) {
+    try { this.storage()?.setItem(this.key, JSON.stringify(records)); } catch { /* storage unavailable: the message is pending for this page only */ }
+  }
+
+  load(conversationId) { return this.all().filter(record => record.conversationId === conversationId); }
+  save(record) { this.write([...this.all().filter(entry => entry.clientMessageId !== record.clientMessageId), record]); }
+  settle(clientMessageId) { this.write(this.all().filter(entry => entry.clientMessageId !== clientMessageId)); }
 }

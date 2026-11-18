@@ -26,7 +26,8 @@ export const TERMINAL_RUN_STATUSES = Object.freeze(["completed", "failed", "canc
 export const ACTIVE_RUN_STATUSES = Object.freeze(["queued", "running", "waiting_for_tool", "waiting_for_approval", "compacting"]);
 export const isTerminalRunStatus = value => TERMINAL_RUN_STATUSES.includes(String(value || "").trim().toLowerCase());
 export const runId = run => String(run?.id ?? run?.run_id ?? "").trim();
-export const activeSnapshotRun = snapshot => snapshot.runs?.find(run => ACTIVE_RUN_STATUSES.includes(run.status)) ?? null;
+/** A Run a restart interrupted that the server is starting again (`retrying`) is still being worked on, as far as the buyer is concerned. */
+export const activeSnapshotRun = snapshot => snapshot.runs?.find(run => ACTIVE_RUN_STATUSES.includes(run.status) || run.retrying === true) ?? null;
 
 const SNAPSHOT_EVENT_TYPES = new Set(JOURNAL_EVENT_TYPES);
 
@@ -68,13 +69,14 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
       continue;
     }
     if (cursor < previousCursor) invalid("The Conversation journal is out of order.");
-    if (!SNAPSHOT_EVENT_TYPES.has(String(event.type || ""))) invalid("The Conversation journal contains an unknown event.");
+    // A type this client does not know (a newer server) is skipped: the journal is integrity evidence, and the cursor still moves past it.
+    const known = SNAPSHOT_EVENT_TYPES.has(String(event.type || ""));
     const eventRunId = String(event.run_id ?? event.runId ?? "").trim();
     if (eventRunId && !runIds.has(eventRunId)) invalid("The Conversation journal references an unknown Run.");
     if (!isObject(event.payload)) invalid("The Conversation journal payload is invalid.");
     fingerprints.set(cursor, fingerprint);
     previousCursor = cursor;
-    events.push(event);
+    if (known) events.push(event);
   }
   if (events.length && previousCursor > reportedCursor) invalid("The Conversation journal exceeds its snapshot cursor.");
   return {

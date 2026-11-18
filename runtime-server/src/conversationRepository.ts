@@ -333,6 +333,8 @@ export interface ConversationRepository {
   /** Lookup used to acknowledge a transport retry without starting tools again. */
   getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined>;
   listRuns(conversationId: string): Promise<ConversationRunRecord[]>;
+  /** Runs a restart interrupted since `since` that are still their conversation's latest: the ones nobody has answered again. */
+  restartInterruptedRuns(since: Date): Promise<ConversationRunRecord[]>;
   /** Who has opened conversations with the creator's Products (not the creator themself), the most recently active first. */
   listAudience(creatorId: string, options?: { productId?: string; limit?: number }): Promise<AudienceRow[]>;
   /** The Products an owner has conversations with, each once. */
@@ -968,6 +970,15 @@ export class InMemoryConversationRepository implements ConversationRepository {
         && conversation.creatorId === binding.creatorId
         && conversation.agentId === binding.agentId;
     }).length;
+  }
+
+  async restartInterruptedRuns(since: Date): Promise<ConversationRunRecord[]> {
+    await this.readReady();
+    const all = [...this.runs.values()];
+    return all
+      .filter((run) => run.status === "interrupted" && run.failure?.code === "run_interrupted" && (run.completedAt ?? "") >= since.toISOString()
+        && !all.some((other) => other.conversationId === run.conversationId && compareRuns(other, run) > 0))
+      .map(cloneRun);
   }
 
   async listRuns(conversationId: string): Promise<ConversationRunRecord[]> {
@@ -2013,6 +2024,16 @@ export class PostgresConversationRepository implements ConversationRepository {
         AND r.input_digest IS DISTINCT FROM $4
     `, [binding.ownerAccountId, binding.creatorId, binding.agentId, TASK_START_DIGEST]);
     return Number(result.rows[0]?.count ?? 0);
+  }
+
+  async restartInterruptedRuns(since: Date): Promise<ConversationRunRecord[]> {
+    await this.initialize();
+    const result = await this.pool.query<RunRow>(`
+      SELECT r.* FROM hatch_conversation_runs r
+      WHERE r.status = 'interrupted' AND r.failure->>'code' = 'run_interrupted' AND r.completed_at >= $1
+        AND NOT EXISTS (SELECT 1 FROM hatch_conversation_runs n WHERE n.conversation_id = r.conversation_id AND (n.created_at, n.id) > (r.created_at, r.id))
+    `, [since]);
+    return result.rows.map(runFromRow);
   }
 
   async listRuns(conversationId: string): Promise<ConversationRunRecord[]> {

@@ -1740,9 +1740,9 @@ function waitForMessage(
   });
 }
 
-async function waitUntil(predicate: () => boolean): Promise<void> {
+async function waitUntil(predicate: () => boolean | Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 2_000;
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for Runtime condition");
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
@@ -1752,3 +1752,48 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
+
+test("turn.cancel while a steer is still being admitted cancels the live Run, and two steers do not hide each other", async () => {
+  const agentRuntime: AgentRuntime = {
+    async *run(input, context) {
+      await new Promise<void>((resolve) => context.abortSignal!.addEventListener("abort", () => resolve(), { once: true }));
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-cancel-steer-")));
+  const repository = await seedLocalConversations(store, ["cancel-steer-conversation"]);
+  // A steer is held inside admission, as one waiting for an upload or an authorization is.
+  const held = new Map<string, () => void>();
+  const entered: string[] = [];
+  const slow = new Proxy(repository, {
+    get: (target, property, receiver) => property === "hasAcceptedMessage"
+      ? async (conversationId: string, key: string) => {
+        if (key.startsWith("steer")) { entered.push(key); await new Promise<void>((resolve) => held.set(key, resolve)); }
+        return target.hasAcceptedMessage(conversationId, key);
+      }
+      : Reflect.get(target, property, receiver)
+  });
+  const runtime = createRuntimeServer({ insecureLocalMode: true, createRuntime: () => agentRuntime, conversationStore: store, conversationRepository: slow, maxActiveRunsGlobal: 4 });
+  const port = await listen(runtime);
+  const socket = await openSocket(port);
+  try {
+    const ready = waitForMessage(socket, (message) => message.type === "session.ready");
+    socket.send(JSON.stringify(hello("cancel-steer-token", "cancel-steer-conversation")));
+    await ready;
+    socket.send(JSON.stringify({ ...clientMessage("cancel-steer-run", "cancel-steer-conversation"), client_message_id: "first" }));
+    await waitUntil(async () => (await repository.getActiveRun("cancel-steer-conversation"))?.id === "cancel-steer-run");
+    for (const key of ["steer-a", "steer-b"]) socket.send(JSON.stringify({ ...clientMessage("cancel-steer-run", "cancel-steer-conversation"), client_message_id: key, reject_by_message: true }));
+    await waitUntil(() => entered.length === 2);
+
+    socket.send(JSON.stringify({ type: "turn.cancel", run_id: "cancel-steer-run" }));
+    await waitUntil(async () => (await repository.getRun("cancel-steer-conversation", "cancel-steer-run"))?.status === "cancelled");
+    for (const release of held.values()) release();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    const runs = await repository.listRuns("cancel-steer-conversation");
+    assert.deepEqual(runs.map((run) => run.status), ["cancelled"], "the Run is cancelled, and a refused steer starts nothing");
+  } finally {
+    for (const release of held.values()) release();
+    socket.close();
+    await runtime.close();
+  }
+});

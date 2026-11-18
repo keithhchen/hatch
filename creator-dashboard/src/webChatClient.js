@@ -1,4 +1,4 @@
-import { AttachmentSource, ConversationTransport, RuntimeConnection, ToolExecutor } from "@hatch/chat";
+import { AttachmentSource, ConversationTransport, RuntimeConnection, SessionPendingStore, ToolExecutor } from "@hatch/chat";
 
 const API = "/v1/web-chat/conversations";
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
@@ -27,6 +27,18 @@ export const browserDictation = request => async recording => {
   const { text } = await request("/v1/transcriptions", { method: "POST", body: JSON.stringify({ base64: base64Of(new Uint8Array(await recording.arrayBuffer())) }) });
   return text;
 };
+
+/**
+ * How a Product Chat page keeps its conversation: an outage of any length is waited out, a message the server has not
+ * acknowledged survives a reload (the tab's session storage) and goes again under its key, a session the bridge's heartbeat
+ * stopped reaching is replaced, and a send nobody answered goes back to the composer.
+ */
+export const webChatControllerOptions = (productId, storage = () => globalThis.sessionStorage) => ({
+  reconnectAttempts: Number.POSITIVE_INFINITY,
+  pendingStore: new SessionPendingStore(storage, `hatch.web.chat.pending.${productId}`),
+  stallMs: 35_000,
+  ackTimeoutMs: 20_000
+});
 
 export class WebChatClientError extends Error {
   constructor(code) {
@@ -61,6 +73,8 @@ export class WebConversationTransport extends ConversationTransport {
   /** The server steers a Run a message arrives during; a send over the socket is answered by `message.accepted` or `message.rejected`. */
   get steerable() { return true; }
   get requestsOutliveStream() { return false; }
+  /** Other tabs and devices write to the conversation: their Runs arrive on this session too. */
+  get adoptsForeignRuns() { return true; }
 
   retryRun(conversationId, key) {
     return this.request(this.conversationUrl(conversationId, "/retry"), { method: "POST", body: JSON.stringify({ retry_id: key, client: "web" }) });

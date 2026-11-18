@@ -616,6 +616,14 @@ export class PostgresStore extends RuntimeStore {
     return this.projectConversationToolDetail(conversationId, runId, toolCallId, result.rows.map((row) => eventFromPayload(row.payload)));
   }
 
+  async readRunActivity(conversationId: string, runId: string) {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<PayloadRow>(`${SELECT_PAYLOAD_SQL}WHERE conversation_id = $1 AND run_id = $2
+      AND event_type IN ('tool.call', 'skill.activated', 'skill.invoked', 'skill.run') ORDER BY id ASC`, [conversationId, runId]);
+    return this.projectRunActivity(conversationId, runId, result.rows.map((row) => eventFromPayload(row.payload)));
+  }
+
   async readConversationAssetReference(conversationId: string, assetId: string): Promise<Extract<PersistedContextAttachment, { kind: "asset" }> | undefined> {
     await this.waitForConversationAppends(conversationId);
     await this.ensureSchema();

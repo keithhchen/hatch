@@ -16,10 +16,11 @@ import type { ProductAnalytics } from "../analytics/port.js";
 import { safely } from "../analytics/safe.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
+import { RestartRetrier, restartRetryKey, retryPending } from "../chat/restartRetry.js";
 import type { Retried } from "../chat/chatService.js";
 import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway.js";
 import type { ScopeResolver, TurnRunner } from "../chat/turnExecutor.js";
-import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
+import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type ReplySteps, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
 import { ChatConversationReadModel, type ConversationReadModel } from "../chat/conversationReadModel.js";
 import { PassThroughOutputGuard, type OutputGuard } from "../outputGuard.js";
 import { ServerToolExecutor } from "../serverTools.js";
@@ -120,13 +121,23 @@ export class AssistantChat implements AssistantHost {
   /** The Assistant's events for Studio observers: Chat's own journal in Studio's words, with the live steps beside it. */
   readonly feed: JournalFeed;
   private readonly systemPrompt = memoizeSuccess(() => this.deps.prompt());
+  /** A restart is not the Expert's problem: the reply it interrupted is started again, like in a Product's chat. */
+  private readonly retrier: RestartRetrier;
 
   constructor(private readonly deps: AssistantChatDeps) {
+    this.retrier = new RestartRetrier({
+      repository: deps.repository,
+      start: async run => {
+        const accountId = accountOfConversation(run.conversationId);
+        if (accountId) await this.retry(accountId, { id: restartRetryKey(run.id), client: { client: "web" } });
+      }
+    });
     this.readModel = new ChatConversationReadModel({ history: deps.store, repository: deps.repository });
     const scopes: ScopeResolver<AssistantScope> = { resolve: async conversation => scopeOfConversation(conversation) };
     this.runtime = new ChatRuntime<AssistantScope>({
       repository: deps.repository, store: deps.store, scopes, runner: this.runner(),
       admission: { reserve: () => () => undefined },
+      afterInterrupted: run => { void this.retrier.afterInterrupted(run); },
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
       compactionStrategy: deps.compactionStrategy ?? (async () => chatCompactionStrategy(await deps.models.resolve("assistant"), { budget: ASSISTANT_CONTEXT_BUDGET })),
@@ -141,12 +152,16 @@ export class AssistantChat implements AssistantHost {
     });
   }
 
-  start(): Promise<void> { return this.runtime.start(); }
+  async start(): Promise<void> {
+    await this.runtime.start();
+    this.retrier.start();
+  }
 
   drain(): Promise<void> { return this.runtime.drain(); }
 
   /** Hands the Assistant's Runs to another instance. The store and repository belong to whoever made them. */
   async close(): Promise<void> {
+    this.retrier.stop();
     await this.runtime.stop();
   }
 
@@ -276,6 +291,8 @@ export class AssistantChat implements AssistantHost {
     const runs = await this.deps.repository.listRuns(conversation.id);
     const last = runs.at(-1);
     if (last && ACTIVE.has(last.status)) return { state: "running", runId: last.id, ...(last.status === "compacting" ? { compacting: true as const } : {}) };
+    // A Run a restart interrupted is answered again by itself: until that starts, it is still being worked on.
+    if (last && retryPending(runs, last)) return { state: "running", runId: last.id, retrying: true };
     // Between Runs a summary can still be under way: a refreshed page learns that from here, not from events it missed.
     const compacting = await this.deps.repository.runningCompaction(conversation.id) ? { compacting: true as const } : {};
     // A Run that failed or was interrupted can be answered again, so the page is told which one.
@@ -370,6 +387,14 @@ export class AssistantChat implements AssistantHost {
     const conversation = await this.conversation(accountId);
     const live = this.runtime.hub.catchUp(conversation.id)?.delta as { content?: string } | undefined;
     return live?.content ?? (await this.deps.repository.getActiveRun(conversation.id))?.partialOutput ?? "";
+  }
+
+  /** The steps the running turn has taken so far (never a tool's arguments or result), as a reply keeps them; nothing when no Run is active. */
+  async activity(accountId: string): Promise<ReplySteps | undefined> {
+    const run = await this.activeRun(accountId);
+    if (!run) return undefined;
+    const { tool_calls = [] } = await this.deps.store.readRunActivity(run.conversationId, run.id);
+    return { tool_calls: tool_calls.map(({ tool_call_id, name, status, activity_message }) => ({ tool_call_id, name, status, activity_message })) };
   }
 
   accountOf(conversationId: string): string | undefined { return accountOfConversation(conversationId); }

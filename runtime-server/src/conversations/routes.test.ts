@@ -10,7 +10,7 @@ import { MessageAlreadyAccepted } from "../factoryAgents/runtime.js";
 import type { AssistantHost } from "./assistantConversation.js";
 import type { AssetScope } from "../assets/domain.js";
 import type { AssetDesk } from "./assets.js";
-import { ConversationError, page, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
+import { ConversationError, page, type ConversationStatus, type ReplySteps, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
 import { MemoryEventLog } from "./eventLog.js";
 import { EventLogJournal } from "./journal.js";
 import { ConversationRoutes } from "./routes.js";
@@ -100,6 +100,8 @@ class FakeAssistant implements AssistantHost {
   assets = () => this.desk;
   stop = async () => { this.stopped++; };
   partial = async () => "";
+  steps: ReplySteps | undefined;
+  activity = async () => this.steps;
   retried: string[] = [];
   retry = async (_account: string, input: { id: string }) => { this.retried.push(input.id); return { run: { id: "arun-2" }, outcome: "started" as const }; };
 }
@@ -484,6 +486,17 @@ test("view: the snapshot of the newest page with where earlier ones begin, the t
     assert.deepEqual(view.tasks, [{ id: "task-1", status: "needs_you", needs: "review" }]);
     assert.deepEqual(view.channels, [{ kind: "telegram", available: true, linked: false }]);
     assert.equal((await h.call("/v1/creator/assistant/conversation/view", { token: null })).status, 401);
+  } finally { await h.close(); }
+});
+
+test("view: a running turn carries the steps it has taken, so a reloaded Studio page shows them; an idle one carries none", async () => {
+  const h = await harness();
+  try {
+    const read = async () => (await h.call("/v1/creator/assistant/conversation/view")).json() as Promise<Record<string, any>>;
+    h.assistant.steps = { tool_calls: [{ tool_call_id: "t1", name: "list_tasks", status: "requested" }] };
+    assert.equal((await read()).activity, undefined, "no Run, no steps");
+    h.assistant.running = true;
+    assert.deepEqual((await read()).activity, h.assistant.steps);
   } finally { await h.close(); }
 });
 

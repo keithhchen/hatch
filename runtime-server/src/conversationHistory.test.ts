@@ -117,3 +117,21 @@ test("real PostgreSQL history pages without replay caps or full-history payload 
   }
 });
 
+test("a Run in progress tells its steps so far, so a page that joins mid-Run shows them", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-activity-"));
+  try {
+    const store = new RuntimeStore(directory);
+    const timestamp = "2026-11-18T00:00:00.000Z";
+    const call = (run_id: string, tool_call_id: string, status: "requested" | "completed") =>
+      store.append({ type: "tool.call", conversation_id: "c", run_id, tool_call_id, name: "box.bash", arguments: {}, status, locality: "server", approval: "none", timestamp } as never);
+    await call("run_a", "t1", "requested");
+    await call("run_a", "t1", "completed");
+    await call("run_a", "t2", "requested");
+    await call("run_b", "other", "completed");
+    const activity = await store.readRunActivity("c", "run_a");
+    assert.deepEqual(activity.tool_calls?.map((tool) => [tool.tool_call_id, tool.status]), [["t1", "completed"], ["t2", "requested"]]);
+    assert.deepEqual((await store.readRunActivity("c", "run_none")).tool_calls ?? [], []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -64,11 +64,13 @@ export class ConversationController {
    * @param {import("../ports/index.js").DraftStore} [options.drafts]
    * @param {import("../ports/index.js").PendingStore} [options.pendingStore] sent messages the server has not acknowledged
    * @param {string} [options.draftScope]
+   * @param {number} [options.ackTimeoutMs] how long a message sent over a socket waits for the server's answer before it goes back to the composer
+   * @param {number} [options.stallMs] a session that says nothing for this long is dead without having closed (0: the host sends no heartbeat, so silence means nothing)
    * @param {(error: object) => string} [options.describeError] localized text sent back with tool errors
    * @param {(options: {onReveal: Function}) => object} [options.textReveal] text pacing policy factory
    */
-  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, pollMs = 2000, freeChat = OPEN_FREE_CHAT, pendingStore = new MemoryPendingStore() }) {
-    Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, pollMs, freeChat, pendingStore });
+  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, ackTimeoutMs = 20_000, stallMs = 0, pollMs = 2000, freeChat = OPEN_FREE_CHAT, pendingStore = new MemoryPendingStore() }) {
+    Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, ackTimeoutMs, stallMs, pollMs, freeChat, pendingStore });
     const draft = drafts.read(draftScope);
     this.state = { ...INITIAL_CHAT_STATE, draft: draft.text, images: draft.files };
     this.listeners = new Set();
@@ -91,6 +93,10 @@ export class ConversationController {
     this.terminalRun = null;
     /** Runs whose end the stream told: a snapshot read before that cannot bring them back. */
     this.endedRuns = new Set();
+    /** Runs this page has already read the server for, having heard of them while it held none (another tab's). */
+    this.probedRuns = new Set();
+    this.lastFrameAt = 0;
+    this.stallTimer = null;
     /** Local tool executions by tool_call_id: one call is executed once, however often the Runtime asks. */
     this.toolRuns = new Map();
     this.connection = null;
@@ -204,7 +210,9 @@ export class ConversationController {
     const generation = ++this.generation;
     this.attempts = 0;
     this.run = null;
+    for (const submission of this.pendings.values()) clearTimeout(submission.ackTimer);
     this.pendings.clear();
+    this.probedRuns.clear();
     this.runText.reset();
     this.seen = { runId: null, seq: null };
     this.hasBeenReady = false;
@@ -227,12 +235,20 @@ export class ConversationController {
   async refresh(id) {
     const generation = this.generation;
     const epoch = this.compactionEpoch;
-    const result = await this.sync.refresh(id, {
+    const context = {
       current: () => this.state.messages,
       // A Run id the page minted for a message the server has not acknowledged is not the server's to know yet.
       activeRunId: () => this.run && !this.run.provisional && ![...this.pendings.values()].some(entry => entry.runId === this.run.id) ? this.run.id : null,
       isCurrent: () => generation === this.generation && this.state.conversationId === id
-    });
+    };
+    let result;
+    try { result = await this.sync.refresh(id, context); }
+    catch (cause) {
+      if (!(cause instanceof ConversationSnapshotError)) throw cause;
+      // A journal this page cannot follow (its cursor is stale, or the server moved on) is read again from the latest page, once; a second refusal is the error.
+      this.sync.reset();
+      result = await this.sync.refresh(id, context);
+    }
     if (!result) return { stale: true };
     const { snapshot } = result;
     const firstSnapshot = this.state.snapshotConversationId !== id;
@@ -247,10 +263,11 @@ export class ConversationController {
       historyCursor: state.historyCursor ?? snapshot.before_cursor ?? null
     }));
     const listed = activeSnapshotRun(snapshot);
-    const running = listed && !this.endedRuns.has(listed.id) ? listed : null;
+    const running = listed && (!this.endedRuns.has(listed.id) || listed.retrying) ? listed : null;
     this.endRunLostWhileAway(snapshot, running);
     const held = this.run?.id;
-    if (running && held !== running.id) this.adoptRun(running.id);
+    // A reply being started again has no Run of its own to hold yet: the retry's Run is adopted when the server names it.
+    if (running && !running.retrying && held !== running.id) this.adoptRun(running.id);
     // The page's rows were read before the adoption: they are keyed by the Run it held, and move with it.
     let projected = running && held && held !== running.id ? rekeyRun(result.messages, held, running.id) : result.messages;
     // A message the live row showed is handed over only once the page holds its saved copy: a read that started before it was saved leaves the words where they are.
@@ -260,14 +277,16 @@ export class ConversationController {
       const replaced = running.live ? this.applyLive(running.live) : false;
       const tail = !running.live && typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
       if (tail) this.timeline.appendText(tail);
+      const steps = !running.live && running.activity ? this.timeline.restoreActivity({ run_id: running.id, ...running.activity }) : null;
       if (!projected.some(message => message.transient && message.run_id === running.id)) {
         projected = [...projected, { ...this.liveRow(running.id, projected), timeline: this.timeline.snapshot() }];
-      } else if (tail || replaced) {
+      } else if (tail || replaced || steps) {
         projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
       }
     }
     if (handedOver && running) projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
     this.updateMessages(projected);
+    this.followRetry(id, running);
     const awaited = this.awaitedRunId();
     const terminal = this.terminalRun;
     const settled = terminal && projected.some(message => message.run_id === terminal.id && message.role === "assistant" && !message.transient);
@@ -310,6 +329,23 @@ export class ConversationController {
     const known = this.seen.seq !== null && event.seq <= this.seen.seq;
     if (!known) this.seen.seq = event.seq;
     return known;
+  }
+
+  /**
+   * While the server is starting an interrupted reply again, the page shows it as working and reads again until the retry's Run
+   * appears (it is then adopted) or the server stops reporting it (the partial reply stays, quietly).
+   */
+  followRetry(id, running) {
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    const retrying = running?.retrying ? running.id : null;
+    if (this.retryingRun && this.retryingRun !== retrying) {
+      const gone = this.retryingRun;
+      this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === gone)));
+      if (!running) this.resetTimeline();
+    }
+    this.retryingRun = retrying;
+    if (retrying) this.retryTimer = setTimeout(() => { if (this.state.conversationId === id) this.requestRefresh(id); }, this.pollMs);
   }
 
   /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. A read that fails is tried once more before it is shown. */
@@ -368,13 +404,14 @@ export class ConversationController {
     this.run = null;
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
-    if (record.status === "failed" || record.status === "interrupted") this.failReply(run.id, record.failure);
+    // A Run a restart interrupted is answered again by the server: it is no failure to report.
+    if (record.status === "failed") this.failReply(run.id, record.failure);
   }
 
   /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
   offerAnswerAgain(snapshot, running) {
     const last = snapshot.runs.at(-1);
-    if (running || this.state.failedRun || !last || !["failed", "interrupted"].includes(last.status)) return;
+    if (running || this.state.failedRun || !last || last.status !== "failed") return;
     this.failReply(idOfRun(last), last.failure);
   }
 
@@ -412,6 +449,7 @@ export class ConversationController {
   reconcilePending(messages) {
     for (const [id, submission] of this.pendings) {
       if (!messages.some(message => message.id === id && !isPlaceholderMessage(message))) continue;
+      clearTimeout(submission.ackTimer);
       this.pendings.delete(id);
       this.pendingStore.settle(id);
       if (submission.awaitingUser) this.writeDraft({ draft: "", images: [] });
@@ -471,6 +509,7 @@ export class ConversationController {
   }
 
   dispose() {
+    clearTimeout(this.retryTimer);
     this.generation += 1;
     this.closeConnection();
     clearInterval(this.pollTimer);
@@ -493,7 +532,61 @@ export class ConversationController {
     });
     this.connection = connection;
     this.link = link;
+    this.watch(connection, link, conversationId);
     this.setState({ connection: "connecting" });
+  }
+
+  /** The network or the tab came back: a session that is down is retried now, not after its backoff; one that went quiet is judged now. */
+  nudge() {
+    const id = this.state.conversationId;
+    if (!id || this.snapshotPending) return;
+    if (this.state.connection !== "open") { this.attempts = 0; this.reconnect(); }
+    else if (this.stallMs && Date.now() - this.lastFrameAt > this.stallMs / 2) this.stalled(id);
+  }
+
+  /** Any frame is a sign of life, and the host's bridge sends one on a beat: a session silent for `stallMs` is dead without having closed. */
+  watch(connection, link, conversationId) {
+    clearInterval(this.stallTimer);
+    this.stallTimer = null;
+    this.lastFrameAt = Date.now();
+    if (!this.stallMs) return;
+    this.stallTimer = setInterval(() => {
+      if (!link.live || this.connection !== connection) return;
+      if (Date.now() - this.lastFrameAt >= this.stallMs) this.stalled(conversationId);
+    }, Math.max(10, Math.round(this.stallMs / 4)));
+    this.stallTimer.unref?.();
+  }
+
+  /** Read what was missed, then open a new session; its ready reads again. */
+  stalled(conversationId) {
+    this.requestRefresh(conversationId);
+    this.releaseDispatched(conversationId);
+    this.attempts = 0;
+    this.reconnect();
+  }
+
+  /** A message sent over a session that is gone goes again on the next one, under the same key. */
+  releaseDispatched(conversationId) {
+    if (this.transport.requestsOutliveStream) return;
+    for (const submission of this.pendings.values()) {
+      if (submission.conversationId !== conversationId) continue;
+      clearTimeout(submission.ackTimer);
+      submission.dispatched = false;
+    }
+  }
+
+  /** The frame went out on a live session: the server owes its answer, `message.accepted` or `message.rejected`, within `ackTimeoutMs`. */
+  markDispatched(submission) {
+    submission.dispatched = true;
+    if (this.transport.requestsOutliveStream || !this.ackTimeoutMs) return;
+    clearTimeout(submission.ackTimer);
+    submission.ackTimer = setTimeout(() => {
+      if (this.pendings.get(submission.clientMessageId) !== submission || submission.conversationId !== this.state.conversationId) return;
+      // The session said nothing to it: the words go back to the composer (same key on a resend), and the session is judged dead.
+      this.refuse(submission, new ChatError("sendNotConfirmed"));
+      this.stalled(submission.conversationId);
+    }, this.ackTimeoutMs);
+    submission.ackTimer.unref?.();
   }
 
   reconnect() {
@@ -503,6 +596,8 @@ export class ConversationController {
   }
 
   closeConnection() {
+    clearInterval(this.stallTimer);
+    this.stallTimer = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     if (this.link) this.link.live = false;
@@ -517,7 +612,7 @@ export class ConversationController {
     const mine = [...this.pendings.values()].filter(submission => submission.conversationId === conversationId);
     if (!this.transport.steerable) for (const submission of mine) this.restoreSubmission(submission, true);
     // A message sent over the socket may have died with it: it goes again when the session is back, under the same key.
-    else if (!this.transport.requestsOutliveStream) for (const submission of mine) submission.dispatched = false;
+    else this.releaseDispatched(conversationId);
     if (this.connection === connection) this.connection = null;
     this.downSince ??= Date.now();
     if (this.attempts >= this.reconnectAttempts) {
@@ -544,7 +639,7 @@ export class ConversationController {
     for (const submission of [...this.pendings.values()]) {
       if (submission.conversationId !== conversationId || submission.awaitingUser || (this.transport.steerable && submission.dispatched)) continue;
       this.showSubmission(submission);
-      submission.dispatched = true;
+      this.markDispatched(submission);
       void this.dispatch(connection, { runId: submission.runId, clientMessageId: submission.clientMessageId, content: submission.content, attachments: submission.attachments })
         .catch(cause => this.refuse(submission, cause));
     }
@@ -583,9 +678,16 @@ export class ConversationController {
 
   async handleEvent(event, connection, link, conversationId) {
     if (!link.live) return;
-    // The server said which Run a message joined: when that is not the Run this page minted for it (another tab's Run was live), the page follows the server.
-    const rival = event.type === "message.accepted" && this.run && event.run_id !== this.run.id && this.pendings.get(event.client_message_id)?.runId === this.run.id;
-    if ((this.run?.provisional || rival) && event.run_id && event.run_id !== this.run.id && isRunEvent(event)) this.adoptRun(event.run_id);
+    this.lastFrameAt = Date.now();
+    // The page follows the server's Run, but only one it can tell is its own: the ack of a message it sent names the Run that message joined, and a Run not ended yet is newer than the ones that are. A late event of an earlier Run adopts nothing.
+    const held = this.run;
+    if (held && event.run_id && event.run_id !== held.id && isRunEvent(event)) {
+      const mine = event.type === "message.accepted" && (event.client_message_id
+        ? this.pendings.get(event.client_message_id)?.runId === held.id
+        : this.pendings.size === 1 && [...this.pendings.values()][0].runId === held.id);
+      if (mine || (held.provisional && event.type !== "message.accepted" && !this.endedRuns.has(event.run_id))) this.adoptRun(event.run_id);
+    }
+    this.probeForeignRun(event, conversationId);
     if (this.heard(event)) return;
     const boundary = textRevealBoundary(event);
     if (boundary === "flush") this.reveal.flush(event.run_id);
@@ -598,6 +700,14 @@ export class ConversationController {
     if (handler) await handler.call(this, outcome, { event, connection, link, conversationId });
   }
 
+  /** A Run another client started, heard of while this page holds none: one read adopts it, and its stream and spinner follow. */
+  probeForeignRun(event, conversationId) {
+    if (!this.transport.adoptsForeignRuns || this.run || !event.run_id || !isRunEvent(event) || event.type === "turn.completed" || event.type === "turn.failed") return;
+    if (this.endedRuns.has(event.run_id) || this.probedRuns.has(event.run_id) || this.snapshotPending) return;
+    this.probedRuns.add(event.run_id);
+    this.requestRefresh(conversationId);
+  }
+
   outcomes = {
     text(outcome, { event }) {
       const content = this.runText.take(event.run_id, outcome.content, outcome.offset);
@@ -605,6 +715,7 @@ export class ConversationController {
       this.reveal.enqueue({ runId: event.run_id, assistantId: event.run_id, content });
       this.setState({ status: outcome.status });
     },
+    resync(_outcome, { conversationId }) { this.requestRefresh(conversationId); },
     changed(outcome, { conversationId }) {
       // The message this page sent is on the page already; only one it did not send (another tab, a channel) needs a read.
       if (outcome.committed === "user" && outcome.messageId && this.state.messages.some(message => message.id === outcome.messageId)) return;
@@ -680,8 +791,11 @@ export class ConversationController {
     accepted(outcome) {
       this.freeChat.record();
       const receipt = outcome.receipt;
+      // The server named the Run this page minted the id of: it is the server's Run now, and a snapshot may end it.
+      if (this.run?.provisional && receipt.run_id === this.run.id) this.run = { id: this.run.id };
       const submission = this.pendings.get(receipt.client_message_id) ?? (receipt.client_message_id || this.pendings.size !== 1 ? undefined : [...this.pendings.values()][0]);
       if (!submission) return;
+      clearTimeout(submission.ackTimer);
       // The server has it now, and says whether it started a Run or joined the running one (queued until it takes it up).
       this.pendings.delete(submission.clientMessageId);
       this.pendingStore.settle(submission.clientMessageId);
@@ -787,6 +901,7 @@ export class ConversationController {
       this.setState({ activeRun: null });
     }
     submission.dispatched = false;
+    clearTimeout(submission.ackTimer);
     if (!preservePending) {
       this.pendings.delete(submission.clientMessageId);
       this.pendingStore.settle(submission.clientMessageId);
@@ -823,7 +938,7 @@ export class ConversationController {
       this.writeDraft({ draft: "", images: [] });
       // Only a session the server has answered with session.ready takes run messages; a socket that is merely open is still saying hello.
       if (connection?.ready && this.state.connection === "open") {
-        submission.dispatched = true;
+        this.markDispatched(submission);
         await this.dispatch(connection, { runId, clientMessageId, content, attachments });
       } else if (!connection) {
         this.attempts = 0;

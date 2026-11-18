@@ -92,6 +92,8 @@ export interface AssetRepository {
   insertIfAbsent(asset: Asset): Promise<{ asset: Asset; created: boolean }>;
   transition(from: AssetState, next: Asset): Promise<Asset | undefined>;
   get(scope: AssetScope, id: string): Promise<Asset | undefined>;
+  /** The asset with this id in any scope: for a signed link, which proves the id and carries no scope. */
+  byId(id: string): Promise<Asset | undefined>;
   attach(scope: AssetScope, id: string, messageId: string): Promise<Asset>;
   release(scope: AssetScope, id: string, messageId: string): Promise<void>;
   /** Every ready asset uploaded to this scope, oldest upload first, whether or not a message carries it. */

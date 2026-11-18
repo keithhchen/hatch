@@ -555,15 +555,13 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
 
   const visible = await store.readVisibleConversation("ordered-history");
   const assistant = visible.find((message) => message.role === "assistant");
-  assert.equal(assistant?.content, `${beforeTool}${afterTool}`);
+  // Text that follows a step starts a paragraph: the stored reply never runs two segments together.
+  const content = `${beforeTool.slice(0, firstBoundary)}\n\n${beforeTool.slice(firstBoundary)}${afterTool}`;
+  assert.equal(assistant?.content, content);
   assert.deepEqual(assistant?.parts, [
     { type: "text", start: 0, end: firstBoundary },
     { type: "tool_call", tool_call_id: "call_interleave" },
-    {
-      type: "text",
-      start: firstBoundary,
-      end: beforeTool.length + afterTool.length
-    }
+    { type: "text", start: firstBoundary, end: content.length }
   ]);
   socket.close();
 });

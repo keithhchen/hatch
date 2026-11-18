@@ -32,11 +32,20 @@ const toolEvent = (tool, runId) => ({
   detail_ref: tool.detail_ref
 });
 
+/** A step never goes backwards: an answer older than what the page already heard (a read overtaken by the stream) leaves a finished step finished. */
+const STATUS_ORDER = { requested: 0, running: 1, completed: 2, failed: 2, cancelled: 2 };
+const laterStatus = (previous, next) => {
+  if (!next) return previous ?? "requested";
+  return previous && (STATUS_ORDER[previous] ?? 0) > (STATUS_ORDER[next] ?? 0) ? previous : next;
+};
+
 export class ChatTimeline {
   constructor() {
     this.entries = [];
     this.sequence = 0;
     this.activeThinking = new Map();
+    /** The entry each content index last finished: an end heard twice (a replay) updates it, never adds another. */
+    this.finishedThinking = new Map();
     /** Entries below `sealed` belong to a message the Run has ended: later words start an entry of their own. */
     this.sealed = 0;
     /** How many leading entries were handed over to saved messages. */
@@ -49,6 +58,7 @@ export class ChatTimeline {
     this.sealed = 0;
     this.dropped = 0;
     this.activeThinking.clear();
+    this.finishedThinking.clear();
     return this.entries;
   }
 
@@ -67,6 +77,7 @@ export class ChatTimeline {
     if (!count) return this.entries;
     const gone = new Set(this.entries.slice(0, count).map(entry => entry.id));
     for (const [index, id] of this.activeThinking) if (gone.has(id)) this.activeThinking.delete(index);
+    for (const [index, id] of this.finishedThinking) if (gone.has(id)) this.finishedThinking.delete(index);
     this.entries = this.entries.slice(count);
     this.dropped += count;
     this.sealed = Math.max(0, this.sealed - count);
@@ -89,8 +100,11 @@ export class ChatTimeline {
   }
 
   startThinking(contentIndex) {
-    // A start heard twice (a replay) begins the step again; it never stops the stream.
+    // A start heard twice (a replay) begins the step again; the one it replaces stops streaming, so none is left running for good.
+    const open = this.activeThinking.get(contentIndex);
+    if (open) this.patch(open, entry => ({ ...entry, streaming: false }));
     this.activeThinking.delete(contentIndex);
+    this.finishedThinking.delete(contentIndex);
     const entry = { kind: "thinking", id: "thinking-" + contentIndex + "-" + ++this.sequence, contentIndex, title: "thinking", content: "", streaming: true };
     this.entries = [...this.entries, entry];
     this.activeThinking.set(contentIndex, entry.id);
@@ -106,9 +120,13 @@ export class ChatTimeline {
   }
 
   finishThinking(contentIndex, content) {
+    // An end heard twice is the same step finished again.
+    const done = this.finishedThinking.get(contentIndex);
+    if (!this.activeThinking.has(contentIndex) && done && this.entries.some(entry => entry.id === done)) return this.patch(done, entry => ({ ...entry, content }));
     if (!this.activeThinking.has(contentIndex)) this.startThinking(contentIndex);
     const id = this.activeThinking.get(contentIndex);
     this.activeThinking.delete(contentIndex);
+    this.finishedThinking.set(contentIndex, id);
     return this.patch(id, entry => ({ ...entry, content, streaming: false }));
   }
 
@@ -168,7 +186,7 @@ export class ChatTimeline {
         error: event.error ?? previous?.content?.error,
         detailRef: event.detail_ref ?? previous?.content?.detailRef
       },
-      status: event.status ?? previous?.status ?? "requested"
+      status: laterStatus(previous?.status, event.status)
     });
   }
 
@@ -185,7 +203,7 @@ export class ChatTimeline {
   upsertSkillRun(event) {
     const id = skillRunEntryId(event);
     return this.upsert(id, {
-      kind: "skill_run", id, title: event.name, status: event.status,
+      kind: "skill_run", id, title: event.name, status: laterStatus(this.entries.find(entry => entry.id === id)?.status, event.status),
       content: { runId: event.run_id, skillRunId: event.skill_run_id, skillId: event.skill_id, name: event.name, error: event.error }
     });
   }
@@ -203,6 +221,14 @@ export class ChatTimeline {
 
   static streamingAssistantMessage(runId, timestamp = new Date().toISOString()) {
     return { id: `stream-${runId}`, renderKey: `${runId}-assistant`, run_id: runId, role: "assistant", content: "", timestamp, transient: true, timeline: [] };
+  }
+
+  /** What a Run in progress has shown besides its text, for a host whose server tells only its steps: each is placed once, by its id. */
+  restoreActivity({ run_id: runId, tool_calls: tools = [], skill_events: skills = [], skill_runs: runs = [] }) {
+    for (const tool of tools) this.upsertTool(toolEvent(tool, runId));
+    for (const event of skills) this.upsertSkill({ run_id: runId, ...event });
+    for (const run of runs) this.upsertSkillRun({ run_id: runId, ...run });
+    return this.entries;
   }
 
   /** Project a durable assistant message (protocol 0.8 `parts`) into timeline entries. */
