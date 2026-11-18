@@ -31,3 +31,13 @@ test("a dropped connection to the box is the service unavailable, not the comman
   }, { image: "img", workDir: "/home/agent/work" });
   await assert.rejects(provider.create("hatch-y"), BoxUnavailable);
 });
+
+test("boxes get outbound network and only the configured secrets", async () => {
+  const created: unknown[] = [];
+  const runtime = { create: async (options: unknown) => { created.push(options); return sdkBox({ exitCode: 0 }); }, getInfo: async () => null, get: async () => null } as never;
+  const provider = BoxliteProvider.fromEnvironment({ BOXLITE_API_KEY: "k", PAGESPEED_API_KEY: "p", CF_API_TOKEN: "c" }, () => runtime)!;
+  await provider.create("hatch-z");
+  const options = created[0] as { network: unknown; secrets: { name: string; hosts: string[]; headers: object }[] };
+  assert.deepEqual(options.network, { outbound: { mode: "enabled", allowNet: [] } });
+  assert.deepEqual(options.secrets.map(({ name, hosts, headers }) => ({ name, hosts, headers })), [{ name: "pagespeed", hosts: ["www.googleapis.com"], headers: { "X-Goog-Api-Key": "{value}" } }, { name: "cloudflare", hosts: ["api.cloudflare.com"], headers: { Authorization: "Bearer {value}" } }]);
+});
