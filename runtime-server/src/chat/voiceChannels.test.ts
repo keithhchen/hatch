@@ -19,7 +19,7 @@ function receiving({ runtime }: Fixture) {
   const sent: SentMessage[] = [];
   const notices: string[] = [];
   const gateway: ChatGateway = { send: async (...args) => { const result = await runtime.chat.send(...args); sent.push(result); return result; }, upload: (...args) => runtime.chat.upload(...args), restart: (...args) => runtime.chat.restart(...args), progress: runId => runtime.chat.progress(runId) };
-  const target = new ChatFlow(new ProductTarget({ gateway, limiter: { take: async () => 0 } }));
+  const target = new ChatFlow(new ProductTarget({ gateway }));
   const adapter = { maxFileBytes: 20 * 1024 * 1024, download: async () => ogg } as unknown as ChannelAdapter;
   const handle = (event: InboundEvent) => target.handle({ id: event.eventId, connection, principal: alice, address: { connectionId: connection.id, ...event.address }, event, adapter, notify: async text => { notices.push(text); } } as Inbound);
   return { handle, sent, notices };

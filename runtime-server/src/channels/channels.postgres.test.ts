@@ -800,7 +800,7 @@ test("A public contact has a contact principal and never reaches Studio tools", 
   const gateway = new FakeGateway();
   const adapter = new FakeAdapter("telegram", "page-1");
   const env = await stack(pool, { adapters: [adapter], gateway });
-  const product = new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter, contactRate: { capacity: 2, perSecond: 0.001 } }));
+  const product = new ChatFlow(new ProductTarget({ gateway }));
   env.service.register("product", product);
   const connectionId = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', 'page-1', $2, 'product:p1', 'public') RETURNING id", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
   env.service.start();
@@ -808,21 +808,20 @@ test("A public contact has a contact principal and never reaches Studio tools", 
     await env.service.accept(adapter, [message("stranger", "How much?"), message("stranger", "And shipping?"), message("stranger", "Hello?")]);
     await env.settle();
     assert.equal(env.target.handled.length, 0, "the Assistant is never reached");
-    assert.equal(gateway.submitted.length, 2, "the third was limited before a Run");
+    assert.equal(gateway.submitted.length, 3, "a public contact is not rate limited");
     const [first] = gateway.submitted;
     assert.equal(first!.principal.kind, "contact");
     assert.equal(first!.principal.kind === "contact" && first!.principal.connectionId, connectionId);
     assert.deepEqual(first!.client, { client: "im" });
     assert.deepEqual(first!.conversation, { kind: "thread", connectionId, threadId: "stranger" });
     assert.deepEqual(first!.parts, [{ type: "text", text: "How much?" }]);
-    assert.match(adapter.texts.at(-1)!, /Too many messages/);
   } finally { await env.service.close(); }
 }));
 
 test("A Run's final reply is sent once, however it is announced, and a failed Run says so", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   const owner = randomUUID();
   await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'org')", [owner, JSON.stringify({ kind: "product", productId: "p1" })]);
   const connectionId = (await pool.query("SELECT id FROM hatch_connections")).rows[0].id;
@@ -863,7 +862,7 @@ async function productConnection(pool: Pool, members: Array<[string, string]>) {
 test("In a group, a reply goes to the message its Run answered: the other member's Run ending later is still answered", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   await productConnection(pool, [["b", "group"], ["a", "group"]]);
   const [fromB, fromA] = [message("b", "from b", { address: address("b", "group") }), message("a", "from a", { address: address("a", "group") })];
   await env.service.accept(env.adapter, [fromB]);
@@ -881,7 +880,7 @@ test("In a group, a reply goes to the message its Run answered: the other member
 test("A Run that two threads steered replies once in each thread, and nothing is marked replied that was not", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   await productConnection(pool, [["one", "one"], ["two", "two"]]);
   await env.service.accept(env.adapter, [message("one", "first")]);
   await env.settle();
@@ -935,7 +934,7 @@ test("An event that is finally given up on is told to its sender in plain words,
 test("Compaction: one notice per compaction, only where someone is waiting, and it is not part of the conversation", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   const connectionId = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'org') RETURNING id", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
   await pool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, 'telegram', '', 'member', 'member')", [connectionId]);
   env.service.start();
@@ -970,7 +969,7 @@ async function orgMember(pool: Pool, owner = randomUUID()) {
 test("A file a contact sends is uploaded into the conversation's scope and sent as a part of the same message", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   const { connectionId } = await orgMember(pool);
   env.service.start();
   try {
@@ -984,7 +983,7 @@ test("A file a contact sends is uploaded into the conversation's scope and sent 
 test("A refusal from Chat goes back to the sender; an unreachable Chat returns the event to the queue, and the retry is the same message", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   await orgMember(pool);
   env.service.start();
   try {
@@ -1012,7 +1011,7 @@ test("Eligibility is checked before Chat: a Product that is not live and the own
   const env = await stack(pool, { gateway });
   const owner = randomUUID();
   const live = new Map<string, { creator_id: string }>();
-  env.service.register("product", new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })), [liveOwnProduct({ getLive: async productId => live.get(productId) })]));
+  env.service.register("product", new GuardedTarget(new ChatFlow(new ProductTarget({ gateway })), [liveOwnProduct({ getLive: async productId => live.get(productId) })]));
   await orgMember(pool, owner);
   env.service.start();
   try {
@@ -1033,7 +1032,7 @@ test("Eligibility is checked before Chat: a Product that is not live and the own
 test("/new starts a fresh conversation without a Run; a Run still going answers in its own conversation and is delivered", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   await orgMember(pool);
   env.service.start();
   try {
@@ -1055,7 +1054,7 @@ test("/new starts a fresh conversation without a Run; a Run still going answers 
 test("A Registry restart loses neither a reply nor a compaction notice: both are read from Chat's durable state", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const first = await stack(pool, { gateway });
-  first.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: first.limiter })));
+  first.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   await orgMember(pool);
   first.service.start();
   await first.service.accept(first.adapter, [message("member", "long question")]);
@@ -1064,7 +1063,7 @@ test("A Registry restart loses neither a reply nor a compaction notice: both are
   // The old process is gone while the Run goes on in Chat.
   gateway.compact("run-1", "run-1:7");
   const second = await stack(pool, { gateway });
-  second.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: second.limiter })));
+  second.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   second.service.start();
   try {
     await second.settle();
@@ -1203,7 +1202,7 @@ async function productBots(pool: Pool, tokens: Record<string, string>) {
     return sealed ? new TelegramChannel(seal.open(sealed), scope, api.fetchImpl) : undefined;
   };
   const env = await stack(pool, { adapters: [], gateway, own, audienceOf: (_kind, target) => target.kind === "product" ? "public" : "self" });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway })));
   const apps = new OwnApps({ connections: stores.connections, seal, forms: { telegram: telegramForm }, origin: "https://site.test", ownsProduct: async (_account, product) => product !== "foreign" });
   const adapterOf = async (scope: string) => (await env.service.hub.get("telegram", scope))!;
   return { ...env, api, apps, gateway, adapterOf, stores, seal };
@@ -1557,7 +1556,7 @@ test("A contact past the free messages is sent a sign-in link; claiming it links
   const env = await stack(pool, { gateway });
   const clock = { at: new Date() };
   const links = new ImLinks({ secret: "registry-secret", origin: "https://hatch.test", connections: env.connections, now: () => clock.at });
-  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter, imLinks: links })));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, imLinks: links })));
   const id = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'public') RETURNING id", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
   const contact = await env.connections.meet((await env.connections.get(id))!, address("u9"));
   env.service.start();

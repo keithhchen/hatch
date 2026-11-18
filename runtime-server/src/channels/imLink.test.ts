@@ -63,7 +63,7 @@ const refusing = (error: Error): ChatGateway => ({ send: async () => { throw err
 
 test("login_required becomes a trilingual sign-in reply with a link, not retryable", async () => {
   const { links: signer } = links();
-  const target = new ProductTarget({ gateway: refusing(new ChatError("login_required", "Sign in.", 403)), limiter: { take: async () => 0 }, imLinks: signer });
+  const target = new ProductTarget({ gateway: refusing(new ChatError("login_required", "Sign in.", 403)), imLinks: signer });
   const error = await target.send(inbound("telegram"), { key: "k", parts: [] }).catch(cause => cause) as ChatError;
   assert.ok(error instanceof ChatError);
   assert.deepEqual([error.code, error.status, error.retryable], ["login_required", 403, false]);
@@ -74,12 +74,12 @@ test("login_required becomes a trilingual sign-in reply with a link, not retryab
 test("A platform without people, or without a signer, gets the sign-in text with no link; other errors pass through", async () => {
   const { links: signer } = links();
   for (const [channel, imLinks] of [["line", signer], ["telegram", undefined]] as const) {
-    const target = new ProductTarget({ gateway: refusing(new ChatError("login_required", "x", 403)), limiter: { take: async () => 0 }, ...(imLinks ? { imLinks } : {}) });
+    const target = new ProductTarget({ gateway: refusing(new ChatError("login_required", "x", 403)), ...(imLinks ? { imLinks } : {}) });
     const error = await target.send(inbound(channel), { key: "k", parts: [] }).catch(cause => cause) as ChatError;
     assert.equal(error.code, "login_required");
     assert.doesNotMatch(error.message, /https?:/);
     assert.match(error.message, /Hatch/);
   }
-  const other = new ProductTarget({ gateway: refusing(new ChatError("contact_limit_reached", "limit", 429)), limiter: { take: async () => 0 }, imLinks: signer });
+  const other = new ProductTarget({ gateway: refusing(new ChatError("contact_limit_reached", "limit", 429)), imLinks: signer });
   await assert.rejects(other.send(inbound("telegram"), { key: "k", parts: [] }), { code: "contact_limit_reached" });
 });

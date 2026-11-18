@@ -3,31 +3,26 @@ import type { Dispatcher } from "./dispatch.js";
 import type { Inbox, InboxItem } from "./inbox.js";
 import type { ChatTarget } from "./chatTarget.js";
 import type { ChatGateway, Inbound, ReplyPolicy } from "./ports.js";
-import type { Rate, RateLimiter } from "./rateLimiter.js";
 import { ChatError } from "../chat/principal.js";
 import type { ImLinks } from "./imLink.js";
 import { log } from "../observability/log.js";
 
-/** A contact may write this much: a burst of 10, then one message every 20 seconds. */
-const CONTACT_RATE: Rate = { capacity: 10, perSecond: 1 / 20 };
 export const FAILED = "出了点问题，请再发一次。\nSomething went wrong, please send that again.";
-const BUSY = "消息有点多，请稍后再发。\nToo many messages, please try again in a moment.";
 
 const SIGN_IN_ON_WEB = "免费消息已用完，请登录 Hatch 网站后继续。\nYou have used your free messages. Please sign in on the Hatch website to continue.\n無料メッセージを使い切りました。続けるには Hatch のサイトにログインしてください。";
 const signInWithLink = (link: string) => `免费消息已用完，请登录后继续（链接 30 分钟内有效）：\n${link}\nYou have used your free messages. Sign in to continue (link valid for 30 minutes):\n${link}\n無料メッセージを使い切りました。ログインして続けてください（30分間有効）：\n${link}`;
 
 /** Chat answers the Connection: an Expert Product talking to its owner, an organization, or the public. */
 export class ProductTarget implements ChatTarget {
-  constructor(private deps: { gateway: ChatGateway; limiter: RateLimiter; contactRate?: Rate; /** Where a contact past the free messages signs in. Without it the reply has no link. */ imLinks?: ImLinks }) {}
+  constructor(private deps: { gateway: ChatGateway; /** Where a contact past the free messages signs in. Without it the reply has no link. */ imLinks?: ImLinks }) {}
 
   async linked(): Promise<string> { return "连上了。可以开始聊了。\nConnected. You can start talking."; }
 
   wording = { tooLarge: () => "这个文件太大了。\nThat file is too large.", unreadable: "这种消息我还读不了，可以发文字、图片或文档。\nI can't read that kind of message yet.", capReached: "这个助手本月的使用额度已用完。\nThis assistant has reached its monthly limit.\n今月の利用上限に達しました。" };
 
-  async admit({ connection, principal }: Inbound): Promise<string | undefined> {
+  async admit({ connection }: Inbound): Promise<string | undefined> {
     if (connection.target.kind !== "product") throw new Error("Not a Product Connection");
-    // Limits are checked before a Run is started, not after.
-    return principal.kind === "contact" && connection.audience === "public" && await this.deps.limiter.take(`contact:${connection.id}:${principal.contactId}`, this.deps.contactRate ?? CONTACT_RATE) ? BUSY : undefined;
+    return undefined;
   }
 
   async restart({ connection, principal, address }: Inbound, key: string): Promise<string> {

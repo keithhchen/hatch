@@ -101,7 +101,7 @@ test("channels: one short reply instead of a Run, in the target's own words", as
   const connection = { id: "c", ownerAccountId: "o", channel: "telegram", scope: "", client: "im", target: { kind: "product", productId: "p" }, audience: "self", taskSpecific: false, state: "active" } as never;
   const notices: string[] = [];
   const inbound = (text: string) => ({ id: "i", connection, adapter: {} as never, principal: { kind: "account", accountId: "o" }, address: { connectionId: "c", chat: "1" } as never, notify: async (reply: string) => { notices.push(reply); }, event: { id: text, address: { chat: "1" }, text, files: [] } as never });
-  const product = new ChatFlow(new ProductTarget({ gateway: refusing as never, limiter: { take: async () => 0 } }));
+  const product = new ChatFlow(new ProductTarget({ gateway: refusing as never }));
   await product.handle(inbound("hi") as never);
   assert.equal(notices.length, 1);
   assert.match(notices[0]!, /monthly limit/);

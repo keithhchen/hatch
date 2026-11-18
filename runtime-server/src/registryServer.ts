@@ -415,7 +415,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const productChannelsOff = environment.HATCH_PRODUCT_CHANNELS?.trim() === "off";
     const productChannelsUnavailable = gateway || productChannelsOff ? undefined : "Product channels need HATCH_RUNTIME_CHAT_URL and HATCH_RUNTIME_CHAT_SERVICE_TOKEN; set both, or set HATCH_PRODUCT_CHANNELS=off.";
     const imLinks = runtimeServiceToken ? new ImLinks({ secret: runtimeServiceToken, origin: siteOrigin, connections: stores.connections }) : undefined;
-    if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter, ...(imLinks ? { imLinks } : {}) })), [liveOwnProduct(releaseStore)]), eligibility));
+    if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, ...(imLinks ? { imLinks } : {}) })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
     Object.assign(registryContext, { productChannelsUnavailable, assistant, forms, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, ...(imLinks ? { imLinks } : {}), publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
