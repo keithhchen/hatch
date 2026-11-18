@@ -64,7 +64,7 @@ function same(left, right) {
  */
 export function createDesktopSignIn({ authenticate, mintSession, codes, seal, open, readJson, send, clock = Date.now, redirects = new RedirectPolicy() }) {
   async function authorize(request, response) {
-    const authentication = await authenticate(request);
+    const authentication = await authenticate(request, response);
     if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
     const body = await readJson(request);
     const state = String(body.state ?? "");
