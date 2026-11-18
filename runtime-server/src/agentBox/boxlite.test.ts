@@ -39,3 +39,50 @@ test("boxes get outbound network to every host", async () => {
   await provider.create("hatch-z");
   assert.deepEqual((created[0] as { network: unknown }).network, { outbound: { mode: "enabled", allowNet: [] } });
 });
+
+/** An SDK box whose commands follow `outcomes` in turn (the last repeats); counts the runs. */
+const scripted = (outcomes: { exitCode: number; errorMessage?: string; output?: string }[]) => {
+  const box = {
+    runs: 0,
+    async exec() {
+      const outcome = outcomes[Math.min(box.runs++, outcomes.length - 1)]!;
+      const chunks = outcome.output ? [outcome.output] : [];
+      const stdout = { next: async () => chunks.shift() ?? null }, empty = { next: async () => null };
+      return { stdout: async () => stdout, stderr: async () => empty, wait: async () => outcome, kill: async () => undefined };
+    }
+  };
+  return box;
+};
+const unavailable503 = { exitCode: 1, errorMessage: "WS connect failed: network error: upstream returned HTTP 503" };
+const boxOf = async (sdk: unknown) => new BoxliteProvider({ create: async () => sdk as never, getInfo: async () => null, get: async () => null }, { image: "img", workDir: "/w", retryBackoffMs: [1, 1, 1] }).create("hatch-r");
+
+test("an exec refused with a 503 is retried and returns the success", async () => {
+  const sdk = scripted([{ exitCode: 0 }, unavailable503, unavailable503, { exitCode: 0, output: "ok" }]);
+  const box = await boxOf(sdk);
+  const result = await box.exec("echo ok", { cwd: "/", timeoutSeconds: 5 });
+  assert.equal(result.stdout, "ok");
+  assert.equal(sdk.runs, 4);
+});
+
+test("four refusals in a row are BoxUnavailable", async () => {
+  const sdk = scripted([{ exitCode: 0 }, unavailable503]);
+  const box = await boxOf(sdk);
+  await assert.rejects(box.exec("true", { cwd: "/", timeoutSeconds: 5 }), BoxUnavailable);
+  assert.equal(sdk.runs, 5);
+});
+
+test("a command that printed output before the transport failure is not run again", async () => {
+  const sdk = scripted([{ exitCode: 0 }, { ...unavailable503, output: "half" }]);
+  const box = await boxOf(sdk);
+  await assert.rejects(box.exec("true", { cwd: "/", timeoutSeconds: 5 }), BoxUnavailable);
+  assert.equal(sdk.runs, 2);
+});
+
+test("an abort during the backoff stops the retries", async () => {
+  const sdk = scripted([{ exitCode: 0 }, unavailable503]);
+  const box = await new BoxliteProvider({ create: async () => sdk as never, getInfo: async () => null, get: async () => null }, { image: "img", workDir: "/w", retryBackoffMs: [50, 50, 50] }).create("hatch-a");
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error("stop")), 10);
+  await assert.rejects(box.exec("true", { cwd: "/", timeoutSeconds: 5, signal: controller.signal }), /stop/);
+  assert.equal(sdk.runs, 2);
+});
