@@ -61,6 +61,11 @@ test("a reload mid-Run shows the steps the Run has taken so far, and a live even
   controller.dispose();
 });
 
+test("a Run a restart interrupted that the server is answering again is listed as retrying, with nothing of its own to show", async () => {
+  const { transport } = setup(async () => view({ status: { state: "running", runId: "run_4", retrying: true }, run_id: "run_4", partial: "stale" }));
+  assert.deepEqual((await transport.snapshot()).runs, [{ id: "run_4", status: "running", retrying: true }]);
+});
+
 test("the view's tasks and channels reach the page, and a failed Run is listed with why it failed", async () => {
   const failure = { code: "upstream_error", message: "The model is unavailable." };
   const { transport } = setup(async () => view({ status: { state: "failed", runId: "run_3", error: failure }, tasks: [{ id: "t1", status: "needs_you" }], channels: [{ kind: "lark", own_app: true }] }));

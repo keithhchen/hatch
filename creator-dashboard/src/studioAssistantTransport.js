@@ -117,7 +117,8 @@ export class StudioAssistantTransport extends ConversationTransport {
       messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
       compacting: view.status?.compacting === true, has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
       // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
-      runs: view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}), ...(view.activity ? { activity: { tool_calls: view.activity.tool_calls.map(call => ({ ...call, locality: "server" })), skill_events: [], skill_runs: [] } } : {}) }]
+      runs: view.status?.state === "running" && view.status.retrying ? [{ id: view.run_id, status: "running", retrying: true }]
+        : view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}), ...(view.activity ? { activity: { tool_calls: view.activity.tool_calls.map(call => ({ ...call, locality: "server" })), skill_events: [], skill_runs: [] } } : {}) }]
         : failed ? [{ id: view.status.runId, status: "failed", failure: view.status.error }] : []
     };
   }

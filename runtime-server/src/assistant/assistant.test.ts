@@ -41,6 +41,7 @@ import { idempotencyId, type OutboundMessage as ChannelMessage } from "../channe
 import { TelegramChannel } from "../channels/telegramChannel.js";
 import { guarded } from "../channels/eligibility.js";
 import { MemoryTaskRepository } from "./tasks.js";
+import { endingOf } from "../testSupport.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
@@ -903,6 +904,24 @@ test("A page that joins a running turn reads the steps it has taken so far, with
     const during = await probe as { tool_calls: Array<Record<string, unknown>> };
     assert.deepEqual(during.tool_calls.map(call => [call.name, "arguments" in call, "result" in call]), [["studio.list_tasks", false, false]]);
     assert.equal(await env.chat.activity(ACCOUNT), undefined, "the Run ended");
+  } finally { await env.close(); }
+});
+
+test("A reply a restart interrupted is answered again by itself; until then the Expert's page sees it working, never failed", async () => {
+  const env = await setup({ model: (_turn, call) => call === 1 ? { delayMs: 500, text: "旧" } : { text: "新的答复" } });
+  try {
+    await env.say("问题", "m-q");
+    await sleep(80);
+    const conversationId = assistantConversationId(ACCOUNT);
+    const [run] = await env.repository.listRuns(conversationId);
+    const interrupted = (await env.repository.endRun(run!.id, endingOf("interrupted", "The Runtime restarted"))).run;
+    assert.deepEqual(await env.chat.status(ACCOUNT), { state: "running", runId: run!.id, retrying: true });
+    await sleep(600); // the process that held the Run is gone in production; here its model call runs out first
+    await (env.chat as unknown as { retrier: { afterInterrupted(run: unknown): Promise<void> } }).retrier.afterInterrupted(interrupted);
+    await env.idle();
+    const lines = await env.chat.lines(ACCOUNT);
+    assert.deepEqual(lines.map(line => [line.role, line.text]), [["user", "问题"], ["assistant", "新的答复"]]);
+    assert.equal((await env.chat.status(ACCOUNT)).state, "idle");
   } finally { await env.close(); }
 });
 
