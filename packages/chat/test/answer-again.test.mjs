@@ -30,6 +30,7 @@ class FakeTransport extends ConversationTransport {
   }
   snapshot() { return Promise.resolve({ conversation: { id: "assistant" }, messages: [], runs: this.runs, events: [], cursor: 1, has_more: false }); }
   history() { return Promise.resolve({ messages: [], has_more: false }); }
+  run(_id, runId) { return Promise.resolve({ id: runId, status: "running" }); }
   connect(_id, handlers) { const connection = new Connection(handlers); this.connections.push(connection); return connection; }
 }
 class NoAttachments extends AttachmentSource { accepts() { return false; } prepareAll() { return Promise.resolve([]); } }
@@ -156,4 +157,63 @@ test("opening a conversation whose last Run a restart interrupted shows no error
 test("a failed Run is still shown and answered again", async () => {
   const { controller } = await failedReply();
   assert.deepEqual(controller.getState().failedRun, { id: "run_1" });
+});
+
+const interruptedRun = (retrying) => ({ id: "run_9", status: "interrupted", ...(retrying ? { retrying: true } : {}), failure: { code: "run_interrupted", message: "The Runtime restarted" } });
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const open = (transport) => {
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 20, reconnectAttempts: 0 });
+  controller.open("assistant");
+  return controller;
+};
+
+test("reload in the gap: the interrupted reply being started again shows as working, with no notice", async () => {
+  const transport = new FakeTransport();
+  transport.runs = [interruptedRun(true)];
+  const controller = open(transport);
+  await wait(60);
+  const state = controller.getState();
+  assert.equal(state.activeRun, "run_9");
+  assert.equal(state.error, null);
+  assert.equal(state.failedRun, null);
+  assert.ok(state.messages.some(message => message.transient), "a working row is shown");
+  controller.dispose();
+});
+
+test("a live client in the gap shows working, then adopts the retry's Run and streams it", async () => {
+  const transport = new FakeTransport();
+  const controller = open(transport);
+  await flush();
+  controller.setDraft("hello");
+  await controller.send();
+  await flush();
+  transport.connections[0].handlers.onEvent({ type: "turn.failed", run_id: "run_1", error: { code: "run_interrupted", message: "x" } });
+  transport.runs = [{ ...interruptedRun(true), id: "run_1" }];
+  await wait(80);
+  assert.ok(controller.getState().activeRun, "working in the gap");
+  assert.equal(controller.getState().error, null);
+  transport.runs = [{ id: "run_2", status: "running" }];
+  await wait(80);
+  assert.equal(controller.getState().activeRun, "run_2", "adopted " + JSON.stringify({ s: controller.getState().status, m: controller.getState().messages.map(m => [m.id, m.role, m.run_id, m.transient]), e: String(controller.getState().error?.message) }));
+  transport.connections[0].handlers.onEvent({ type: "assistant.delta", run_id: "run_2", delta: { kind: "text", content: "whole answer" } });
+  await wait(60);
+  assert.match(JSON.stringify(controller.getState().messages), /whole answer/);
+  assert.equal(controller.getState().error, null);
+  controller.dispose();
+});
+
+test("budget exhausted: the server stops reporting the reply as retrying and the client goes idle, quietly", async () => {
+  const transport = new FakeTransport();
+  transport.runs = [interruptedRun(true)];
+  const controller = open(transport);
+  await wait(60);
+  assert.equal(controller.getState().activeRun, "run_9");
+  transport.runs = [interruptedRun(false)];
+  await wait(80);
+  const state = controller.getState();
+  assert.equal(state.activeRun, null);
+  assert.equal(state.error, null);
+  assert.equal(state.failedRun, null);
+  assert.ok(!state.messages.some(message => message.transient), "no working row is left");
+  controller.dispose();
 });

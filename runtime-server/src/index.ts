@@ -118,6 +118,8 @@ export type RuntimeServer = {
   /** What the channel layer calls to talk to the Chat API without a transport. */
   chat: ChatGateway;
   close: () => Promise<void>;
+  /** Looks now for Runs a restart interrupted and starts their retries (otherwise done on a timer). */
+  retryInterrupted: () => Promise<void>;
   /** Leaves production traffic to the next instance: unready, stop intake, finish the Runs held, then close. */
   shutdown: (deadlineMs: number) => Promise<{ drained: boolean }>;
 };
@@ -185,6 +187,8 @@ export type RuntimeServerOptions = {
   /** Limits checked before a customer's message becomes a Run. By default each contact may send `maxContactMessages` to a Product. */
   principalLimits?: PrincipalLimits;
   maxContactMessages?: number;
+  /** How often Runs a restart interrupted are looked for, to be answered again. */
+  restartRetryPollMs?: number;
   /** The channel layer's Connections, which a customer's messages arrive through. */
   connectionDirectory?: ConnectionDirectory;
   /** Uploads, attachments in messages, and the ls/grep/read tools over them. Without it a message takes text only. */
@@ -510,6 +514,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   });
   // A restart is not the buyer's problem: the reply it interrupted is started again from their latest message (see RestartRetrier).
   const restartRetrier = new RestartRetrier({
+    pollMs: options.restartRetryPollMs,
     repository: conversationRepository,
     skip: async (conversationId) => Boolean(await artifact?.reports.get(conversationId)),
     start: async (run, key, runId) => {
@@ -670,7 +675,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       closeStorage: () => close(),
       onError: (step, error) => log.error("runtime_shutdown_step_failed", { step, error }),
     }),
-    close: () => close()
+    close: () => close(),
+    retryInterrupted: () => restartRetrier.tick()
   };
   async function close(): Promise<void> {
     await stopIntake();

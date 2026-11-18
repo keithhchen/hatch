@@ -519,6 +519,66 @@ test("a restart mid-Run: the swept Run is answered again once, silently; the mod
   assert.deepEqual(visible.map((message) => [message.role, message.content]), [["user", "hello"], ["assistant", "whole answer"]]);
 });
 
+test("the buyer's snapshot in the gap after a restart: the reply is retrying with its partial text once; then the retry's Run is active; with the budget spent nothing is retrying", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-retrying-snapshot-")));
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.initialize();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository,
+    restartRetryPollMs: 60_000,
+    createRuntime: () => ({ async *run(input) {
+      await gate;
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "whole answer" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const seed = async (clientRequestId: string) => {
+    const created = await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { client_request_id: clientRequestId } });
+    const publicId = (created.body as { conversation: { id: string } }).conversation.id;
+    const conversationId = durableConversationId({ creatorId: binding.creator_id, productId: binding.product_id, userId: binding.user_id }, publicId);
+    const record = (await repository.getConversation(conversationId))!;
+    return { conversationId, record, prefix: `/v1/conversations/${encodeURIComponent(publicId)}` };
+  };
+  const snapshot = async (prefix: string) => (await json(base, `${prefix}/snapshot?${scope}&view=page`)).body as { runs: Array<{ id: string; status: string; retrying?: boolean; partial_output?: string }>; messages: Array<{ role: string; content?: string }> };
+  const interrupt = async (c: { conversationId: string; record: Awaited<ReturnType<typeof repository.getConversation>> & object }, runId: string, key: string, retry: boolean) => {
+    if (retry) await repository.acceptRetry({ binding: c.record, run: { id: runId, conversationId: c.conversationId, clientMessageId: key, corpusDigest: c.record.corpusDigest, executorId: "executor_gone" } });
+    else await repository.acceptSubmission({ binding: c.record, run: { id: runId, conversationId: c.conversationId, clientMessageId: key, inputDigest: "d-1", corpusDigest: c.record.corpusDigest, executorId: "executor_gone" }, canonicalUser: { role: "user", content: "hello" } });
+    await repository.savePartialOutput(runId, "The first half");
+    await repository.endRun(runId, { status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted" } });
+  };
+
+  // The gap: the Run is ended, its retry has not started.
+  const gap = await seed("gap_target");
+  await interrupt(gap, "run_gap_1", "m-1", false);
+  await store.append({ type: "conversation.model_message", conversation_id: gap.conversationId, run_id: "run_gap_1", message: { role: "assistant", content: "The first half" } });
+  const inGap = await snapshot(gap.prefix);
+  const reported = inGap.runs.find((run) => run.id === "run_gap_1");
+  assert.equal(reported?.retrying, true);
+  assert.equal(reported?.partial_output, undefined, "the partial text is not sent a second time");
+  assert.equal(inGap.messages.filter((message) => message.content === "The first half").length, 1);
+
+  // The retry starts (held by the gate): its Run is the active one and nothing is retrying.
+  await runtime.retryInterrupted();
+  const started = await snapshot(gap.prefix);
+  const active = started.runs.find((run) => ["queued", "running"].includes(run.status));
+  assert.ok(active && active.id !== "run_gap_1", "the retry's Run is active");
+  assert.ok(started.runs.every((run) => !run.retrying));
+  release();
+
+  // The budget is spent: two retries were interrupted too. Nothing is retrying and nothing starts.
+  const spent = await seed("spent_target");
+  await interrupt(spent, "run_spent_1", "m-1", false);
+  await interrupt(spent, "run_spent_2", "restart-retry:run_spent_1", true);
+  await interrupt(spent, "run_spent_3", "restart-retry:run_spent_2", true);
+  await runtime.retryInterrupted();
+  const exhausted = await snapshot(spent.prefix);
+  assert.ok(exhausted.runs.every((run) => !run.retrying));
+  assert.equal((await repository.listRuns(spent.conversationId)).length, 3, "no fourth Run");
+});
+
 test("HTTP without wait returns 202 with the run id, and a stream delivers the Run's events then ends", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-stream-"));
   let release!: () => void;

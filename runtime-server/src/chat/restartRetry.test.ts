@@ -12,7 +12,7 @@ import { endingOf } from "../testSupport.js";
 import { ChatService, RunRegistry } from "./chatService.js";
 import { RunEventHub } from "./runEventHub.js";
 import { RunTerminator } from "./runTerminator.js";
-import { MAX_RESTART_RETRIES, RESTART_RETRY_PREFIX, RestartRetrier, restartRetryKey } from "./restartRetry.js";
+import { MAX_RESTART_RETRIES, RESTART_RETRY_PREFIX, RETRY_PENDING_MS, RestartRetrier, restartRetryKey, retryPending } from "./restartRetry.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
 const id = `scope:${"f".repeat(24)}:restart`;
@@ -179,7 +179,7 @@ for (const backend of ["memory", "postgres"] as const) {
 test("RESILIENT: a database error in the scan is logged and the next scan works; a start that throws never escapes", async () => {
   let fail = true;
   const started: string[] = [];
-  const run = { id: "r1", conversationId: id, clientMessageId: "m", status: "interrupted", createdAt: "2026-01-01T00:00:00.000Z" } as ConversationRunRecord;
+  const run = { id: "r1", conversationId: id, clientMessageId: "m", status: "interrupted", createdAt: "2026-01-01T00:00:00.000Z", failure: { code: "run_interrupted", message: "restart" } } as ConversationRunRecord;
   const subject = new RestartRetrier({
     repository: {
       restartInterruptedRuns: async () => { if (fail) throw new Error("db down"); return [run]; },
@@ -192,4 +192,22 @@ test("RESILIENT: a database error in the scan is logged and the next scan works;
   fail = false;
   await subject.tick();
   assert.deepEqual(started, [restartRetryKey("r1")]);
+});
+
+test("the snapshot reports an interrupted reply as being started again only while a retry is owed: budget left, latest Run, inside the window", () => {
+  const at = "2026-01-01T00:00:00.000Z";
+  const run = (n: number, key: string, status: string, completedAt = at): ConversationRunRecord => ({
+    id: `r${n}`, conversationId: id, clientMessageId: key, status, createdAt: `2026-01-01T00:00:0${n}.000Z`, completedAt,
+    ...(status === "interrupted" ? { failure: { code: "run_interrupted", message: "restart" } } : {})
+  } as ConversationRunRecord);
+  const now = new Date(new Date(at).getTime() + 1_000);
+  const first = run(1, "m1", "interrupted");
+  assert.equal(retryPending([first], first, now), true, "reload in the gap shows working");
+  assert.equal(retryPending([first], first, new Date(new Date(at).getTime() + RETRY_PENDING_MS + 1)), false, "the window passed");
+  assert.equal(retryPending([first, run(2, "m2", "completed")], first, now), false, "a newer Run");
+  const retry1 = run(2, restartRetryKey("r1"), "interrupted");
+  assert.equal(retryPending([first, retry1], retry1, now), true, "one more attempt is owed");
+  const retry2 = run(3, restartRetryKey("r2"), "interrupted");
+  assert.equal(retryPending([first, retry1, retry2], retry2, now), false, "budget exhausted: idle, quietly");
+  assert.equal(retryPending([run(1, "m1", "failed")], run(1, "m1", "failed"), now), false, "a plain failure is the buyer's to answer again");
 });
