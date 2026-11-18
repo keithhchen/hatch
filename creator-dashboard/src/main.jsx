@@ -74,7 +74,8 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
   useAccountIdentity(profile?.id);
-  const carriedOver = useGuestCarryOver(sessionStatus);
+  const carryOverSettled = useGuestCarryOver(sessionStatus);
+  const chatWaiting = sessionStatus === "loading" || !carryOverSettled;
 
   const clearSession = useCallback(() => {
     setProfile(null);
@@ -207,19 +208,19 @@ function App() {
   // `profile` is null for a guest. After a guest's conversations move to the account, the page is mounted again to read them.
   const chatRoute = WebChatRoute.parse(location.pathname);
   if (chatRoute) {
-    if (sessionStatus === "loading") return <AppLoading />;
-    return <Suspense fallback={<AppLoading />}><WebChatPage key={carriedOver} productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+    if (chatWaiting) return <AppLoading />;
+    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   const artifactRoute = ArtifactRoute.parse(location.pathname);
   if (artifactRoute) {
-    if (sessionStatus === "loading") return <AppLoading />;
-    return <Suspense fallback={<AppLoading />}><ArtifactPage key={carriedOver} productId={artifactRoute.productId} conversationId={artifactRoute.conversationId} search={location.search} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+    if (chatWaiting) return <AppLoading />;
+    return <Suspense fallback={<AppLoading />}><ArtifactPage productId={artifactRoute.productId} conversationId={artifactRoute.conversationId} search={location.search} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT
     || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {
-    if (sessionStatus === "loading") return <AppLoading />;
+    if (chatWaiting) return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-up?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
@@ -243,7 +244,6 @@ function App() {
   return (
     <Suspense fallback={<AppLoading />}>
       <BuyerPortalV2
-        key={carriedOver}
         pathname={location.pathname}
         search={location.search}
         navigate={location.navigate}
@@ -256,25 +256,23 @@ function App() {
 
 /**
  * Once per page load, as soon as the session is authenticated: the visitor's guest conversations become the account's.
- * Returns a number that changes when some moved, so the pages that list them read again. A failure is not shown:
- * the server keeps the guest until it succeeds, and the next page load asks again.
+ * Returns true once that call has finished (moved or nothing to move) or there is no session to carry over to (it is not waited for while signed out), so the
+ * pages that read those conversations mount only afterwards. A failure is not shown: the server keeps the guest until
+ * it succeeds, and the next page load asks again.
  */
 function useGuestCarryOver(sessionStatus) {
   const analytics = useAnalytics();
   const asked = useRef(false);
-  const [movedTimes, setMovedTimes] = useState(0);
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (sessionStatus !== "authenticated" || asked.current) return;
     asked.current = true;
     dashboardRequest("/v1/web-chat/guest/carry-over", { method: "POST", body: "{}" })
-      .then(({ moved }) => {
-        if (!(moved > 0)) return;
-        analytics.track(guestSignedInCarriedOver({ moved }));
-        setMovedTimes(count => count + 1);
-      })
-      .catch(() => {});
+      .then(({ moved }) => { if (moved > 0) analytics.track(guestSignedInCarriedOver({ moved })); })
+      .catch(() => {})
+      .finally(() => setSettled(true));
   }, [analytics, sessionStatus]);
-  return movedTimes;
+  return sessionStatus !== "authenticated" || settled;
 }
 
 function useBrowserLocation() {
