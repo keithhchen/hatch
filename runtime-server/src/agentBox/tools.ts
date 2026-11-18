@@ -41,7 +41,7 @@ export const boxToolDefinitions = (workDir: string): ToolDefinition[] => [
     { path: { type: "string", description: `A path under ${workDir}, or relative to it.` }, content: { type: "string", description: "The whole file." } }, ["path", "content"]),
   definition("edit", `Replace exact text in a file under ${workDir}: old_string must appear exactly once (or set replace_all).`,
     { path: { type: "string" }, old_string: { type: "string", description: "The exact text to replace." }, new_string: { type: "string" }, replace_all: { type: "boolean" } }, ["path", "old_string", "new_string"]),
-  definition("save_file", `Keep a file from ${workDir} for the user (an HTML page, a PDF, an image): returns its file_id. Saving the same content again returns the same id. Save again after changing the file.`,
+  definition("save_file", `Keep a file from ${workDir} for the user (an HTML page, a PDF, an image): returns its file_id and a url: a link the user can open or download. Never invent file links; give the user this url. Saving the same content again returns the same id. Save again after changing the file.`,
     { path: { type: "string", description: `The file under ${workDir}.` } }, ["path"]),
   definition("publish_html", "Publish a saved HTML file as a web page and get its link to send to the user. The page is a whole HTML document; it is shown as is, scripts allowed. The same file_id gives the same link; a changed page is a new save and a new link.",
     { file_id: { type: "string", description: "The id save_file returned." }, title: { type: "string", description: "The page's name." } }, ["file_id", "title"])
@@ -91,7 +91,7 @@ export class AgentBoxMode {
               const file = opened.resolve(args.path);
               const bytes = await opened.bytes(file, MAX_SAVED_BYTES);
               const saved = await files.save(scope, path.posix.basename(file), bytes);
-              return { file_id: saved.id, name: saved.name, mime: saved.mime, bytes: saved.bytes };
+              return { file_id: saved.id, name: saved.name, mime: saved.mime, bytes: saved.bytes, url: saved.url };
             }
             case "publish_html": {
               if (typeof args.file_id !== "string" || typeof args.title !== "string") throw new BoxToolError("file_id and title are strings.");
