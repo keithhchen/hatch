@@ -44,6 +44,8 @@ export type SupervisorOptions = {
   toolPollMs?: number;
   /** Called once a Run has completed, for work that follows a reply, such as compaction. */
   afterReply?: (run: ConversationRunRecord) => void;
+  /** Called once a swept Run has been ended as interrupted, for work that follows a restart, such as answering again. */
+  afterInterrupted?: (run: ConversationRunRecord) => void;
   /** Tells the instance that executes a Run it was stopped, so it does not wait for its next lease renewal. */
   stops?: StopRelay;
   /** Tells the instance that executes a Run a message joined it, so it cuts the model call in flight without waiting for it to end. */
@@ -193,7 +195,8 @@ export class RunSupervisor {
     for (const run of claimed) {
       try {
         await this.settleOrphan(run);
-        await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted while this Run was in progress. Send the message again to continue." } });
+        const { ended, run: interrupted } = await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted while this Run was in progress. Send the message again to continue." } });
+        if (ended) this.options.afterInterrupted?.(interrupted);
       } catch (error) { log.error("run_interrupt_unrecorded", { run_id: run.id, conversation_id: run.conversationId, error }); }
     }
   }

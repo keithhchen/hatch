@@ -126,3 +126,34 @@ test("opening a conversation whose last reply completed offers nothing", async (
   assert.equal(controller.getState().failedRun, null);
   assert.equal(controller.getState().error, null);
 });
+
+test("a Run a restart interrupted shows no error and offers no answer again: the server starts the reply again", async () => {
+  const transport = new FakeTransport();
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
+  controller.open("assistant");
+  await flush();
+  controller.setDraft("hello");
+  await controller.send();
+  await flush();
+  transport.connections[0].handlers.onEvent({ type: "turn.failed", run_id: "run_1", error: { code: "run_interrupted", message: "The Runtime restarted while this Run was in progress. Send the message again to continue." } });
+  await flush();
+  const state = controller.getState();
+  assert.equal(state.error, null, "no notice, technical or not");
+  assert.equal(state.failedRun, null);
+  assert.equal(transport.calls.length, 0, "nothing is answered again by the client");
+});
+
+test("opening a conversation whose last Run a restart interrupted shows no error either", async () => {
+  const transport = new FakeTransport();
+  transport.runs = [{ id: "run_9", status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted" } }];
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
+  controller.open("assistant");
+  await flush();
+  assert.equal(controller.getState().error, null);
+  assert.equal(controller.getState().failedRun, null);
+});
+
+test("a failed Run is still shown and answered again", async () => {
+  const { controller } = await failedReply();
+  assert.deepEqual(controller.getState().failedRun, { id: "run_1" });
+});

@@ -1,5 +1,6 @@
 import type { ConversationHistoryOptions, ConversationHistoryPage } from "../conversationHistory.js";
 import type { ConversationRepository, QueuedMessage } from "../conversationRepository.js";
+import { RESTART_RETRY_PREFIX } from "./restartRetry.js";
 import { publicJournalPayload } from "./messageLedger.js";
 import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
 
@@ -30,14 +31,17 @@ const queuedAsMessage = (queued: QueuedMessage): ReadMessage => {
 export class ChatConversationReadModel implements ConversationReadModel {
   constructor(private readonly deps: {
     history: Pick<RuntimeStore, "readVisibleConversationPage">;
-    repository: Pick<ConversationRepository, "queuedMessages">;
+    repository: Pick<ConversationRepository, "queuedMessages" | "listRuns">;
   }) {}
 
   async page(conversationId: string, options: ConversationHistoryOptions = {}): Promise<ConversationReadPage> {
     // Queued first: a message claimed in between is then in the page too and is dropped below, never in neither.
     const queued = options.beforeCursor === undefined ? await this.deps.repository.queuedMessages(conversationId) : [];
     const page = await this.deps.history.readVisibleConversationPage(conversationId, options);
-    const committed = page.messages.map((message): ReadMessage => ({ ...message, id: message.id!, accepted_at: message.timestamp }));
+    // A reply a restart interrupted is answered again in its own Run: the retry's reply takes its place.
+    const superseded = new Set((await this.deps.repository.listRuns(conversationId))
+      .filter((run) => run.clientMessageId.startsWith(RESTART_RETRY_PREFIX)).map((run) => run.clientMessageId.slice(RESTART_RETRY_PREFIX.length)));
+    const committed = page.messages.filter((message) => !(message.role === "assistant" && message.run_id && superseded.has(message.run_id))).map((message): ReadMessage => ({ ...message, id: message.id!, accepted_at: message.timestamp }));
     const held = new Set(committed.map((message) => message.id));
     return { ...page, messages: [...committed, ...queued.filter((message) => !held.has(message.clientMessageId)).map(queuedAsMessage)] };
   }

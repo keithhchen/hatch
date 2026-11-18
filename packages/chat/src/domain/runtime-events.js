@@ -51,7 +51,8 @@ const runHandlers = Object.freeze({
   "message.accepted": (_timeline, event) => outcome("accepted", { receipt: event }),
   "turn.completed": (_timeline, event) => outcome("terminal", { failed: false, finishReason: event.finish_reason }),
   // A Run the user stopped ends as `turn.failed` with this code: it is a cancellation, never a failure to report.
-  "turn.failed": (_timeline, event) => event.error?.code === "run_cancelled"
+  // A Run a service restart cut off is started again by the server: the buyer is told of nothing and sees no failure.
+  "turn.failed": (_timeline, event) => event.error?.code === "run_cancelled" || event.error?.code === "run_interrupted"
     ? outcome("terminal", { failed: false, cancelled: true })
     : outcome("terminal", { failed: true, error: event.error })
 });

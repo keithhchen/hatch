@@ -341,13 +341,14 @@ export class ConversationController {
     this.run = null;
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
-    if (record.status === "failed" || record.status === "interrupted") this.failReply(run.id, record.failure);
+    // A Run a restart interrupted is answered again by the server: it is no failure to report.
+    if (record.status === "failed") this.failReply(run.id, record.failure);
   }
 
   /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
   offerAnswerAgain(snapshot, running) {
     const last = snapshot.runs.at(-1);
-    if (running || this.state.failedRun || !last || !["failed", "interrupted"].includes(last.status)) return;
+    if (running || this.state.failedRun || !last || last.status !== "failed") return;
     this.failReply(idOfRun(last), last.failure);
   }
 

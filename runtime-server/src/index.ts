@@ -53,6 +53,7 @@ import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
 import { accountPrincipal } from "./chat/principal.js";
+import { RestartRetrier } from "./chat/restartRetry.js";
 import { clientMessageInputDigest } from "./protocol.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
@@ -503,8 +504,23 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
     ...(options.library ? { library: new RetryingLibrary(options.library) } : {}),
     ...(artifact ? { artifacts: artifact.lifecycle } : {}),
+    afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); },
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
+  });
+  // A restart is not the buyer's problem: the reply it interrupted is started again from their latest message (see RestartRetrier).
+  const restartRetrier = new RestartRetrier({
+    repository: conversationRepository,
+    skip: async (conversationId) => Boolean(await artifact?.reports.get(conversationId)),
+    start: async (run, key, runId) => {
+      const conversation = await conversationRepository.getConversation(run.conversationId);
+      if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.retry({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        key, runId, corpusDigest: scope.corpusDigest, requiresLocalTools: false
+      });
+    }
   });
   const startArtifactRun = async (record: ReportRecord, runId: string, content: string, clientMessageId: string) => {
     const conversation = await conversationRepository.getConversation(record.conversationId);
@@ -522,7 +538,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     reports: artifact.reports, lifecycle: artifact.lifecycle,
     start: (record, runId) => startArtifactRun(record, runId, ARTIFACT_RETRY_MESSAGE, `artifact-retry-${runId}`)
   }) : undefined;
-  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); }).catch(() => undefined);
+  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); restartRetrier.start(); }).catch(() => undefined);
   const edge: ChatEdge = {
     chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
@@ -673,6 +689,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     await Promise.allSettled([...connectionTasks]);
     // Runs are handed off, not failed: another instance continues them.
     artifactRetrier?.stop();
+    restartRetrier.stop();
     await chat.stop();
     await conversationStore.close();
     await conversationRepository.close();
