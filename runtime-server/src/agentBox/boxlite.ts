@@ -6,7 +6,8 @@ import { log } from "../observability/log.js";
 import { OutputCapture } from "./output.js";
 import { BoxFileMissing, BoxNameTaken, BoxUnavailable, type AgentBox, type BoxProvider, type ExecResult } from "./ports.js";
 
-export const DEFAULT_BOX_IMAGE = "docker.io/keithchen/hatch-agent-box:latest";
+/** Pinned: a new image is a code change, so BoxLite never pulls one under a live buyer. Built by keithhchen/hatch-agent-box. */
+export const DEFAULT_BOX_IMAGE = "docker.io/keithchen/hatch-agent-box:703c048708152a2f7a40feeeef6e8443b8a9d4e8";
 export const DEFAULT_WORK_DIR = "/home/agent/work";
 /** What one command may print, in all; the start and the end of it are kept. */
 const OUTPUT_CHARS = 30_000;
@@ -17,6 +18,14 @@ const unavailable = (error: unknown): never => {
   log.error("agent_box_failed", { error });
   throw new BoxUnavailable(error);
 };
+
+/** BoxLite gave up waiting for a box to start, or is still starting it: the box comes up on its own (a new image's first pull is slow). */
+const STARTING = /reach started|state change in progress/i;
+/** The connection to the box failed: the service's fault, not the command's, though BoxLite reports it as the command's error. */
+const TRANSPORT = /WS connect failed|network error|upstream connect error/i;
+/** How long a call waits for a starting box. */
+export const START_WAIT_MS = 180_000;
+const START_POLL_MS = 3_000;
 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
@@ -46,6 +55,7 @@ class BoxliteBox implements AgentBox {
           options.signal?.throwIfAborted();
           return { exitCode: 124, stdout: stdout.text(), stderr: `${stderr.text()}\n[Stopped: the command ran longer than ${options.timeoutSeconds} seconds.]`.trimStart() };
         }
+        if (result.exitCode !== 0 && TRANSPORT.test(result.errorMessage ?? "")) return unavailable(new Error(result.errorMessage));
         return { exitCode: result.exitCode, stdout: stdout.text(), stderr: result.errorMessage ? `${stderr.text()}\n${result.errorMessage}`.trimStart() : stderr.text() };
       } finally {
         clearTimeout(timer);
@@ -87,7 +97,7 @@ class BoxliteBox implements AgentBox {
 
 /** BoxLite Cloud through its Node SDK's REST runtime: `create` is a box of its own, resumed on the next call after it idles out. */
 export class BoxliteProvider implements BoxProvider {
-  constructor(private readonly runtime: Pick<Boxlite, "get" | "create">, private readonly options: { image: string; workDir: string }) {}
+  constructor(private readonly runtime: Pick<Boxlite, "get" | "create" | "getInfo">, private readonly options: { image: string; workDir: string; startPollMs?: number }) {}
 
   /** Configured by BOXLITE_API_KEY (and BOXLITE_REST_URL, default the hosted API); undefined without a key. */
   static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): BoxliteProvider | undefined {
@@ -112,12 +122,28 @@ export class BoxliteProvider implements BoxProvider {
       // The box is the buyer's for good: it idles out (and resumes on use) but is never deleted.
       box = await this.runtime.create({ image: this.options.image, cpus: 2, memoryMib: 2048, autoRemove: false, autoDelete: 0 }, name);
     } catch (error) {
-      if (/already exists/i.test(error instanceof Error ? error.message : "")) throw new BoxNameTaken(name, { cause: error });
-      return unavailable(error);
+      const message = error instanceof Error ? error.message : "";
+      if (/already exists/i.test(message)) throw new BoxNameTaken(name, { cause: error });
+      if (!STARTING.test(message)) return unavailable(error);
+      box = await this.started(name, error);
     }
     const created = new BoxliteBox(box);
     const made = await created.exec(`mkdir -p -- ${quote(this.options.workDir)}`, { cwd: "/", timeoutSeconds: 60 });
     if (made.exitCode !== 0) return unavailable(new Error(`Cannot create ${this.options.workDir}: ${made.stderr}`));
     return created;
+  }
+
+  /** The box once BoxLite reports it running, waiting up to START_WAIT_MS. */
+  private async started(name: string, cause: unknown): Promise<SdkBox> {
+    const poll = this.options.startPollMs ?? START_POLL_MS;
+    for (let waited = 0; waited < START_WAIT_MS; waited += poll) {
+      await new Promise(resolve => setTimeout(resolve, poll));
+      const info = await this.runtime.getInfo(name).catch(() => null);
+      if (info?.state.running) {
+        const box = await this.runtime.get(name).catch(() => null);
+        if (box) return box;
+      }
+    }
+    return unavailable(cause);
   }
 }
