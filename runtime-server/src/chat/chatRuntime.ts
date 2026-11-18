@@ -6,7 +6,7 @@ import type { UsageRecording } from "../usage/usage.js";
 import type { RunCap } from "../usage/usageCap.js";
 import type { ArtifactLifecycle } from "../artifact/lifecycle.js";
 import type { ChatAnalytics } from "./chatAnalytics.js";
-import type { ConversationRepository } from "../conversationRepository.js";
+import type { ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
 import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
 import type { ClientGroup } from "../surfaces/contract.js";
 import { DEFAULT_RUN_LEASE_MS } from "../conversationRepository.js";
@@ -63,6 +63,8 @@ export type ChatRuntimeOptions<Scope> = {
   analytics?: ChatAnalytics;
   /** Where an Agent is saved when its Run starts for an account. */
   library?: Library;
+  /** Told of each Run a restart interrupted, once it is ended. */
+  afterInterrupted?: (run: ConversationRunRecord) => void;
   /** Report conversations' lifecycle: a Run that ends with no report published fails the report. */
   artifacts?: ArtifactLifecycle;
 };
@@ -107,7 +109,7 @@ export class ChatRuntime<Scope> {
         compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs, usage: options.usage
       }),
       (run) => closeDanglingCalls(store, run),
-      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },
+      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), afterInterrupted: options.afterInterrupted, stops: options.stops, steers: options.steers },
       terminators
     );
     this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction, analytics: options.analytics, library: options.library, artifacts: options.artifacts });

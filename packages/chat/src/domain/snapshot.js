@@ -26,7 +26,8 @@ export const TERMINAL_RUN_STATUSES = Object.freeze(["completed", "failed", "canc
 export const ACTIVE_RUN_STATUSES = Object.freeze(["queued", "running", "waiting_for_tool", "waiting_for_approval"]);
 export const isTerminalRunStatus = value => TERMINAL_RUN_STATUSES.includes(String(value || "").trim().toLowerCase());
 export const runId = run => String(run?.id ?? run?.run_id ?? "").trim();
-export const activeSnapshotRun = snapshot => snapshot.runs?.find(run => ACTIVE_RUN_STATUSES.includes(run.status)) ?? null;
+/** A Run a restart interrupted that the server is starting again (`retrying`) is still being worked on, as far as the buyer is concerned. */
+export const activeSnapshotRun = snapshot => snapshot.runs?.find(run => ACTIVE_RUN_STATUSES.includes(run.status) || run.retrying === true) ?? null;
 
 const SNAPSHOT_EVENT_TYPES = new Set(JOURNAL_EVENT_TYPES);
 

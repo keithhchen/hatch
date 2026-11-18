@@ -77,6 +77,15 @@ export type TurnProfile = {
   toolCallLimit?: { max: number; uncounted: string[] };
 };
 
+/**
+ * Answering again has no new user message: the transcript still ends with the reply an interrupted or failed Run left.
+ * The model answers the latest user message afresh, so that reply and its tool calls stay in the history but leave the context.
+ */
+export function untilLastUser(messages: ConversationMessage[]): ConversationMessage[] {
+  const last = messages.map((message) => message.role).lastIndexOf("user");
+  return last < 0 ? messages : messages.slice(0, last + 1);
+}
+
 export async function runModelTurn(...args: Parameters<typeof runModelTurnInternal>): Promise<void> {
   const [input, , , binding] = args;
   return withLangfuseTurn("user-runtime.turn", input.message.content, () => runModelTurnInternal(...args), {
@@ -116,7 +125,7 @@ async function runModelTurnInternal(
   try {
     abortSignal.throwIfAborted();
     await state.start();
-    const committedInput = await store.readConversation(input.conversation_id);
+    const committedInput = untilLastUser(await store.readConversation(input.conversation_id));
     // The wire-level task_start message is intentionally empty, but the
     // Runtime's canonical user turn is not. Keep the same marked message in
     // the durable transcript and pass its non-empty content to the Agent.
@@ -341,7 +350,7 @@ async function runModelTurnInternal(
           const overflow = isContextOverflow({ stopReason: "error", errorMessage: errorMessage(error) } as AssistantMessage);
           const recovered = overflow ? await compaction.recoverFromOverflow(await store.readConversation(input.conversation_id)) : undefined;
           if (!recovered) throw error;
-          currentMessages = await store.readConversation(input.conversation_id);
+          currentMessages = untilLastUser(await store.readConversation(input.conversation_id));
           // Where the transcript ends decides how the turn resumes: a user message is prompted, anything else continued.
           current = currentMessages.at(-1)?.role === "user"
             ? runtimeInput

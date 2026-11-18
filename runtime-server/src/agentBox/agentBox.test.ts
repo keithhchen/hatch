@@ -5,7 +5,7 @@ import { harness } from "../assets/kit.test.js";
 import { requireModelTool, toolRegistry, type ToolDefinition } from "../tools.js";
 import { AgentBoxes } from "./boxes.js";
 import { InMemoryProductCapabilities } from "./capabilities.js";
-import { BuyerFiles } from "./files.js";
+import { BuyerFiles, FileLinks, handleFileRoute } from "./files.js";
 import { HtmlLinks, HtmlPages, MemoryHtmlPageRepository, handleHtmlRoute } from "./htmlPages.js";
 import { BoxFileMissing, BoxNameTaken, type AgentBox, type BoxProvider, type ExecResult } from "./ports.js";
 import { AgentBoxMode } from "./tools.js";
@@ -42,12 +42,12 @@ class FakeProvider implements BoxProvider {
 async function setup(capabilities: Array<[string, string]> = [["prod-1", "agent_box"]]) {
   const { repository, blobs } = await harness();
   const provider = new FakeProvider();
-  const files = new BuyerFiles(repository, blobs);
+  const files = new BuyerFiles(repository, blobs, new FileLinks("secret", "https://example.test"));
   const links = new HtmlLinks("secret", "https://example.test");
   const pages = new HtmlPages(new MemoryHtmlPageRepository(), files, links);
   const mode = new AgentBoxMode({ capabilities: new InMemoryProductCapabilities(capabilities), boxes: new AgentBoxes(provider), workDir: WORK, pdf: { render: async () => { throw new Error("no pdf"); } } as never, files, pages });
   const runnerFor = async (userId: string, guest = false) => (await mode.turnFor({ productId: "prod-1", userId, guest }))!.tools;
-  return { provider, pages, mode, runnerFor };
+  return { provider, pages, files, mode, runnerFor };
 }
 
 test("calls that arrive together open one box; a lost create race finds the winner's box", async () => {
@@ -144,4 +144,38 @@ test("one model name on two tools dispatches to the one this Run is allowed", ()
     assert.equal(requireModelTool("dup_write").runtimeName, "x.write");
     assert.equal(requireModelTool("dup_write", ["y.write"]).runtimeName, "y.write");
   } finally { toolRegistry.delete("x.write"); toolRegistry.delete("y.write"); }
+});
+
+test("save_file returns a signed /file link that downloads the bytes as an attachment; forged and foreign links are a plain 404", async () => {
+  const { provider, runnerFor, files } = await setup();
+  const box = await runnerFor("u1");
+  await box.run("write", { path: "JUDU官网获客诊断.pdf", content: "pdf bytes" });
+  const saved = await box.run("save_file", { path: "JUDU官网获客诊断.pdf" });
+  assert.match(String(saved.url), /^https:\/\/example\.test\/file\/[0-9a-f-]{36}\?t=/);
+  await box.run("write", { path: "x.html", content: PAGE });
+  const html = await box.run("save_file", { path: "x.html" });
+  const server = http.createServer((req, res) => void handleFileRoute(req, res, new URL(req.url!, "http://x"), files));
+  await new Promise<void>(resolve => server.listen(0, resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const local = (url: unknown) => { const u = new URL(String(url)); return `${base}${u.pathname}${u.search}`; };
+  try {
+    const ok = await fetch(local(saved.url));
+    assert.equal(ok.status, 200);
+    assert.equal(await ok.text(), "pdf bytes");
+    assert.equal(ok.headers.get("content-type"), "application/pdf");
+    assert.equal(ok.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(ok.headers.get("referrer-policy"), "no-referrer");
+    assert.match(ok.headers.get("content-disposition")!, /^attachment; filename="[^"]*\.pdf"; filename\*=UTF-8''JUDU%E5%AE%98%E7%BD%91%E8%8E%B7%E5%AE%A2%E8%AF%8A%E6%96%AD\.pdf$/);
+    const page = await fetch(local(html.url));
+    assert.match(page.headers.get("content-disposition")!, /^attachment/);
+    const path = new URL(String(saved.url)).pathname;
+    assert.equal((await fetch(`${base}${path}?t=forged`)).status, 404);
+    assert.equal((await fetch(`${base}${path}`)).status, 404);
+    // Another buyer's file id with a token that is not its own.
+    const other = await runnerFor("u2");
+    await other.run("write", { path: "mine.txt", content: "secret of u2" });
+    const theirs = new URL(String((await other.run("save_file", { path: "mine.txt" })).url));
+    assert.equal((await fetch(`${base}${theirs.pathname}?t=${new URL(String(saved.url)).searchParams.get("t")}`)).status, 404);
+  } finally { server.close(); }
+  void provider;
 });
