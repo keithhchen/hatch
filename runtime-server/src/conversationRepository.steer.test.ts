@@ -192,7 +192,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
 
   test(`${backend}: partial output is persisted on the Run for a snapshot`, options, async () => withBackend(backend, async ({ repository }) => {
     const start = await repository.acceptSubmission(message(0));
-    await repository.savePartialOutput(start.run.id, "Hello wor");
+    await repository.savePartialOutput(start.run.id, { text: "Hello wor" });
     assert.equal((await repository.snapshot(id)).runs[0]!.partialOutput, "Hello wor");
   }));
 

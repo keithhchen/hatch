@@ -23,7 +23,7 @@ export function assertConversationIdentity(actualConversationId, expectedConvers
 }
 
 export const TERMINAL_RUN_STATUSES = Object.freeze(["completed", "failed", "cancelled", "interrupted"]);
-export const ACTIVE_RUN_STATUSES = Object.freeze(["queued", "running", "waiting_for_tool", "waiting_for_approval"]);
+export const ACTIVE_RUN_STATUSES = Object.freeze(["queued", "running", "waiting_for_tool", "waiting_for_approval", "compacting"]);
 export const isTerminalRunStatus = value => TERMINAL_RUN_STATUSES.includes(String(value || "").trim().toLowerCase());
 export const runId = run => String(run?.id ?? run?.run_id ?? "").trim();
 export const activeSnapshotRun = snapshot => snapshot.runs?.find(run => ACTIVE_RUN_STATUSES.includes(run.status)) ?? null;

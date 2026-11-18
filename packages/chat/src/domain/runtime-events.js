@@ -59,6 +59,8 @@ const runHandlers = Object.freeze({
 const sessionHandlers = Object.freeze({
   "session.ready": (_timeline, event) => outcome("ready", { session: event }),
   "session.error": (_timeline, event) => outcome("session_error", { error: event.error }),
+  // The Run in progress as the server has it so far, with the number of its last event: sent when a session opens, so nothing before it is missed.
+  "run.live": (_timeline, event) => outcome("live", { live: event }),
   // One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was.
   "frame.rejected": () => IGNORED,
   // One message was refused, by the key the client gave it. No Run ended: the message may have been meant to join a live one.

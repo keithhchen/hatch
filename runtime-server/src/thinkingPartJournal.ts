@@ -6,6 +6,11 @@ export class ThinkingPartJournal {
 
   constructor(private readonly orderedParts: VisibleConversationPart[]) {}
 
+  /** Whether this part is still being written (its end has not come). */
+  isActive(part: VisibleConversationPart): boolean {
+    return part.type === "thinking" && this.activeParts.get(part.contentIndex) === part;
+  }
+
   accept(delta: AgentDelta["delta"]): void {
     if (delta.kind === "thinking_start") {
       if (this.activeParts.has(delta.contentIndex)) {

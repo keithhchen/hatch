@@ -122,7 +122,7 @@ for (const backend of ["memory", "postgres"] as const) {
 
   test(`${backend}: an ending with no reply keeps the partial output the Run saved; none saved, none written`, options, async () => withBackend(backend, async ({ repository, store }) => {
     const { run } = await repository.acceptSubmission(message(0));
-    await repository.savePartialOutput(run.id, "half an ans");
+    await repository.savePartialOutput(run.id, { text: "half an ans" });
     const swept = await new RunTerminator(repository, new RunEventHub()).end(run.id, endingOf("interrupted", "orphan"));
     assert.equal(swept.messageId, "run-0:1");
     assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "half an ans"]);

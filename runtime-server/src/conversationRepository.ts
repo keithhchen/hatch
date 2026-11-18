@@ -35,6 +35,8 @@ export type EndStatus = "completed" | "failed" | "cancelled" | "interrupted";
 export type LiveRunStatus = Exclude<DurableRunStatus, EndStatus>;
 
 /** What the executor says when it ends a Run: the assistant's reply, and, when it did not complete, why. */
+/** What a Run has produced while it runs: its text, and the parts in the order they came (text ranges, thinking, steps). */
+export type RunPartial = { text: string; parts?: VisibleConversationPart[] };
 export type RunReply = { message: ConversationMessage; finishReason: OutputFinishReason; visibleParts: VisibleConversationPart[] };
 export type RunEnding =
   | { status: "completed"; reply: RunReply }
@@ -110,6 +112,8 @@ export type ConversationRunRecord = {
   consumedCount: number;
   /** Assistant text produced so far, saved periodically so a snapshot is never blank. */
   partialOutput?: string;
+  /** The parts around that text, in order: what an interrupted Run keeps as its reply besides the words. */
+  partialParts?: VisibleConversationPart[];
 };
 
 export type ToolCallOutcome =
@@ -391,7 +395,7 @@ export interface ConversationRepository {
   endCompaction(compactionId: string): Promise<void>;
   /** Appends the transcript checkpoint and the journal entry together, and ends the claim. False when stale. */
   commitCompaction(input: CommitCompactionInput): Promise<boolean>;
-  savePartialOutput(runId: string, text: string, hold?: RunHold): Promise<void>;
+  savePartialOutput(runId: string, partial: RunPartial, hold?: RunHold): Promise<void>;
   /** Atomically takes over active Runs whose owner's lease lapsed. */
   claimOrphanedRuns(executorId: string, leaseMs: number): Promise<ConversationRunRecord[]>;
   /** False when the lease is no longer this executor's. */
@@ -809,11 +813,11 @@ export class InMemoryConversationRepository implements ConversationRepository {
     });
   }
 
-  async savePartialOutput(runId: string, text: string, hold?: RunHold): Promise<void> {
+  async savePartialOutput(runId: string, partial: RunPartial, hold?: RunHold): Promise<void> {
     await this.write(async () => {
       const run = this.runs.get(runId);
       assertHeld(run, hold);
-      if (run && isActiveRun(run.status)) this.runs.set(runId, { ...run, partialOutput: text });
+      if (run && isActiveRun(run.status)) this.runs.set(runId, { ...run, partialOutput: partial.text, ...(partial.parts ? { partialParts: structuredClone(partial.parts) } : {}) });
     });
   }
 
@@ -1301,6 +1305,7 @@ CREATE INDEX IF NOT EXISTS hatch_conversation_runs_conversation_idx
 ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS steered_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS consumed_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS partial_output TEXT;
+ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS partial_parts JSONB;
 -- interrupted_reason is read only, for Runs that ended before failures were structured; new endings write failure.
 ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS failure JSONB;
 
@@ -1630,13 +1635,13 @@ export class PostgresConversationRepository implements ConversationRepository {
     });
   }
 
-  async savePartialOutput(runId: string, text: string, hold?: RunHold): Promise<void> {
+  async savePartialOutput(runId: string, partial: RunPartial, hold?: RunHold): Promise<void> {
     await this.initialize();
     const result = await this.pool.query(`
-      UPDATE hatch_conversation_runs SET partial_output = $2
+      UPDATE hatch_conversation_runs SET partial_output = $2, partial_parts = COALESCE($4::jsonb, partial_parts)
       WHERE id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting') AND ($3::text IS NULL OR executor_id = $3)
       RETURNING id
-    `, [runId, text, hold?.heldBy ?? null]);
+    `, [runId, partial.text, hold?.heldBy ?? null, partial.parts ? JSON.stringify(partial.parts) : null]);
     if (hold && !result.rows.length) throw new RunFenced(runId);
   }
 
@@ -2252,6 +2257,7 @@ type RunRow = QueryResultRow & {
   steered_count: number;
   consumed_count: number;
   partial_output: string | null;
+  partial_parts: VisibleConversationPart[] | null;
 };
 
 type JournalRow = QueryResultRow & {
@@ -2299,7 +2305,8 @@ function runFromRow(row: RunRow): ConversationRunRecord {
     ...(row.executor_lease_expires_at ? { executorLeaseExpiresAt: iso(row.executor_lease_expires_at) } : {}),
     steeredCount: Number(row.steered_count ?? 0),
     consumedCount: Number(row.consumed_count ?? 0),
-    ...(row.partial_output ? { partialOutput: row.partial_output } : {})
+    ...(row.partial_output ? { partialOutput: row.partial_output } : {}),
+    ...(row.partial_parts ? { partialParts: row.partial_parts } : {})
   });
 }
 
@@ -2414,8 +2421,8 @@ export function endingWrites(run: ConversationRunRecord, ending: RunEnding, at: 
 }
 
 /** An ending that brought no reply keeps what the Run saved as it streamed: the text the user may already have read. */
-const savedPartial = (run: ConversationRunRecord): RunReply | undefined => run.partialOutput
-  ? { message: { role: "assistant", content: run.partialOutput }, finishReason: "stop", visibleParts: [{ type: "text", start: 0, end: run.partialOutput.length }] }
+const savedPartial = (run: ConversationRunRecord): RunReply | undefined => run.partialOutput || run.partialParts?.length
+  ? { message: { role: "assistant", content: run.partialOutput ?? "" }, finishReason: "stop", visibleParts: run.partialParts ?? [{ type: "text", start: 0, end: run.partialOutput!.length }] }
   : undefined;
 
 /** A transcript event that is a reply of this Run: an assistant message the model's turn ended with. */

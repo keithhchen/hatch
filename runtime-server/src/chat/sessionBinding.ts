@@ -296,3 +296,10 @@ export function sanitizeBoundHistory<T extends Awaited<ReturnType<RuntimeStore["
     } : {})
   }));
 }
+
+/** A Run in progress as a page may see it: the same redactions as its saved reply. */
+export function protectedLiveRun(live: import("./runLedger.js").LiveRun, productId: string): import("./runLedger.js").LiveRun {
+  const [shown] = sanitizeBoundHistory([{ role: "assistant", timestamp: "", ...live }] as never, productId) as unknown as Array<import("./runLedger.js").LiveRun>;
+  const { content, parts, tool_calls, skill_events, skill_runs } = shown!;
+  return { run_id: live.run_id, seq: live.seq, content, parts, tool_calls, skill_events, skill_runs };
+}

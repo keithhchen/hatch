@@ -5,7 +5,7 @@ import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai"
 import type { ClientToolBroker } from "../clientBroker.js";
 import type { RuntimeCompactionMessage } from "../compaction.js";
 import type { AgentRuntime, RunContext, RuntimeSessionSkills } from "../agentRuntime.js";
-import { ThinkingPartJournal } from "../thinkingPartJournal.js";
+import { VisibleParts } from "./visibleParts.js";
 import {
   TASK_START_MESSAGE_CONTENT,
   type BoundRunStart,
@@ -17,7 +17,7 @@ import {
 import type { RunStateMachine } from "../runState.js";
 import { failures } from "../errors/failures.js";
 import type { ServerToolExecutor } from "../serverTools.js";
-import type { RuntimeStore, VisibleConversationPart } from "../store.js";
+import type { RuntimeStore } from "../store.js";
 import type { ConversationRepository, RunReply } from "../conversationRepository.js";
 import { RunFenced } from "../runHold.js";
 import type { ToolBridge } from "../toolBridge.js";
@@ -153,78 +153,23 @@ async function runModelTurnInternal(
       })
     );
     let approvedAssistantText = "";
-    const visibleParts: VisibleConversationPart[] = [];
-    const thinkingPartJournal = new ThinkingPartJournal(visibleParts);
+    const visible = new VisibleParts();
+    const visibleParts = visible.parts;
     // A Run that fails or is stopped keeps what it already showed: the released text and the steps, as its reply.
     state.keepsReplyFrom(() => approvedAssistantText || visibleParts.length
       ? { message: { role: "assistant", content: approvedAssistantText }, finishReason: "stop", visibleParts: structuredClone(visibleParts) }
       : undefined);
-    const visibleActivityKeys = new Set<string>();
     const recordVisiblePart = (message: OutboundMessage): void => {
-      if (!("run_id" in message) || message.run_id !== input.run_id) return;
-      if (message.type === "assistant.delta" && message.delta.kind === "text") {
-        const end = approvedAssistantText.length;
-        const start = end - message.delta.content.length;
-        if (start < 0) return;
-        const last = visibleParts.at(-1);
-        if (last?.type === "text" && last.end === start) {
-          last.end = end;
-        } else {
-          visibleParts.push({ type: "text", start, end });
-        }
-        return;
-      }
-      if (
-        message.type === "assistant.delta"
-        && (message.delta.kind === "thinking_start"
-          || message.delta.kind === "thinking_delta"
-          || message.delta.kind === "thinking_end")
-      ) {
-        thinkingPartJournal.accept(message.delta);
-        return;
-      }
-      if (message.type === "tool_call.delta") {
-        const key = `tool:${message.tool_call_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "tool_call", tool_call_id: message.tool_call_id });
-        }
-        return;
-      }
-      if (message.type === "skill.invoked" || message.type === "skill.activated") {
-        const key = [
-          "skill",
-          message.status,
-          message.name,
-          message.reason,
-          "source_tool_call_id" in message ? message.source_tool_call_id : ""
-        ].join(":");
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({
-            type: "skill_event",
-            name: message.name,
-            status: message.status,
-            reason: message.reason,
-            ...(message.type === "skill.invoked" ? { source_tool_call_id: message.source_tool_call_id } : {})
-          });
-        }
-        return;
-      }
-      if (message.type === "skill.run") {
-        const key = `skill-run:${message.skill_run_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "skill_run", skill_run_id: message.skill_run_id });
-        }
-      }
+      if ("run_id" in message && message.run_id === input.run_id) visible.accept(message);
     };
     const emit = async (message: OutboundMessage): Promise<void> => {
       await send(message);
       recordVisiblePart(message);
     };
     const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
-      for (const content of result.released) {
+      for (const released of result.released) {
+        // Text that follows steps starts a paragraph of its own, so the stored reply never runs two segments together.
+        const content = visible.separator() + released;
         approvedAssistantText += content;
         const releasedAt = performance.now();
         firstSafeSegment ??= releasedAt;

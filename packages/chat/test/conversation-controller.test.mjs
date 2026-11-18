@@ -255,6 +255,7 @@ test("a reconnect reads the conversation, and a Run that ended while the socket 
   controller.open("conv");
   await flush();
   transport.connections[0].emit({ type: "session.ready", conversation_id: "conv" });
+  await flush();
   assert.equal(controller.getState().activeRun, "run_live");
   const reads = transport.snapshots;
   transport.page = page([{ id: "a1", run_id: "run_live", role: "assistant", content: "done" }], [{ id: "run_live", status: "completed" }], 5);
@@ -352,19 +353,24 @@ test("a reload mid-thinking: the end of a thinking block whose start was never h
   controller.dispose();
 });
 
-test("a reload mid-Run shows the server's steps so far, then the live events continue", async () => {
+test("a reload mid-Run shows the Run as the server has it, in order, then the live events continue and a replayed one is skipped", async () => {
   const { transport, controller } = setup();
-  const tool = (id, status) => ({ run_id: "run_live", tool_call_id: id, name: "box.bash", arguments: {}, status, locality: "server", first_timestamp: "t", timestamp: "t" });
-  transport.page = page([], [{ id: "run_live", status: "running", partial_output: "Hello.", activity: { tool_calls: [tool("t1", "completed"), tool("t2", "requested")], skill_events: [], skill_runs: [] } }]);
+  const tool = (id, status) => ({ run_id: "run_live", tool_call_id: id, name: "box.bash", arguments: {}, status, locality: "server" });
+  const live = { run_id: "run_live", seq: 5, content: "Hello.\n\nMore", tool_calls: [tool("t1", "completed"), tool("t2", "requested")], skill_events: [], skill_runs: [],
+    parts: [{ type: "text", start: 0, end: 6 }, { type: "tool_call", tool_call_id: "t1" }, { type: "thinking", contentIndex: 0, content: "hm", streaming: true }, { type: "tool_call", tool_call_id: "t2" }, { type: "text", start: 6, end: 12 }] };
+  transport.page = page([], [{ id: "run_live", status: "running", live }]);
   controller.open("conv");
   await flush();
   const connection = transport.connections[0];
   const kinds = () => controller.getState().messages.at(-1).timeline.map(entry => entry.kind);
-  assert.deepEqual(kinds(), ["text", "tool", "tool"]);
-  connection.emit({ type: "tool_call.delta", run_id: "run_live", tool_call_id: "t2", name: "box.bash", status: "completed", locality: "server", arguments: {}, result: {} });
-  connection.emit({ type: "tool_call.delta", run_id: "run_live", tool_call_id: "t3", name: "box.bash", status: "requested", locality: "server", arguments: {} });
-  const tools = controller.getState().messages.at(-1).timeline.filter(entry => entry.kind === "tool");
-  assert.deepEqual(tools.map(entry => [entry.id, entry.status]), [["tool-t1", "completed"], ["tool-t2", "completed"], ["tool-t3", "requested"]]);
+  assert.deepEqual(kinds(), ["text", "tool", "thinking", "tool", "text"]);
+  // An event at or below the snapshot's position is skipped; the next one is shown.
+  connection.emit({ type: "tool_call.delta", seq: 5, run_id: "run_live", tool_call_id: "t2", name: "box.bash", status: "completed", locality: "server", arguments: {} });
+  connection.emit({ type: "assistant.delta", seq: 6, run_id: "run_live", delta: { kind: "thinking_delta", contentIndex: 0, delta: "m" } });
+  connection.emit({ type: "tool_call.delta", seq: 7, run_id: "run_live", tool_call_id: "t3", name: "box.bash", status: "requested", locality: "server", arguments: {} });
+  const timeline = controller.getState().messages.at(-1).timeline;
+  assert.deepEqual(timeline.filter(entry => entry.kind === "tool").map(entry => [entry.id, entry.status]), [["tool-t1", "completed"], ["tool-t2", "requested"], ["tool-t3", "requested"]]);
+  assert.equal(timeline.find(entry => entry.kind === "thinking").content, "hmm");
   controller.dispose();
 });
 

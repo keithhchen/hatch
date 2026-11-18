@@ -84,7 +84,7 @@ export class TurnExecutor<Scope> implements RunExecutor {
       (await repository.claimSteeredMessages(run.id)).map(({ message }) => message);
     const partial = withPartialOutput(
       (message) => hub.publish(conversation.id, message),
-      (text) => repository.savePartialOutput(run.id, text)
+      (partial) => repository.savePartialOutput(run.id, partial)
     );
     const publish = (message: OutboundMessage): void => partial.publish(message as unknown as Record<string, unknown>);
     const state = new RunStateMachine(run.id, conversation.id, store as RuntimeStore, async (ending) => {

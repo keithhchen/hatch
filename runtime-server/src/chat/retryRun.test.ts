@@ -76,7 +76,7 @@ for (const backend of ["memory", "postgres"] as const) {
 
   test(`${backend}: a failed Run is answered again by one new Run over the same transcript, after the reply it kept`, options, () => withBackend(backend, async (h) => {
     const { run } = await h.repository.acceptSubmission(message(1));
-    await h.repository.savePartialOutput(run.id, "The first half of an answer");
+    await h.repository.savePartialOutput(run.id, { text: "The first half of an answer" });
     await h.repository.endRun(run.id, endingOf("failed", "fetch failed"));
     const before = (await h.store.readConversation(id)).map((entry) => [entry.role, entry.content]);
 

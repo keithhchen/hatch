@@ -71,7 +71,7 @@ test("partial output is saved at most once per interval and flushed at the end",
   await saver.flush();
   assert.deepEqual(saved, ["a", "abc"]);
   const published: unknown[] = [];
-  const wrapped = withPartialOutput((message) => published.push(message), async (text) => { saved.push(text); }, 0);
+  const wrapped = withPartialOutput((message) => published.push(message), async (partial) => { saved.push(partial.text); }, 0);
   wrapped.publish({ type: "assistant.delta", delta: { kind: "text", content: "hi" } });
   wrapped.publish({ type: "assistant.delta", delta: { kind: "status", content: "thinking" } });
   await wrapped.flush();

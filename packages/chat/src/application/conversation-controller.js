@@ -82,6 +82,8 @@ export class ConversationController {
     /** Messages sent and not yet acknowledged, by clientMessageId. */
     this.pendings = new Map();
     this.runText = new RunText();
+    /** The last event of the Run this page holds, by the number the server gave it: nothing at or below it is shown twice. */
+    this.seen = { runId: null, seq: null };
     this.hasBeenReady = false;
     /** Messages the Run has ended whose saved copy the page has not read yet: `{ runId, entries, saved }`. */
     this.settleMarks = [];
@@ -204,6 +206,7 @@ export class ConversationController {
     this.run = null;
     this.pendings.clear();
     this.runText.reset();
+    this.seen = { runId: null, seq: null };
     this.hasBeenReady = false;
     this.terminalRun = null;
     this.endedRuns.clear();
@@ -253,13 +256,13 @@ export class ConversationController {
     // A message the live row showed is handed over only once the page holds its saved copy: a read that started before it was saved leaves the words where they are.
     const handedOver = this.settleSaved(projected, Boolean(running));
     if (running) {
-      const tail = typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
+      // The Run as the server has it, in order, when the server says it; otherwise the text it saved.
+      const replaced = running.live ? this.applyLive(running.live) : false;
+      const tail = !running.live && typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
       if (tail) this.timeline.appendText(tail);
-      // The steps the Run has taken so far come from the server, so a page that joined mid-Run shows them all.
-      const steps = running.activity ? this.timeline.restoreActivity({ run_id: running.id, ...running.activity }) : null;
       if (!projected.some(message => message.transient && message.run_id === running.id)) {
         projected = [...projected, { ...this.liveRow(running.id, projected), timeline: this.timeline.snapshot() }];
-      } else if (tail || steps) {
+      } else if (tail || replaced) {
         projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
       }
     }
@@ -283,6 +286,30 @@ export class ConversationController {
     if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
     this.readFailure = null;
     return { stale: false };
+  }
+
+  /**
+   * Shows the Run as the server has it so far, in the form of a saved reply, so what a page shows of a Run is the same whether it
+   * watched it, reloaded in the middle, or opened it after. False when the page already holds this much of the Run or more.
+   */
+  applyLive(live) {
+    if (this.seen.runId === live.run_id && this.seen.seq !== null && live.seq <= this.seen.seq) return false;
+    this.reveal.discard(live.run_id);
+    this.resetTimeline();
+    this.timeline.restoreMessage(live);
+    this.runText.reset(live.run_id);
+    this.runText.take(live.run_id, live.content ?? "", 0);
+    this.seen = { runId: live.run_id, seq: live.seq };
+    return true;
+  }
+
+  /** The server numbers each event of a Run: one this page holds already (the live part of a snapshot, an event after a reconnect) is skipped. */
+  heard(event) {
+    if (typeof event.seq !== "number" || !event.run_id || event.run_id !== this.run?.id) return false;
+    if (this.seen.runId !== event.run_id) this.seen = { runId: event.run_id, seq: null };
+    const known = this.seen.seq !== null && event.seq <= this.seen.seq;
+    if (!known) this.seen.seq = event.seq;
+    return known;
   }
 
   /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. A read that fails is tried once more before it is shown. */
@@ -559,6 +586,7 @@ export class ConversationController {
     // The server said which Run a message joined: when that is not the Run this page minted for it (another tab's Run was live), the page follows the server.
     const rival = event.type === "message.accepted" && this.run && event.run_id !== this.run.id && this.pendings.get(event.client_message_id)?.runId === this.run.id;
     if ((this.run?.provisional || rival) && event.run_id && event.run_id !== this.run.id && isRunEvent(event)) this.adoptRun(event.run_id);
+    if (this.heard(event)) return;
     const boundary = textRevealBoundary(event);
     if (boundary === "flush") this.reveal.flush(event.run_id);
     else if (boundary === "discard") this.reveal.discard(event.run_id);
@@ -582,6 +610,11 @@ export class ConversationController {
       if (outcome.committed === "user" && outcome.messageId && this.state.messages.some(message => message.id === outcome.messageId)) return;
       if (outcome.committed === "assistant") this.markSettled();
       this.requestRefresh(conversationId);
+    },
+    live(outcome, { conversationId }) {
+      // A Run this page does not hold (it started while the page was away): a read adopts it, and brings the same account.
+      if (this.run?.id !== outcome.live.run_id) { this.requestRefresh(conversationId); return; }
+      if (this.applyLive(outcome.live)) this.publishTimeline(timeline => timeline.snapshot());
     },
     timeline(outcome) {
       this.publishTimeline(timeline => timeline.snapshot());
@@ -625,7 +658,8 @@ export class ConversationController {
       this.setState(state => ({ session, connection: "open", ...(state.status.key === "reconnecting" ? { status: { key: "connected" } } : {}) }));
       this.dispatchPending(connection, conversationId);
       // Whatever happened while the session was down was not heard: read it.
-      if (this.hasBeenReady) this.requestRefresh(conversationId);
+      // A page that read its snapshot before the session opened missed what came between: the Run it holds is read again.
+      if (this.hasBeenReady || (this.run && !this.run.provisional)) this.requestRefresh(conversationId);
       this.hasBeenReady = true;
       if (this.taskStart === conversationId) {
         this.taskStart = null;

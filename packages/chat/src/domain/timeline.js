@@ -112,8 +112,11 @@ export class ChatTimeline {
     return this.patch(id, entry => ({ ...entry, content, streaming: false }));
   }
 
-  restoreThinking(contentIndex, content) {
-    this.entries = [...this.entries, { kind: "thinking", id: "thinking-" + contentIndex + "-" + ++this.sequence, contentIndex, title: "thinking", content, streaming: false }];
+  /** A thinking step as the server has it; one still being written goes on streaming, so the deltas that follow join it. */
+  restoreThinking(contentIndex, content, streaming = false) {
+    const entry = { kind: "thinking", id: "thinking-" + contentIndex + "-" + ++this.sequence, contentIndex, title: "thinking", content, streaming };
+    this.entries = [...this.entries, entry];
+    if (streaming) this.activeThinking.set(contentIndex, entry.id);
     return this.entries;
   }
 
@@ -202,45 +205,46 @@ export class ChatTimeline {
     return { id: `stream-${runId}`, renderKey: `${runId}-assistant`, run_id: runId, role: "assistant", content: "", timestamp, transient: true, timeline: [] };
   }
 
-  /** What a Run in progress has shown besides its text (the server's account of it): each step is placed once, by its id. */
-  restoreActivity({ run_id: runId, tool_calls: tools = [], skill_events: skills = [], skill_runs: runs = [] }) {
-    for (const tool of tools) this.upsertTool(toolEvent(tool, runId));
-    for (const event of skills) this.upsertSkill({ run_id: runId, ...event });
-    for (const run of runs) this.upsertSkillRun({ run_id: runId, ...run });
-    return this.entries;
-  }
-
   /** Project a durable assistant message (protocol 0.8 `parts`) into timeline entries. */
   static fromHistory(message) {
     const timeline = new ChatTimeline();
+    timeline.restoreMessage(message);
+    return timeline.snapshot();
+  }
+
+  /**
+   * Puts a message's parts on the timeline in their order. A saved reply and a Run in progress have the same shape, so both are
+   * shown by this one function: what a page shows of a Run is the same whenever and however it was loaded.
+   */
+  restoreMessage(message) {
     const tools = new Map((message.tool_calls ?? []).map(tool => [tool.tool_call_id, tool]));
     const skillRuns = new Map((message.skill_runs ?? []).map(run => [run.skill_run_id, run]));
     if (!Array.isArray(message.parts) || !message.parts.length) {
-      timeline.appendText(message.content ?? "");
-      for (const tool of message.tool_calls ?? []) timeline.upsertTool(toolEvent(tool, message.run_id));
-      return timeline.snapshot();
+      this.appendText(message.content ?? "");
+      for (const tool of message.tool_calls ?? []) this.upsertTool(toolEvent(tool, message.run_id));
+      return this.entries;
     }
     for (const part of message.parts) {
       if (part.type === "text") {
         const start = Math.max(0, Number(part.start) || 0);
         const end = Math.max(start, Number(part.end) || 0);
-        timeline.appendText(String(message.content ?? "").slice(start, end));
+        this.appendText(String(message.content ?? "").slice(start, end));
       } else if (part.type === "thinking") {
-        timeline.restoreThinking(Number(part.contentIndex), String(part.content ?? ""));
+        this.restoreThinking(Number(part.contentIndex), String(part.content ?? ""), part.streaming === true);
       } else if (part.type === "tool_call") {
         const tool = tools.get(part.tool_call_id);
-        if (tool) timeline.upsertTool(toolEvent(tool, message.run_id));
+        if (tool) this.upsertTool(toolEvent(tool, message.run_id));
       } else if (part.type === "skill_run") {
         const run = skillRuns.get(part.skill_run_id);
-        if (run) timeline.upsertSkillRun({ run_id: message.run_id, ...run });
+        if (run) this.upsertSkillRun({ run_id: message.run_id, ...run });
       } else if (part.type === "skill_event") {
         const event = (message.skill_events ?? []).find(candidate => candidate.name === part.name
           && candidate.status === part.status && candidate.reason === part.reason
           && (candidate.source_tool_call_id ?? "") === (part.source_tool_call_id ?? ""));
-        if (event) timeline.upsertSkill({ run_id: message.run_id, ...event });
+        if (event) this.upsertSkill({ run_id: message.run_id, ...event });
       }
     }
-    return timeline.snapshot();
+    return this.entries;
   }
 }
 

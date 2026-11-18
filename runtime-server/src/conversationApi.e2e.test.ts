@@ -848,7 +848,7 @@ test("Runtime startup ends a Run whose owner's lease lapsed as interrupted, keep
   const reading = await carried("reading");
   const waiting = await carried("waiting");
   // The dead process had streamed part of a reply to the first Run, and asked a local tool in the second.
-  await repository.savePartialOutput(reading.run.id, "partial reading");
+  await repository.savePartialOutput(reading.run.id, { text: "partial reading" });
   const asked = new RuntimeStore(dataDir);
   await asked.append({ type: "conversation.model_message", conversation_id: waiting.conversation.id, run_id: waiting.run.id,
     message: { role: "assistant", content: null, tool_calls: [{ id: "call_lost", type: "function", function: { name: "file_search", arguments: "{}" } }] } });

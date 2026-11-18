@@ -12,6 +12,7 @@ import {
   conversationBinding,
   durableConversationId,
   privateBoundaryProjection,
+  protectedLiveRun,
   sanitizeBoundHistory,
   type LegacyHmacAuth
 } from "../chat/sessionBinding.js";
@@ -263,13 +264,13 @@ export async function handleConversationHttpRequest(
         conversation: publicConversation(snapshot.conversation),
         ...page,
         messages: sanitizeBoundHistory(page.messages, binding.productId),
-        // A Run still going also tells what it has shown besides its text, so a page that joins now sees every step so far.
-        runs: await Promise.all([...runs.values()].map(async (run) => {
-          if (TERMINAL_STATUSES.has(run.status)) return publicRun(run);
-          const activity = await store.readRunActivity(conversation.id, run.id);
-          const [shown] = sanitizeBoundHistory([{ run_id: run.id, role: "assistant" as const, content: "", timestamp: "", ...activity }], binding.productId);
-          return { ...publicRun(run), activity: { tool_calls: shown?.tool_calls ?? [], skill_events: shown?.skill_events ?? [], skill_runs: shown?.skill_runs ?? [] } };
-        })),
+        // A Run still going also tells everything it has shown so far, in order, and where in its events that stands: the page then skips those and hears the rest.
+        runs: [...runs.values()].map((run) => {
+          const live = TERMINAL_STATUSES.has(run.status) ? undefined : edge?.chat.hub.liveRun(conversation.id, run.id);
+          return { ...publicRun(run), ...(live ? { live: protectedLiveRun(live, binding.productId) } : {}) };
+        }),
+        // The history is being summarized, in a Run or after a reply: a page that opens now keeps its composer waiting.
+        compacting: [...runs.values()].some((run) => run.status === "compacting") || Boolean(await repository.runningCompaction(conversation.id)),
         events: [],
         cursor: snapshot.cursor
       });

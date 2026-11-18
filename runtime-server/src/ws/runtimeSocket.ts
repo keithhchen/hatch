@@ -14,6 +14,7 @@ import { SocketSink, projecting } from "../chat/sinks.js";
 import {
   conversationBinding,
   privateBoundaryProjection,
+  protectedLiveRun,
   resolveHelloAuthClaims,
   resolveSessionBinding,
   type LegacyHmacAuth,
@@ -247,6 +248,10 @@ export async function handleRuntimeSocket(
             // A connection sees its conversation's live events, whoever started the Run.
             // Subscribed before the ready frame is awaited: a client that answers it at once cannot outrun its own subscription.
             detach = chat.hub.subscribe(conversation.id, sink);
+            // In the same step as the subscription: the Run as it stands, then each event after it. A page that reloaded, or came back
+            // from an outage, learns everything that happened while it was away, and skips what it already holds by the events' `seq`.
+            const live = chat.hub.liveRun(conversation.id);
+            if (live) sink.push({ type: "run.live", ...protectedLiveRun(live, binding.productId) });
             await ready;
             await replayPendingToolRequests(conversation.id);
             startEstablishedConnectionHeartbeat();

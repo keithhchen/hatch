@@ -603,20 +603,6 @@ export class RuntimeStore {
     return this.projectConversationToolDetail(conversationId, runId, toolCallId, await this.readEvents());
   }
 
-  /** What an active Run has shown so far besides its text: its tool calls and skills, for a page that joins mid-Run. */
-  async readRunActivity(conversationId: string, runId: string): Promise<Pick<VisibleConversationMessage, "tool_calls" | "skill_events" | "skill_runs">> {
-    const events = (await this.readEvents(conversationId)).filter((event) => event.type === "tool.call" || event.type === "skill.activated" || event.type === "skill.invoked" || event.type === "skill.run");
-    return this.projectRunActivity(conversationId, runId, events);
-  }
-
-  protected async projectRunActivity(conversationId: string, runId: string, events: StoreEvent[]): Promise<Pick<VisibleConversationMessage, "tool_calls" | "skill_events" | "skill_runs">> {
-    const mine = events.filter((event) => "run_id" in event && event.run_id === runId);
-    const [projected] = await RuntimeStore.prototype.readVisibleConversation.call(this, conversationId, [...mine, {
-      type: "message.created", conversation_id: conversationId, run_id: runId, role: "assistant", content: "", timestamp: ""
-    }]);
-    return { tool_calls: projected?.tool_calls, skill_events: projected?.skill_events, skill_runs: projected?.skill_runs };
-  }
-
   protected async projectConversationToolDetail(conversationId: string, runId: string, toolCallId: string, events: StoreEvent[]): Promise<VisibleConversationToolCall | undefined> {
     const matches = events.filter((event) => event.type === "tool.call" && event.conversation_id === conversationId
       && event.run_id === runId && event.tool_call_id === toolCallId);

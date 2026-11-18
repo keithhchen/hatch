@@ -1,5 +1,6 @@
 import type { EventRelay } from "./eventRelay.js";
 import { TERMINAL_STATUSES } from "./runResult.js";
+import { RunLedger, type LiveRun } from "./runLedger.js";
 
 /** A Run's text longer than this keeps only its tail in memory; the snapshot holds all of it. */
 const MAX_LIVE_TEXT = 1024 * 1024;
@@ -19,6 +20,7 @@ export interface EventSink {
 export class RunEventHub {
   private readonly sinks = new Map<string, Set<EventSink>>();
   private readonly live = new Map<string, LiveText>();
+  private readonly ledgers = new Map<string, RunLedger>();
 
   constructor(private readonly relay?: EventRelay) {}
 
@@ -37,9 +39,22 @@ export class RunEventHub {
     };
   }
 
+  /** Numbers each event of a Run in order, so any observer can tell what it holds from what it has not heard. */
   publish(conversationId: string, event: Record<string, unknown>): void {
-    this.deliver(conversationId, event);
-    this.relay?.publish(conversationId, event);
+    const ledger = this.ledgers.get(conversationId);
+    const numbered = typeof event.run_id === "string" && typeof event.seq !== "number"
+      ? { ...event, seq: (ledger?.runId === event.run_id ? ledger.seq : 0) + 1 } : event;
+    this.deliver(conversationId, numbered);
+    this.relay?.publish(conversationId, numbered);
+  }
+
+  /**
+   * The Run in progress as a page would have shown it so far, undefined when there is none or this instance did not hear all of it.
+   * A page that applies it and then skips every event numbered at or below `seq` has seen each event exactly once.
+   */
+  liveRun(conversationId: string, runId?: string): LiveRun | undefined {
+    const ledger = this.ledgers.get(conversationId);
+    return ledger?.complete && !ledger.ended && (!runId || ledger.runId === runId) ? ledger.view() : undefined;
   }
 
   /** The Run's text so far as one delta; a client that already holds part of it skips that part by offset. */
@@ -49,7 +64,12 @@ export class RunEventHub {
   }
 
   private track(conversationId: string, event: Record<string, unknown>): void {
-    if (event.type === "turn.state" && TERMINAL_STATUSES.has(String(event.status))) { this.live.delete(conversationId); return; }
+    if (event.type === "turn.state" && TERMINAL_STATUSES.has(String(event.status))) { this.live.delete(conversationId); const ledger = this.ledgers.get(conversationId); if (ledger?.runId === event.run_id) ledger.end(); return; }
+    if (typeof event.run_id === "string") {
+      let ledger = this.ledgers.get(conversationId);
+      if (ledger?.runId !== event.run_id) { ledger = new RunLedger(event.run_id); this.ledgers.set(conversationId, ledger); }
+      ledger.accept(event);
+    }
     const delta = event.type === "assistant.delta" ? event.delta as { kind?: string; content?: string; offset?: number } : undefined;
     if (delta?.kind !== "text" || typeof delta.content !== "string" || typeof delta.offset !== "number") return;
     let live = this.live.get(conversationId);
