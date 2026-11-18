@@ -149,6 +149,12 @@ services:
       HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${HATCH_CREATOR_NAS_GATEWAY_TOKEN:?set HATCH_CREATOR_NAS_GATEWAY_TOKEN in /opt/hatch/.env}
       # The token the Registry's channel layer presents to reach Chat; without it that door stays shut.
       HATCH_RUNTIME_CHAT_SERVICE_TOKEN: ${HATCH_RUNTIME_CHAT_SERVICE_TOKEN:?set HATCH_RUNTIME_CHAT_SERVICE_TOKEN in /opt/hatch/.env}
+      # The Agent's own computer (BoxLite Cloud) for Products with the agent_box capability; off without a key.
+      BOXLITE_API_KEY: ${BOXLITE_API_KEY:-}
+      HATCH_AGENT_BOX_IMAGE: ${HATCH_AGENT_BOX_IMAGE:-}
+      # Signs the links of pages the Agent publishes (/html/<id>), which point at HATCH_DOMAIN_ALIAS.
+      HATCH_CREDENTIALS_KEY: ${HATCH_CREDENTIALS_KEY:-}
+      HATCH_DOMAIN_ALIAS: ${HATCH_DOMAIN_ALIAS:-gethatchapp.com}
       # Kimi Hosted Agents: renders artifact reports to PDF. Report mode fails loudly when unset.
       HATCH_MANAGED_AGENTS_API_KEY: ${HATCH_MANAGED_AGENTS_API_KEY:-}
       # Public web search for report mode (HATCH_SEARCH_PROVIDER picks the provider; default parallel).

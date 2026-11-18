@@ -134,6 +134,12 @@
         import upstream registry 8100
     }
 
+    # Pages the Agent publishes from its computer (/html/<uuid>): a signed link, no session, served sandboxed. The Runtime owns them.
+    @html_pages path /html/*
+    handle @html_pages {
+        import upstream runtime 8400
+    }
+
     # All browser APIs belong to the cookie-backed Dashboard BFF. In
     # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {

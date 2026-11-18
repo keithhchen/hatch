@@ -953,8 +953,8 @@ export function chatToolsForRun(
       || spec.runtimeName.startsWith("hatch.")
       // Chat's Unix-style attachment retrieval is part of every Run's fixed surface.
       || spec.runtimeName.startsWith("attachments.")
-      // Studio and report tools belong to one kind of conversation: it has them only when its agent names them.
-      || (allowed === undefined ? !spec.runtimeName.startsWith("studio.") && !spec.runtimeName.startsWith("artifact.") : allowed.has(spec.runtimeName))
+      // Studio, report and box tools belong to one kind of conversation: it has them only when its agent names them.
+      || (allowed === undefined ? !["studio.", "artifact.", "box."].some((prefix) => spec.runtimeName.startsWith(prefix)) : allowed.has(spec.runtimeName))
     ))
     .map((spec) => tool(spec.name, spec.clientTool ? describeLocalTool(spec.clientTool, spec.description) : spec.description, spec.properties, spec.required));
   const creatorTools = externalToolDefinitions.map((definition) => tool(
@@ -1083,7 +1083,7 @@ export async function executeChatTool(
   if (creatorTool) {
     return ctx.serverTools.executeCreatorTool(creatorTool, args, executionSignal);
   }
-  const dispatch = requireModelToolDispatch(name);
+  const dispatch = requireModelToolDispatch(name, ctx.allowedExternalTools);
   const documentSkillName = documentSkillNameForPath(String(args.path ?? ""));
   const documentSkill = documentSkillName
     ? findDocumentSkillForPath(ctx.sessionSkills.records, String(args.path ?? ""))
@@ -1254,7 +1254,7 @@ export function toolEventBase(
       ...(ctx?.skillRunId ? { skill_run_id: ctx.skillRunId } : {})
     };
   }
-  const dispatch = requireModelToolDispatch(name);
+  const dispatch = requireModelToolDispatch(name, ctx?.allowedExternalTools);
   if (dispatch.target === "server") {
     return {
       type: "tool_call.delta",

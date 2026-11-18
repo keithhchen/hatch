@@ -73,6 +73,10 @@ import { ChatAnalytics } from "./chat/chatAnalytics.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
+import { openAgentBoxMode } from "./agentBox/open.js";
+import type { AgentBoxMode } from "./agentBox/tools.js";
+import type { HtmlPages } from "./agentBox/htmlPages.js";
+import { GUEST_PREFIX } from "./chat/principal.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { MAX_CONSUMER_BUFFERED_BYTES } from "./chat/sinks.js";
 import { productRequiresLocalTools } from "./chat/toolSurface.js";
@@ -184,6 +188,8 @@ export type RuntimeServerOptions = {
   chatAssets?: ChatAssets;
   /** Report mode: products that offer it, and conversations that are reports. */
   artifact?: ArtifactMode;
+  /** The Agent's own computer and the pages it publishes, for the Products that have it. */
+  agentBox?: { mode: AgentBoxMode; pages: HtmlPages };
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -248,6 +254,8 @@ export async function createRuntimeServerFromEnvironment(
   const artifact = conversationStore instanceof PostgresStore && chatAssets
     ? await openArtifactMode({ pool: conversationStore.pool, blobs: chatBlobs!, assets: chatAssets, renderer: new ChromiumReportRenderer(), analytics, search: configuredSearch(environment) })
     : undefined;
+  // The Agent's own computer, for the Products that have it switched on: off without a BoxLite key.
+  const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -274,6 +282,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment), { analytics }) }; })() : {}),
     ...(chatAssets ? { chatAssets } : {}),
     ...(artifact ? { artifact } : {}),
+    ...(agentBox ? { agentBox } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -398,6 +407,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (chatAssets) for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
   const artifact = options.artifact;
   if (artifact) for (const definition of artifactToolDefinitions()) toolRegistry.set(definition.name, definition);
+  const agentBox = options.agentBox;
+  if (agentBox) for (const definition of agentBox.mode.definitions()) toolRegistry.set(definition.name, definition);
   const parts: PartsReader = chatAssets ?? new TextPartsReader();
 
   const admission: RunAdmission = {
@@ -444,6 +455,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         const report = await artifact?.turnFor(turn.conversation, turn.run);
         if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation, report ? "flat" : "messages"));
         if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
+        const box = report ? undefined : await agentBox?.mode.turnFor({ productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX) });
+        serverTools.setBox(box?.tools);
         const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
         await runModelTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
@@ -451,7 +464,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
-          { usage: turn.usage, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
+          { usage: turn.usage, ...box ? { extraTools: box.extraTools } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
       } catch (error) {
         await failRun(turn, error);
@@ -553,6 +566,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       readiness,
       allowedOrigins,
       artifact,
+      htmlPages: agentBox?.pages,
       guests: options.guestTokens,
       ...(options.library ? { carryOver: new GuestCarryOver({ repository: conversationRepository, library: options.library }) } : {})
     }, requestAbortController.signal);

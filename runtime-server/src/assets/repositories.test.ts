@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
-import { Asset, AssetError, scopeKey, type AssetRepository } from "./domain.js";
+import { Asset, AssetError, scopeKey, type AssetRepository, type AssetScope } from "./domain.js";
 import { scopeA, scopeB } from "./kit.test.js";
 import { InMemoryAssetRepository, PostgresAssetRepository } from "./repositories.js";
 
-const fresh = (sha256: string = randomUUID(), scope = scopeA) => Asset.received({ scope, sha256, kind: "file", mime: "text/plain", name: "a.txt", bytes: 1 });
+const fresh = (sha256: string = randomUUID(), scope: AssetScope = scopeA) => Asset.received({ scope, sha256, kind: "file", mime: "text/plain", name: "a.txt", bytes: 1 });
 const code = (promise: Promise<unknown>) => promise.then(() => "ok", (e: unknown) => e instanceof AssetError ? e.code : String(e));
 
 /** The contract both adapters must meet. The database one is what makes it true under concurrency. */

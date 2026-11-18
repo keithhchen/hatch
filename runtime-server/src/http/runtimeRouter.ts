@@ -20,6 +20,7 @@ import type { RuntimeStore } from "../store.js";
 import { ResponsesHttpApi } from "../responses/router.js";
 import type { ArtifactMode } from "../artifact/mode.js";
 import { handleProductArtifactRequest } from "../artifact/routes.js";
+import { handleHtmlRoute, type HtmlPages } from "../agentBox/htmlPages.js";
 import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
   bearerToken,
@@ -58,6 +59,8 @@ export type RuntimeHttpDeps = {
   /** Guests: how a visitor's signed id is verified, and what happens to their conversations when they sign in. */
   guests?: GuestTokens;
   carryOver?: Pick<GuestCarryOver, "carry">;
+  /** Pages the Agent published (/html/<id>), opened by their signed link. */
+  htmlPages?: HtmlPages;
 };
 
 export async function handleHttpRequest(
@@ -82,6 +85,7 @@ export async function handleHttpRequest(
     writeJson(res, 200, { ok: true });
     return;
   }
+  if (url.pathname.startsWith("/html/") && await handleHtmlRoute(req, res, url, deps.htmlPages)) return;
   if (req.method === "GET" && url.pathname === "/readyz") {
     const repository = readiness?.repository ?? "failed";
     const ready = !readiness?.draining && repository === "ready";

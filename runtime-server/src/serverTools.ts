@@ -1,6 +1,7 @@
 import { requireTool } from "./tools.js";
 import type { RuntimeCreatorTool } from "./creatorTools.js";
 import type { ToolOutput } from "./assets/toolOutput.js";
+import type { BoxToolRunner } from "./agentBox/tools.js";
 import { assertBoundedJsonValue, readBoundedJsonObject, readBoundedResponseText } from "./boundedResponse.js";
 
 type McpServerConfig = {
@@ -17,6 +18,7 @@ export class ServerToolExecutor {
   private attachments?: AttachmentRunner;
   private studio?: HostToolRunner;
   private artifact?: HostToolRunner;
+  private box?: BoxToolRunner;
   private observer?: (name: string, args: Record<string, unknown>) => void;
 
   constructor(private readonly timeoutMs = 120000) {}
@@ -39,6 +41,11 @@ export class ServerToolExecutor {
   /** The report tools of an artifact conversation (`artifact.*`). */
   setArtifact(runner: HostToolRunner | undefined): void {
     this.artifact = runner;
+  }
+
+  /** The Agent's own computer (`box.*`), bound to the buyer it belongs to; `read` and `ls` of a path in it go there. */
+  setBox(runner: BoxToolRunner | undefined): void {
+    this.box = runner;
   }
 
   setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
@@ -75,6 +82,20 @@ export class ServerToolExecutor {
     // /report/ is the report's own files, mounted beside /attachments/: the same read and ls reach either.
     if (this.artifact && (name === "attachments.read" || name === "attachments.ls") && typeof parsedArgs.path === "string" && parsedArgs.path.startsWith("/report/")) {
       const result = await this.artifact.run(name.slice("attachments.".length), parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
+    if (this.box && (name === "attachments.read" || name === "attachments.ls") && this.box.owns(parsedArgs.path)) {
+      const result = await this.box.run(name.slice("attachments.".length), parsedArgs, signal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
+    if (name.startsWith("box.")) {
+      if (!this.box) throw new Error("This conversation has no computer.");
+      // A command sets its own deadline (up to five minutes).
+      const result = await this.box.run(name.slice("box.".length), parsedArgs, signal);
       assertBoundedJsonValue(result);
       return result;
     }

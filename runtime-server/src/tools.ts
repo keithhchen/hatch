@@ -343,18 +343,20 @@ export function modelToolSpecsForRun(
     .filter((spec) => modelToolAvailable(spec, clientTools, options));
 }
 
-export function requireModelTool(name: string): ModelToolSpec {
-  const spec = [...toolRegistry.values()]
+/** Two kinds of conversation may give one model name to different tools (write, edit): the one this Run is allowed wins. */
+export function requireModelTool(name: string, allowed?: readonly string[]): ModelToolSpec {
+  const matches = [...toolRegistry.values()]
     .flatMap((tool) => tool.model ? [toModelToolSpec(tool)] : [])
-    .find((tool) => tool.name === name);
+    .filter((tool) => tool.name === name);
+  const spec = matches.find((tool) => allowed?.includes(tool.runtimeName)) ?? matches[0];
   if (!spec) {
     throw new Error(`Unknown Pi tool: ${name}`);
   }
   return spec;
 }
 
-export function requireModelToolDispatch(name: string): ModelToolDispatch {
-  const spec = requireModelTool(name);
+export function requireModelToolDispatch(name: string, allowed?: readonly string[]): ModelToolDispatch {
+  const spec = requireModelTool(name, allowed);
   if (spec.locality === "server") {
     return {
       target: "server",

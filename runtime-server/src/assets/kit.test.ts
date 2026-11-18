@@ -10,7 +10,7 @@ import { AssetPipeline } from "./pipeline.js";
 import { FileProcessor, ImageProcessor, VoiceProcessor } from "./processors.js";
 import { InMemoryAssetRepository } from "./repositories.js";
 
-export const scopeA: AssetScope = { kind: "account", accountId: "acct-1", conversationId: "conv-1" };
+export const scopeA = { kind: "account", accountId: "acct-1", conversationId: "conv-1" } satisfies AssetScope;
 export const scopeB: AssetScope = { kind: "account", accountId: "acct-2", conversationId: "conv-1" };
 export const contact = (connectionId: string, contactId: string, conversationId = "conv-1"): AssetScope => ({ kind: "contact", connectionId, contactId, conversationId });
 
