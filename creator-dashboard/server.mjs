@@ -142,10 +142,11 @@ export async function createDashboardApp(options = {}) {
   const startWebSession = async (request, response, auth, method, created = false) => {
     const profile = publicProfile(auth.account);
     const webSession = await portalState.createWebSession(auth.token, profile, {
-      registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
+      registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey),
+      absolute_expires_at: auth.session?.expires_at
     });
     track(profile.id, created ? signupCompleted(method) : signedIn(method));
-    setWebSessionCookies(request, response, webSession.session_id);
+    setWebSessionCookies(request, response, webSession.session_id, webSessionMaxAge(portalState, webSession));
     return profile;
   };
   const fetchImpl = propagatingFetch(options.fetchImpl ?? fetch);
@@ -450,6 +451,7 @@ export async function createDashboardApp(options = {}) {
       response.__hatchRequestId = requestId;
       response.__includeRequestId = url.pathname.startsWith("/v1/");
       request.__oauthStateKey = oauthStateKey;
+      request.__response = response;
       response.setHeader("x-request-id", requestId);
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
@@ -2430,6 +2432,10 @@ async function authenticate(request, registryUrl, fetchImpl, portalState) {
     bindAccount(profile.id);
     request.__registryToken = token;
     request.__oauthScopes = oauthToken?.scopes;
+    if (webSession && request.__response && !request.__response.headersSent) {
+      const slid = await portalState.touchWebSession(webSessionId).catch(() => undefined);
+      if (slid && !request.__response.headersSent) setWebSessionCookies(request, request.__response, webSessionId, webSessionMaxAge(portalState, slid), { append: true });
+    }
     return { profile, account, token };
   } catch (error) {
     if (error?.status === 401) {
@@ -3270,11 +3276,17 @@ function redirect(response, location) {
   response.end();
 }
 
-function setWebSessionCookies(request, response, token) {
+function webSessionMaxAge(portalState, session) {
+  return Math.max(0, Math.floor((Date.parse(session.expires_at) - portalState.clock().getTime()) / 1000));
+}
+
+function setWebSessionCookies(request, response, token, maxAge, { append = false } = {}) {
   const secure = requestIsSecure(request);
   const secureAttribute = secure ? "; Secure" : "";
-  const common = `Path=/; SameSite=Lax; Max-Age=43200${secureAttribute}`;
+  const common = `Path=/; SameSite=Lax; Max-Age=${maxAge}${secureAttribute}`;
+  const existing = append ? [response.getHeader("set-cookie") ?? []].flat() : [];
   response.setHeader("set-cookie", [
+    ...existing,
     `hatch_web_session=${encodeURIComponent(token)}; ${common}; HttpOnly`,
     `hatch_web_csrf=${encodeURIComponent(webCsrfToken(token))}; ${common}`
   ]);
