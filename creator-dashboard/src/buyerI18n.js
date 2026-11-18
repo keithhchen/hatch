@@ -57,7 +57,6 @@ const ENTRIES = {
   "Agent details": ["Agent 详情", "Agent の詳細"],
   "How it works": ["使用方式", "ご利用の流れ"],
   "Start a conversation": ["开始对话", "会話を開始"],
-  "Chat right in your browser. No account needed.": ["在浏览器里直接对话，无需账户。", "ブラウザでそのまま会話できます。アカウントは不要です。"],
   "Pick up where you left off": ["随时接着聊", "続きからいつでも"],
   "Agents you chat with are saved to My library.": ["聊过的 Agent 会保存在我的库里。", "会話した Agent はマイライブラリに保存されます。"],
   "The expert's own judgment": ["专家本人的判断", "専門家本人の判断"],

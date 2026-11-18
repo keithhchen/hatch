@@ -141,7 +141,25 @@ export async function createDashboardApp(options = {}) {
     });
     track(profile.id, created ? signupCompleted(method) : signedIn(method));
     setWebSessionCookies(request, response, webSession.session_id, webSessionMaxAge(portalState, webSession));
+    // Whatever way the visitor signed in, the guest's conversations become the account's before the first page of it loads.
+    await carryOverGuest(request, response, auth.token, profile.id).catch(() => {});
     return profile;
+  };
+  // Moves the browser's guest conversations to the account; a failure throws and keeps the cookie so it can be retried.
+  const carryOverGuest = async (request, response, token, accountId) => {
+    const guestToken = requestCookies(request).hatch_guest;
+    if (!guestTokens?.verify(guestToken)) return 0;
+    const upstream = await fetchImpl(new URL("/v1/guest/carry-over", runtimeUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ guest_token: guestToken })
+    });
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) throw Object.assign(new Error("carry_over_failed"), { status: upstream.status, payload });
+    const moved = Number(payload.moved) || 0;
+    response.setHeader("set-cookie", [[response.getHeader("set-cookie") ?? []].flat(), guestCookie(request, "", 0)].flat());
+    if (moved > 0) track(accountId, guestSignedInCarriedOver(moved));
+    return moved;
   };
   const fetchImpl = propagatingFetch(options.fetchImpl ?? fetch);
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
@@ -212,7 +230,7 @@ export async function createDashboardApp(options = {}) {
   const payoutReconcileAfterMs = Math.max(0, Number(options.payoutReconcileAfterMs
     ?? process.env.HATCH_PAYOUT_RECONCILE_AFTER_MS
     ?? 60_000));
-  const resolveCreatorNames = async (creatorIds) => {
+  const resolveCreatorAccounts = async (creatorIds) => {
     const ids = [...new Set(creatorIds.map((id) => String(id ?? "")).filter(Boolean))];
     if (!ids.length) return new Map();
     if (!registryDeploymentServiceToken) {
@@ -229,14 +247,14 @@ export async function createDashboardApp(options = {}) {
       if (!Array.isArray(payload?.accounts)) throw new Error("Registry account response is malformed.");
       return payload.accounts;
     });
-    const names = new Map(accounts.map((account) => {
+    return new Map(accounts.map((account) => {
       if (typeof account?.id !== "string" || typeof account.display_name !== "string" || !account.display_name.trim()) {
         throw new Error("Registry returned an invalid account name.");
       }
-      return [account.id, account.display_name];
+      return [account.id, { name: account.display_name, avatar_url: account.avatar_url ?? null }];
     }));
-    return names;
   };
+  const resolveCreatorNames = async (creatorIds) => new Map([...await resolveCreatorAccounts(creatorIds)].map(([id, account]) => [id, account.name]));
 
   const dispatchCommerceOutbox = async () => {
     if (typeof ledger.dispatchOutbox !== "function") return { claimed: 0, dispatched: 0, failed: 0, errors: [] };
@@ -422,6 +440,14 @@ export async function createDashboardApp(options = {}) {
           return response.end();
         }
         response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
+        // The Agent's published corpus holds a placeholder creator; the chat shows the expert's current account name and avatar, as the product page does.
+        if (request.method === "GET" && upstream.ok && PRODUCT_AGENT_PATH.test(url.pathname)) {
+          const body = await upstream.json();
+          const creatorId = body?.creator_agent?.creator?.id;
+          const account = creatorId ? await resolveCreatorAccounts([creatorId]).then((accounts) => accounts.get(creatorId), () => undefined) : undefined;
+          if (account) body.creator_agent.creator = { ...body.creator_agent.creator, name: account.name, avatar_url: account.avatar_url };
+          return response.end(JSON.stringify(body));
+        }
         if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
         else response.end();
         return;
@@ -429,20 +455,12 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/web-chat/guest/carry-over") {
         const authentication = await authenticate(request);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const guestToken = requestCookies(request).hatch_guest;
-        if (!guestTokens?.verify(guestToken)) return send(response, 200, { moved: 0 });
-        const upstream = await fetchImpl(new URL("/v1/guest/carry-over", runtimeUrl), {
-          method: "POST",
-          headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
-          body: JSON.stringify({ guest_token: guestToken })
-        });
-        const payload = await upstream.json().catch(() => ({}));
-        // Only a completed carry-over lets go of the cookie, so a failed one can be retried.
-        if (!upstream.ok) return send(response, upstream.status, payload?.error ? payload : { error: { code: "carry_over_failed", message: "The conversations could not be moved." } });
-        const moved = Number(payload.moved) || 0;
-        response.setHeader("set-cookie", guestCookie(request, "", 0));
-        if (moved > 0) track(authentication.profile.id, guestSignedInCarriedOver(moved));
-        return send(response, 200, { moved });
+        try {
+          return send(response, 200, { moved: await carryOverGuest(request, response, authentication.token, authentication.profile.id) });
+        } catch (error) {
+          const payload = error.payload;
+          return send(response, error.status ?? 502, payload?.error ? payload : { error: { code: "carry_over_failed", message: "The conversations could not be moved." } });
+        }
       }
       if (request.method === "POST" && url.pathname === "/v1/im-link/claim") {
         const authentication = await authenticate(request);

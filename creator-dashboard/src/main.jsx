@@ -255,7 +255,7 @@ function App() {
 }
 
 /**
- * Once per page load, as soon as the session is authenticated: the visitor's guest conversations become the account's.
+ * Each time the session becomes authenticated (sign-in and sign-up already did it on the server, so this is the retry and the already-signed-in page load; the server no-ops without a guest cookie): the visitor's guest conversations become the account's.
  * Returns true once that call has finished (moved or nothing to move) or there is no session to carry over to (it is not waited for while signed out), so the
  * pages that read those conversations mount only afterwards. A failure is not shown: the server keeps the guest until
  * it succeeds, and the next page load asks again.
@@ -265,7 +265,8 @@ function useGuestCarryOver(sessionStatus) {
   const asked = useRef(false);
   const [settled, setSettled] = useState(false);
   useEffect(() => {
-    if (sessionStatus !== "authenticated" || asked.current) return;
+    if (sessionStatus !== "authenticated") { asked.current = false; setSettled(false); return; }
+    if (asked.current) return;
     asked.current = true;
     dashboardRequest("/v1/web-chat/guest/carry-over", { method: "POST", body: "{}" })
       .then(({ moved }) => { if (moved > 0) analytics.track(guestSignedInCarriedOver({ moved })); })

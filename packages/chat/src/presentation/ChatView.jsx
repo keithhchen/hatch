@@ -23,7 +23,7 @@ export function useChatState(controller) {
 
 const isImeConfirmation = event => event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
 
-/** Creator avatar, Agent name and the "<creator> AI" line. */
+/** Creator avatar, Agent name and the creator name line. */
 export function CreatorHeading({ identity, agentName }) {
   return <div className="web-chat__heading">
     <Avatar className="web-chat__heading-avatar" src={identity.creatorAvatarUrl} name={identity.creatorName} size="medium" />

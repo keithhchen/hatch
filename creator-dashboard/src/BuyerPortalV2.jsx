@@ -392,7 +392,7 @@ function ProductPage({ route, request, navigate, session }) {
       <section className="buyer-v2__how">
         <h2>{t('How it works')}</h2>
         <ol className="buyer-v2__steps">
-          <li className="web-card"><span>1</span><strong>{t('Start a conversation')}</strong><p>{t('Chat right in your browser. No account needed.')}</p></li>
+          <li className="web-card"><span>1</span><strong>{t('Start a conversation')}</strong></li>
           <li className="web-card"><span>2</span><strong>{t('Pick up where you left off')}</strong><p>{t('Agents you chat with are saved to My library.')}</p></li>
           <li className="web-card"><span>3</span><strong>{t("The expert's own judgment")}</strong><p>{t("Answers draw on this expert's methods and experience, in their own style — not a generic AI answer.")}</p></li>
         </ol>

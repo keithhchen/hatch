@@ -4,7 +4,7 @@ import { Pool } from "pg";
 /** An account made by an identity provider alone (Telegram) has no email and no password. */
 export type Account = { id: string; email: string | null; display_name: string; avatar_url: string | null; early_access: boolean; password_salt: string | null; password_hash: string | null; created_at: string };
 export type AccountPublic = Pick<Account, "id" | "email" | "display_name" | "avatar_url" | "early_access">;
-export type CreatorAccountPublic = Pick<Account, "id" | "display_name">;
+export type CreatorAccountPublic = Pick<Account, "id" | "display_name" | "avatar_url">;
 export type ClientType = "desktop" | "cli" | "api_key";
 export const CLIENT_TYPES: readonly ClientType[] = ["desktop", "cli", "api_key"];
 export type AccountSession = {
@@ -187,14 +187,14 @@ export class AccountStoreTs {
     if (!this.pool) {
       return ids.flatMap((id) => {
         const account = this.accounts.get(id);
-        return account ? [{ id: account.id, display_name: account.display_name }] : [];
+        return account ? [{ id: account.id, display_name: account.display_name, avatar_url: account.avatar_url }] : [];
       });
     }
     const result = await this.pool.query(
-      "SELECT id, display_name FROM accounts WHERE id = ANY($1::uuid[])",
+      "SELECT id, display_name, avatar_url FROM accounts WHERE id = ANY($1::uuid[])",
       [ids]
     );
-    return result.rows.map((row) => ({ id: String(row.id), display_name: String(row.display_name) }));
+    return result.rows.map((row) => ({ id: String(row.id), display_name: String(row.display_name), avatar_url: row.avatar_url == null ? null : String(row.avatar_url) }));
   }
 
   async create(email: string, password: string, displayName: string): Promise<Account> {
