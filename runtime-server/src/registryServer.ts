@@ -120,7 +120,6 @@ import { CreatorFactoryService } from "./creatorLearning/service.js";
 import { InMemoryModelRoleResolver, PostgresModelRoleResolver } from "./modelRoles.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
-import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { imageMime } from "./factoryAgents/imageRefs.js";
 import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
@@ -217,7 +216,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product object storage is not configured");
   const nodeObjectStore = objectStore ?? productObjectStore;
-  const graphPool = store.databasePool();
   // Registry releases are the cross-process publish authority. Bind this
   // store directly to the configured production Postgres URL so a release
   // can never silently fall back to process memory.
@@ -232,7 +230,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       statement_timeout: releaseDatabaseTimeoutMs,
       idleTimeoutMillis: 30_000,
     })
-    : graphPool;
+    : registryPool;
   const ownsReleasePool = Boolean(releaseDatabaseUrl);
   const releaseStore = new CreatorRegistryReleaseStore(releasePool, analytics);
   await releaseStore.ensureSchema();
@@ -245,13 +243,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const productLive = corpusPublisher && nodeObjectStore
     ? createProductLive({ factoryRoot, publisher: corpusPublisher, releases: releaseStore, objectStore: nodeObjectStore, publicOrigin: siteOrigin })
     : undefined;
-  const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
-  await graphStore?.initialize();
-  const factoryService = new CreatorFactoryService(
-    factoryRepository,
-    graphStore,
-    analytics
-  );
+  const factoryService = new CreatorFactoryService(factoryRepository, analytics);
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
   const deploymentServiceToken = environment.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN?.trim() || "";
