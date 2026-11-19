@@ -244,32 +244,44 @@ export class PiAgentRuntime implements AgentRuntime {
       (skill) => queue.push(skillActivationEvent(input, skill, "explicit", "explicit_mention"))
     ));
 
+    // Pi keeps its own transcript and sends only what transformContext returns, so the latest summary is remembered here: the
+    // messages up to `through` are sent as `projection`, and every later step adds only what came after. Without it, every
+    // step after the first summary would summarize the whole Run again.
+    let compacted: { through: AgentMessage; projection: AgentMessage[] } | undefined;
+    const runtimeContext = new Set<AgentMessage>(contextMessages);
     const compactContext = async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
       // Pi owns the live transcript. Runtime only invokes the product's
       // compaction adapter when the normal context projection says it is
       // needed; it never replaces a tool call/result pair with an ad-hoc
       // evidence user message.
-      if (!ctx.compactMessagesIfNeeded || !hasExecutedTool || compacting) return messages;
-      const runtimeMessages = messages
-        .filter(isModelMessage)
-        .map(toRuntimeCompactionMessage);
+      const anchor = compacted ? messages.indexOf(compacted.through) : -1;
+      const view = compacted && anchor >= 0 ? [...compacted.projection, ...messages.slice(anchor + 1)] : messages;
+      if (!ctx.compactMessagesIfNeeded || !hasExecutedTool || compacting) return view;
+      // Runtime context (Skill instructions) is rebuilt on every request: it is never summarized, only put back in front.
+      const origin = new Map<ReturnType<typeof toRuntimeCompactionMessage>, AgentMessage>();
+      const runtimeMessages = view
+        .filter((message) => isModelMessage(message) && !runtimeContext.has(message))
+        .map((message) => { const runtime = toRuntimeCompactionMessage(message); origin.set(runtime, message); return runtime; });
       compacting = true;
       try {
         const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
-        if (!replacement) return messages;
+        if (!replacement) return view;
         const replacementAssetImages = await loadAssetImages(replacement, ctx.assetStore);
-        return [
+        const projection = [
           ...contextMessages,
-          ...replacement.map((message) => toPiMessage(
+          // A message kept verbatim stays the same Pi message, with its reasoning and its turn.
+          ...replacement.map((message) => origin.get(message as never) ?? toPiMessage(
             message,
             replacementAssetImages
           ))
         ];
+        compacted = { through: messages.at(-1)!, projection };
+        return projection;
       } catch {
         // A compaction failure should not destroy an otherwise usable live
         // turn. The normal provider request will surface a context error if
         // the context is genuinely too large.
-        return messages;
+        return view;
       } finally {
         compacting = false;
       }

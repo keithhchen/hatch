@@ -65,6 +65,24 @@ export function prunePiMessage(message: AgentMessage, placeholder: string): Agen
 export const piSummaryMessage = (summary: string, tokensBefore: number): AgentMessage =>
   createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString());
 
+/**
+ * What the summarizer reads of a tool result. Pi's serializer cuts every tool result to 2,000 characters, which suits a
+ * coding agent that runs the command again; a report reads its facts from files and records, and anything past the first
+ * 2,000 characters of each never reached the summary. A tool result is handed over as a labelled message instead, which Pi
+ * serializes whole (as it does its own command output); only when the messages would not fit the summary model's window is
+ * each result shortened, all by the same share.
+ */
+export function forSummary(messages: AgentMessage[], budgetTokens: number): AgentMessage[] {
+  const total = messages.reduce((sum, message) => sum + estimatePiMessageTokens(message), 0);
+  const share = total > budgetTokens ? budgetTokens / total : 1;
+  return messages.map((message) => {
+    if (message.role !== "toolResult") return message;
+    const text = textOf(message);
+    const kept = share < 1 ? `${text.slice(0, Math.floor(text.length * share))}\n[... ${text.length - Math.floor(text.length * share)} more characters left out to fit the summary]` : text;
+    return { role: "custom", customType: "toolResult", content: `[Tool result: ${message.toolName}${message.isError ? ", error" : ""}]\n${kept}`, display: false, timestamp: message.timestamp } as AgentMessage;
+  });
+}
+
 /** The model call. Messages become text first, so no image bytes and no reminder reach the summarizer. */
 export function summarizeWithPi<M>(
   toPi: (message: M) => AgentMessage,
@@ -73,7 +91,10 @@ export function summarizeWithPi<M>(
 ): (input: SummarizeInput<M>) => Promise<string> {
   return async ({ messages, previous, instructions, signal, usage }) => {
     const { models: registry, model } = models();
-    const asText = messages.map(toPi).filter((message) => !textOf(message).startsWith("<system-reminder>"));
+    // The window holds the messages, the previous summary, the instructions and the summary itself. The estimate runs up to
+    // 2.6 times under a provider's own count on ids and JSON (measured 2026-11-19 on Kimi, DeepSeek and Gemini), so a third of it.
+    const budget = Math.floor((model.contextWindow - reserveTokens) / 3) - (previous?.length ?? 0);
+    const asText = forSummary(messages.map(toPi).filter((message) => !textOf(message).startsWith("<system-reminder>")), budget);
     // A span, not a generation: the summary request is already a generation underneath, and cost counts once.
     const result = await traceObservation(
       "compaction.summarize",

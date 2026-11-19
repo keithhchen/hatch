@@ -109,9 +109,17 @@ export function chatCompactionStrategy(profile: LlmProfile, options: ChatCompact
   const cacheTtlMs = options.cacheTtlMs ?? (Number(process.env.HATCH_PROVIDER_CACHE_TTL_MS) || undefined);
   return new CompactionStrategy(
     chatCompactionAdapter(options.summarize ?? summarizeWithPi((message) => toPiMessage({ ...message, model_images: undefined }), () => createPiModels({ profile }), 8_000)),
-    { ...policyFor(options.contextWindow ?? profile.contextWindow, { cacheTtlMs }), ...options.budget },
+    withinWindow(policyFor(options.contextWindow ?? profile.contextWindow, { cacheTtlMs }), options.budget),
     options.memory
   );
+}
+
+/** A fixed budget never goes past what the window allows: a report's 750k trigger on a smaller window would never fire. */
+export function withinWindow(policy: CompactionPolicy, budget: ChatCompactionOptions["budget"] = {}): CompactionPolicy {
+  const cap = (key: "trigger" | "hard" | "tail") => Math.min(budget[key] ?? policy[key], policy[key]);
+  const trigger = cap("trigger");
+  // Pruning is a preference below the trigger, not a ceiling of its own.
+  return { ...policy, ...budget, trigger, hard: Math.max(trigger, cap("hard")), tail: cap("tail"), prune: Math.min(budget.prune ?? policy.prune, trigger) };
 }
 
 /**

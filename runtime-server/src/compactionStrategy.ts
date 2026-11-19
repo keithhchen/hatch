@@ -71,7 +71,8 @@ export function policyFor(contextWindow: number, options: { outputTokens?: numbe
     tail: Math.floor(contextWindow * 0.15),
     cacheTtlMs: options.cacheTtlMs ?? 5 * 60_000,
     minPruneTokens: 256,
-    timeoutMs: options.timeoutMs ?? 120_000,
+    // A summary of a full window takes minutes: Kimi took 57 s for 221k tokens (2026-11-19). A timeout ends it as degraded.
+    timeoutMs: options.timeoutMs ?? Math.max(120_000, Math.floor(contextWindow * 0.4)),
     maxOverflowRetries: 2
   };
 }

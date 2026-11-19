@@ -189,3 +189,8 @@ test("a CJK character counts as about one token, so a Chinese context reaches th
   assert.ok(chinese >= 4000, `4000 Chinese characters are at least 4000 tokens (${chinese})`);
   assert.ok(toolResult >= 4000, `a Chinese tool result counts the same (${toolResult})`);
 });
+
+test("a summary of a large window gets minutes, not the two a small one gets", () => {
+  assert.equal(policyFor(32_000).timeoutMs, 120_000);
+  assert.ok(policyFor(1_048_576).timeoutMs >= 400_000, "a 1M window: Kimi took 57 s for a 221k head");
+});
