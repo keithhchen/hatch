@@ -45,7 +45,7 @@ export async function openHatchPay(options: { pool: PostgresQueryExecutor; envir
         sender: new ResendSender(config.resendApiKey), from: config.emailFrom, prompts: new PostgresPromptRows(options.pool),
         products: new CorpusProductMailInfos(options.corpora), priceFen: config.priceFen
       }),
-      publicBase: config.publicBase, priceFen: config.priceFen
+      corpora: options.corpora, publicBase: config.publicBase, priceFen: config.priceFen
     })
   };
 }
