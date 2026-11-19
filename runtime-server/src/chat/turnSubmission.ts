@@ -11,7 +11,6 @@ import {
   type RunStart
 } from "../protocol.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
-import type { CapacityGate, KeyedCapacityGate } from "../runtimeConfig.js";
 import type { ChatAssets, PartsReader, PreparedMessage } from "./assets.js";
 import type { Retried, Submission } from "./chatService.js";
 import type { ChatRuntime } from "./chatRuntime.js";
@@ -32,8 +31,6 @@ export type ChatEdge = {
   chatAssets?: ChatAssets;
   /** The channel layer's door into Chat from another process. */
   serviceApi?: ChatServiceApi;
-  turnAuthorizationGate: CapacityGate;
-  turnAuthorizationPerUserGate: KeyedCapacityGate;
   entitlementResolver?: EntitlementResolver;
   authIdentityResolver?: AuthIdentityResolver;
   agentCorpusResolver?: AgentCorpusResolver;
@@ -63,15 +60,6 @@ export type ChatMessageRequest = {
 
 /** Access is verified again before any Run starts, for a message and for an answer again alike: what the user may use now. */
 export async function authorizedBinding(edge: ChatEdge, session: ChatSession, signal?: AbortSignal): Promise<SessionBinding> {
-  const releaseAuthorization = edge.turnAuthorizationGate.tryAcquire();
-  if (!releaseAuthorization) {
-    throw new ChatError("authorization_busy", "Hatch is already verifying the maximum number of turns. Try again shortly.", 429);
-  }
-  const releaseUserAuthorization = edge.turnAuthorizationPerUserGate.tryAcquire(session.binding.userId);
-  if (!releaseUserAuthorization) {
-    releaseAuthorization();
-    throw new ChatError("user_authorization_busy", "This account is already verifying the maximum number of turns. Try again shortly.", 429);
-  }
   let binding = session.binding;
   try {
     await revalidateTurnAuthorization({ auth_token: session.authToken }, binding, edge.authIdentityResolver, signal);
@@ -86,9 +74,6 @@ export async function authorizedBinding(edge: ChatEdge, session: ChatSession, si
   } catch (error) {
     if (error instanceof AuthorizationError) throw error;
     throw new AuthorizationError("authorization_unavailable", errorMessage(error));
-  } finally {
-    releaseAuthorization();
-    releaseUserAuthorization();
   }
   return binding;
 }

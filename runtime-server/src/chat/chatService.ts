@@ -13,11 +13,6 @@ import { assertProductUsable } from "./toolSurface.js";
 import type { RunCap } from "../usage/usageCap.js";
 import type { ChatAnalytics } from "./chatAnalytics.js";
 
-/** Capacity for one more Run. Reserving can fail; the returned function gives the capacity back. */
-export interface RunAdmission {
-  reserve(principal: Principal): () => void;
-}
-
 /** Limits that must hold before a Run exists, such as a contact's message allowance. */
 export interface PrincipalLimits {
   check(principal: Principal, conversation: ConversationRecord): Promise<void>;
@@ -90,7 +85,6 @@ export class ChatService<Scope> {
     terminator: Pick<RunTerminator, "end">;
     supervisor: Pick<RunSupervisor, "adopt" | "executorId" | "holdsConversation" | "steered">;
     hub: RunEventHub;
-    admission: RunAdmission;
     registry: RunRegistry<Scope>;
     limits?: PrincipalLimits;
     /** Asked before a new Run starts, never for a message that joins one: whoever pays for the Run may be out of budget. */
@@ -110,37 +104,31 @@ export class ChatService<Scope> {
    * refused (409) while a Run is active or when the latest Run is not failed or interrupted. A repeated key replays its Run.
    */
   async retry(command: RetryCommand<Scope>): Promise<Retried> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, cap, artifacts } = this.deps;
+    const { repository, supervisor, hub, registry, limits, compaction, cap, artifacts } = this.deps;
     const binding = command.conversation;
     const accept = () => repository.acceptRetry({
       binding,
       run: { id: command.runId, conversationId: binding.id, clientMessageId: command.key, corpusDigest: command.corpusDigest, executorId: supervisor.executorId }
     }).catch((error: unknown) => { throw refused(error); });
-    // A key that already started a Run needs no capacity and no checks: it is told which Run that was, even while it runs.
+    // A key that already started a Run needs no checks: it is told which Run that was, even while it runs.
     if (await repository.getRunByClientMessageId(binding.id, command.key)) return { outcome: "replayed", run: (await accept()).run };
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, binding);
     await cap?.(command.scope);
     if (supervisor.holdsConversation(binding.id)) throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
-    const release = admission.reserve(command.principal);
-    try {
-      await compaction?.waitForCompaction(binding.id);
-      const accepted = await accept();
-      if (!accepted.created) { release(); return { outcome: "replayed", run: accepted.run }; }
-      await artifacts?.runAccepted(binding, accepted.run);
-      registry.rememberClient(binding.id, command.client, command.timeZone);
-      registry.rememberScope(accepted.run.id, command.scope);
-      supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });
-      hub.publish(binding.id, { type: "turn.state", run_id: accepted.run.id, status: "queued" });
-      return { outcome: "started", run: accepted.run };
-    } catch (error) {
-      release();
-      throw error;
-    }
+    await compaction?.waitForCompaction(binding.id);
+    const accepted = await accept();
+    if (!accepted.created) return { outcome: "replayed", run: accepted.run };
+    await artifacts?.runAccepted(binding, accepted.run);
+    registry.rememberClient(binding.id, command.client, command.timeZone);
+    registry.rememberScope(accepted.run.id, command.scope);
+    supervisor.adopt(accepted.run, () => registry.forget(accepted.run.id));
+    hub.publish(binding.id, { type: "turn.state", run_id: accepted.run.id, status: "queued" });
+    return { outcome: "started", run: accepted.run };
   }
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap, analytics, artifacts, library } = this.deps;
+    const { repository, supervisor, hub, registry, limits, compaction, terminator, cap, analytics, artifacts, library } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
@@ -153,7 +141,6 @@ export class ChatService<Scope> {
     if (!joining && supervisor.holdsConversation(command.conversation.id)) {
       throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
     }
-    let release = joining ? () => undefined : once(admission.reserve(command.principal));
     let accepted: Awaited<ReturnType<typeof repository.acceptSubmission>>;
     try {
       // The new message aborts a compaction running after the last reply, and waits until it has ended.
@@ -172,7 +159,6 @@ export class ChatService<Scope> {
         ...(command.mode ? { mode: command.mode } : {})
       }, known ? undefined : command.bind);
     } catch (error) {
-      release();
       throw refused(error);
     }
     // From here the message is stored, so what follows is never a refusal: a Run that cannot go on ends failed, and the message is answered with that.
@@ -182,8 +168,8 @@ export class ChatService<Scope> {
     let adopted = false;
     try {
       if (outcome === "started" && joining) {
-        // The Run we meant to join ended first, so this one starts a Run after all: admit it now.
-        try { await cap?.(command.scope); release = once(admission.reserve(command.principal)); }
+        // The Run we meant to join ended first, so this one starts a Run after all: check the usage cap now.
+        try { await cap?.(command.scope); }
         catch (error) { failure = failureOf(error); }
       }
       if (outcome !== "replayed") {
@@ -197,10 +183,8 @@ export class ChatService<Scope> {
       }
       if (outcome === "started" && !failure) {
         registry.rememberScope(accepted.run.id, command.scope);
-        supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });
+        supervisor.adopt(accepted.run, () => registry.forget(accepted.run.id));
         adopted = true;
-      } else {
-        release();
       }
       if (outcome !== "replayed") {
         hub.publish(command.conversation.id, { type: "message.accepted", conversation_id: command.conversation.publicId, run_id: accepted.run.id, client_message_id: command.clientMessageId, outcome });
@@ -212,19 +196,12 @@ export class ChatService<Scope> {
     } catch (error) {
       log.error("chat_submit_after_accept_failed", { run: accepted.run.id, conversation: command.conversation.id, error: error instanceof Error ? error.message : String(error) });
       if (!adopted) {
-        release();
         // A started Run nobody will execute is ended now; if even that fails the sweeper takes it.
         if (outcome === "started") await terminator.end(accepted.run.id, { status: "failed", failure: failureOf(error) }).catch((endError: unknown) => log.error("chat_submit_end_failed", { run: accepted.run.id, error: endError instanceof Error ? endError.message : String(endError) }));
       }
     }
     return { outcome, run: accepted.run, clientMessageId: command.clientMessageId, acceptedAt: accepted.receipt.accepted_at };
   }
-}
-
-/** A release that frees a reservation once, however many paths reach it. */
-function once(release: () => void): () => void {
-  let released = false;
-  return () => { if (!released) { released = true; release(); } };
 }
 
 /** A refusal of the repository, as the Chat API tells it. */

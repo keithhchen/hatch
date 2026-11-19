@@ -14,7 +14,7 @@ async function setup(userId: string, now?: () => number) {
   const pages = new MemoryHtmlPageRepository();
   const page = await pages.publish({ productId: "prod-1", userId, fileId: "f1", title: "Audit" });
   const repository = new MemoryLeadRepository();
-  const codes = { lookup: async (code: string) => code === "MSC123456" ? { status: "used" as const, source: "paid" as const, productId: "prod-1", conversationId: "conv-1" } : null };
+  const codes = { lookup: async (code: string) => code === "MSC123456" ? { status: "used" as const, source: "paid" as const, productId: "prod-1", conversationId: "conv-1", outcome: null } : null };
   const conversations = { getConversation: async (id: string) => id === "conv-1" ? { briefSnapshot: auditBrief("MSC123456") } as never : undefined };
   const leads = new ReportLeads(pages, links, repository, briefContactOf(codes, conversations), new WindowLimiter(5, 60_000, now));
   const server = http.createServer((req, res) => void handleHtmlRoute(req, res, new URL(req.url!, "http://x"), undefined, leads));

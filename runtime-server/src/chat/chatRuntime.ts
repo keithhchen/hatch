@@ -14,7 +14,7 @@ import type { RuntimeStore } from "../store.js";
 import type { ConversationTitles } from "./conversationTitles.js";
 import { ChatCompaction } from "./chatCompaction.js";
 import type { Library } from "./library.js";
-import { ChatService, RunRegistry, type PrincipalLimits, type RunAdmission } from "./chatService.js";
+import { ChatService, RunRegistry, type PrincipalLimits } from "./chatService.js";
 import { ConversationFeed } from "./conversationFeed.js";
 import type { EventRelay } from "./eventRelay.js";
 import { fenced } from "./runFence.js";
@@ -37,7 +37,6 @@ export type ChatRuntimeOptions<Scope> = {
   store: RuntimeStore;
   runner: TurnRunner<Scope>;
   scopes: ScopeResolver<Scope>;
-  admission: RunAdmission;
   limits?: PrincipalLimits;
   toolTimeoutMs: number;
   leaseMs?: number;
@@ -121,7 +120,7 @@ export class ChatRuntime<Scope> {
       { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => { this.compaction.afterReply(run); options.afterReply?.(run); }, afterInterrupted: options.afterInterrupted, stops: options.stops, steers: options.steers },
       terminators
     );
-    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction, analytics: options.analytics, library: options.library, artifacts: options.artifacts });
+    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction, analytics: options.analytics, library: options.library, artifacts: options.artifacts });
   }
 
   /** Ends the Runs a previous instance left behind as interrupted, then keeps watching for more. */

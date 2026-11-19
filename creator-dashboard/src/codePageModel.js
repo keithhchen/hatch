@@ -32,17 +32,20 @@ export function siteDomain(value) {
 
 /**
  * Reads the code's status until its report is ready. `accept` takes any status (a poll's, or the intake's answer) and keeps the loop
- * going while the state is "generating", however the page got there; a failed read is reported and tried again. Time and reading are injected.
+ * going while the state is "generating", however the page got there. Each wait is `every` with ±15% jitter; a failed read is reported and
+ * tried again after a doubled wait (capped at `maxBackoff`), back to `every` on the next success. Time, randomness and reading are injected.
  */
-export function createStatusPoller({ read, onStatus, onError, every = 5000, schedule = setTimeout, cancel = clearTimeout }) {
+export function createStatusPoller({ read, onStatus, onError, every = 8000, maxBackoff = 60000, random = Math.random, schedule = setTimeout, cancel = clearTimeout }) {
   let timer;
   let alive = true;
-  const arm = () => { if (alive && timer === undefined) timer = schedule(tick, every); };
-  const accept = status => { if (!alive) return; onStatus(status); if (status?.state === "generating") arm(); };
+  let failures = 0;
+  const wait = () => Math.min(maxBackoff, every * 2 ** failures) * (0.85 + random() * 0.3);
+  const arm = () => { if (alive && timer === undefined) timer = schedule(tick, wait()); };
+  const accept = status => { if (!alive) return; failures = 0; onStatus(status); if (status?.state === "generating") arm(); };
   async function tick() {
     timer = undefined;
     try { const status = await read(); accept(status); }
-    catch (error) { if (alive) { onError(error); arm(); } }
+    catch (error) { if (alive) { failures++; onError(error); arm(); } }
   }
   return { start: tick, accept, stop() { alive = false; cancel(timer); timer = undefined; } };
 }
@@ -59,12 +62,11 @@ const DIMENSIONS = Object.freeze([
 ]);
 
 /**
- * The lines of the wait: what the Run has really called come first, then the checks of an audit, then the scoring dimensions, opening up
- * as the steps advance. The checks and dimensions are what is being looked at ("正在核对"), never a claim that one is done.
+ * The lines of the wait: the checks of an audit, then the scoring dimensions, opening up as the steps advance. The checks and dimensions are what is being looked at ("正在核对"), never a claim that one is done.
  */
-export function feedPool({ activity, steps, step }) {
+export function feedPool({ steps, step }) {
   const shown = Math.max(0, step ?? -1) < 0 ? 0 : Math.ceil(DIMENSIONS.length * Math.min(1, (step + 1) / Math.max(1, steps?.length ?? 1)));
-  return [...(activity ?? []), ...CHECKS.map(item => `正在核对${item}`), ...DIMENSIONS.slice(0, shown).map(item => `正在评估「${item}」`)];
+  return [...CHECKS.map(item => `正在核对${item}`), ...DIMENSIONS.slice(0, shown).map(item => `正在评估「${item}」`)];
 }
 
 /** `size` consecutive lines of the pool starting at `tick`, wrapping around. */

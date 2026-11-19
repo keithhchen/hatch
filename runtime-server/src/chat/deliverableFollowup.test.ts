@@ -20,7 +20,7 @@ async function setup(options: { capable?: boolean; page?: { published: boolean }
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: () => undefined, executorId: "exec", holdsConversation: () => false, steered: () => undefined },
-    hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>()
+    hub, registry: new RunRegistry<object>()
   });
   const page = options.page ?? { published: false };
   const followups = new DeliverableFollowups({

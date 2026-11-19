@@ -33,7 +33,7 @@ function harness(repository: ConversationRepository, store: Harness["store"], ov
   const service = new ChatService<object>({
     repository: racing, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: overrides.adopt ?? (() => undefined), executorId: "exec-a", holdsConversation: () => false, steered: () => undefined },
-    hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>(),
+    hub, registry: new RunRegistry<object>(),
     ...(overrides.cap ? { cap: overrides.cap } : {})
   });
   return { repository, store, service, heard, ghostActiveRun: () => { ghost = true; } };

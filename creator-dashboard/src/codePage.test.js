@@ -79,9 +79,9 @@ test("the publish step is never shown", () => {
   assert.deepEqual(visibleSteps([{ id: "x", label: "发布" }]), []);
 });
 
-test("the feed shows what the Run really called first, and opens scoring dimensions only as steps advance", () => {
+test("the feed is static: the checks first, and scoring dimensions open only as steps advance", () => {
   const steps = [{}, {}, {}];
-  assert.equal(feedPool({ activity: ["正在打开官网页面"], steps, step: -1 })[0], "正在打开官网页面");
+  assert.ok(feedPool({ steps, step: -1 })[0].startsWith("正在核对"));
   const count = step => feedPool({ steps, step }).filter(line => line.startsWith("正在评估")).length;
   assert.equal(count(-1), 0);
   assert.ok(count(0) > 0 && count(0) < count(2));
@@ -93,7 +93,8 @@ test("the feed shows what the Run really called first, and opens scoring dimensi
 // A fake clock: scheduled ticks run when the test says so.
 function clock() {
   const queue = [];
-  return { schedule: fn => { queue.push(fn); return queue.length; }, cancel: () => {}, pending: () => queue.length, run: async () => { await queue.shift()?.(); } };
+  const delays = [];
+  return { delays, schedule: (fn, delay) => { delays.push(delay); queue.push(fn); return queue.length; }, cancel: () => {}, pending: () => queue.length, run: async () => { await queue.shift()?.(); } };
 }
 
 test("the poller keeps reading while generating, switches by itself when ready, and stops there", async () => {
@@ -133,6 +134,20 @@ test("a failed read is reported and tried again; a stopped poller does nothing m
   poller.stop();
   await time.run();
   assert.equal(time.pending(), 0);
+});
+
+test("waits are 8 s with ±15% jitter, double on consecutive errors up to 60 s, and reset on success", async () => {
+  const time = clock();
+  const outcomes = ["err", "err", "err", "err", "err", "err", "ok", "ok"];
+  const poller = createStatusPoller({ read: async () => { if (outcomes.shift() === "err") throw new Error("net"); return { state: "generating" }; }, onStatus: () => {}, onError: () => {}, random: () => 0.5, schedule: (fn, d) => time.schedule(fn, d), cancel: time.cancel });
+  await poller.start();
+  for (let i = 0; i < 7; i++) await time.run();
+  assert.deepEqual(time.delays, [16000, 32000, 60000, 60000, 60000, 60000, 8000, 8000]);
+  const bounds = r => { const t = clock(); createStatusPoller({ read: async () => ({ state: "generating" }), onStatus: () => {}, onError: () => {}, random: () => r, schedule: (fn, d) => t.schedule(fn, d), cancel: t.cancel }).start(); return t; };
+  const low = bounds(0), high = bounds(1);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(low.delays[0], 6800);
+  assert.equal(high.delays[0], 9200);
 });
 
 test("the price is fen shown as yuan with two decimals", () => {

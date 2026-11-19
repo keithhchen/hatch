@@ -1,17 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type http from "node:http";
 import path from "node:path";
-import { limited, type AccessGate } from "../accessGate.js";
+import type { AccessGate } from "../accessGate.js";
 import type { AgentCorpusResolverLike } from "../agentCorpus.js";
 import { BriefValidationError, briefAnswer, briefEmail, createBriefSnapshot, type BriefSpec } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
-import { DELIVERABLE_FOLLOWUP_PREFIX, MAX_DELIVERABLE_FOLLOWUPS } from "../chat/deliverableFollowup.js";
 import { conversationBinding, durableConversationId } from "../chat/sessionBinding.js";
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
-import { recentActivity, type ToolCallView } from "./activity.js";
-import { log } from "../observability/log.js";
-import type { RuntimeStore } from "../store.js";
 
 /** What a person sees at /c/<code>: the entry, the intake form, the wait, the report, or a plain failure. */
 export type CodePageState = "entry" | "intake" | "generating" | "ready" | "failed";
@@ -31,8 +26,6 @@ export type CodePageStatus = {
   step?: number;
   /** Generating only: where the report will be mailed (the Brief's email), as the buyer gave it. */
   email?: string;
-  /** Generating only: plain-language lines for what the Run has really called, oldest first. */
-  activity?: string[];
   report_url?: string;
 };
 
@@ -70,13 +63,18 @@ export type CodePagesDeps = {
   gate: AccessGate;
   corpora: AgentCorpusResolverLike;
   repository: ConversationRepository;
-  store: Pick<RuntimeStore, "readRunActivity">;
+  /** The distinct names of the tools the conversation's Runs have called: names only, never arguments or results. */
+  store: { toolNames(conversationId: string): Promise<string[]> };
   /** The signed link of the page the code's buyer published since the conversation began. */
   reportUrl(conversation: ConversationRecord): Promise<string | undefined>;
   /** Starts the Run of the Brief, under `key`: the same key again is the same Run. */
   start(conversation: ConversationRecord, key: string): Promise<unknown>;
   /** What one code costs, in fen (HATCH_PAY_PRICE_FEN); absent when payment is not configured. */
   priceFen?: number;
+  /** How long a code's status is reused (the page polls every few seconds), and how long a Product's corpus and progress map are. */
+  statusTtlMs?: number;
+  corpusTtlMs?: number;
+  clock?: () => number;
 };
 
 /**
@@ -85,7 +83,8 @@ export type CodePagesDeps = {
  * capability is not found.
  */
 export class CodePages {
-  private readonly reported = new Set<string>();
+  private readonly statuses = new Map<string, { at: number; value: Promise<CodePageStatus> }>();
+  private readonly corpora = new Map<string, { at: number; value: Promise<{ resolved: Awaited<ReturnType<AgentCorpusResolverLike["resolveByProduct"]>>; map: ProgressMap | undefined }> }>();
   constructor(private readonly deps: CodePagesDeps) {}
 
   /** The product page before any code: what is sold, in the Product's own words, and for how much. */
@@ -96,13 +95,39 @@ export class CodePages {
     return { creator: { name: creator.name }, ...(copy ? { landing: copy } : {}), product: { id: productId, name: product.name, ...(product.description ?? product.promise ? { description: product.description ?? product.promise } : {}) }, ...(this.deps.priceFen ? { price_fen: this.deps.priceFen } : {}) };
   }
 
-  async status(rawCode: string, headers?: http.IncomingHttpHeaders): Promise<CodePageStatus> {
+  private cached<V>(cache: Map<string, { at: number; value: Promise<V> }>, key: string, ttlMs: number, read: () => Promise<V>): Promise<V> {
+    const now = (this.deps.clock ?? Date.now)();
+    const hit = cache.get(key);
+    if (hit && now - hit.at < ttlMs) return hit.value;
+    if (cache.size > 1000) cache.clear();
+    const value = read();
+    cache.set(key, { at: now, value });
+    value.catch(() => { if (cache.get(key)?.value === value) cache.delete(key); });
+    return value;
+  }
+
+  private resolved(productId: string) {
+    return this.cached(this.corpora, productId, this.deps.corpusTtlMs ?? 60_000, async () => {
+      const resolved = await this.deps.corpora.resolveByProduct(productId);
+      return { resolved, map: await readProgressMap(resolved.root) };
+    });
+  }
+
+  /** The page polls every few seconds: callers of the same code share one read for a few seconds. */
+  status(rawCode: string): Promise<CodePageStatus> {
     const code = normalizeCode(rawCode);
-    const { gate, corpora, repository } = this.deps;
-    const held = await limited(gate.codes(headers).lookup(code));
+    const status = this.cached(this.statuses, code, this.deps.statusTtlMs ?? 5_000, () => this.read(code));
+    // The entry and the intake are not waited on: they change the moment a payment or an intake lands, so they are never reused.
+    void status.then((value) => { if (value.state === "entry" || value.state === "intake") this.statuses.delete(code); }, () => undefined);
+    return status;
+  }
+
+  private async read(code: string): Promise<CodePageStatus> {
+    const { gate, repository } = this.deps;
+    const held = await gate.codes().lookup(code);
     if (!held || !await gate.required(held.productId)) return { state: "entry", reason: "not_found" };
     if (held.status === "pending" || held.status === "void") return { state: "entry", reason: "not_paid" };
-    const resolved = await corpora.resolveByProduct(held.productId);
+    const { resolved, map } = await this.resolved(held.productId);
     const product = { id: held.productId, name: resolved.corpus.product.name };
     const creator = { name: resolved.corpus.creator.name };
     const conversation = held.status === "used" ? await repository.findOwnedConversation({ ownerAccountId: codeOwner(code), creatorId: resolved.corpus.creator.id }, codeConversationId(code)) : undefined;
@@ -115,22 +140,11 @@ export class CodePages {
     const who = { product, creator, ...(website ? { website } : {}) };
     const report = await this.deps.reportUrl(conversation);
     if (report) return { state: "ready", ...who, report_url: report };
-    const runs = (await repository.listRuns(conversation.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-    const last = runs.at(-1);
-    let followups = 0;
-    for (let i = runs.length - 1; i >= 0 && runs[i]!.clientMessageId.startsWith(DELIVERABLE_FOLLOWUP_PREFIX); i--) followups++;
-    const failed = last?.status === "failed" || last?.status === "cancelled" || (last?.status === "completed" && followups >= MAX_DELIVERABLE_FOLLOWUPS);
-    if (failed) {
-      if (!this.reported.has(code)) { this.reported.add(code); log.error("code_page_failed", { conversation_id: conversation.id, product_id: held.productId, last_run: last?.id, last_status: last?.status }); }
-      return { state: "failed", ...who };
-    }
-    const map = await readProgressMap(resolved.root);
-    const names = new Set<string>();
-    const calls: ToolCallView[] = [];
-    for (const run of runs) for (const call of (await this.deps.store.readRunActivity(conversation.id, run.id)).tool_calls ?? []) { names.add(call.name); calls.push(call); }
+    if (held.outcome === "failed") return { state: "failed", ...who };
+    const names = new Set(await this.deps.store.toolNames(conversation.id));
     const step = map ? map.steps.reduce((reached, entry, index) => entry.tools.some((tool) => names.has(tool)) ? index : reached, -1) : -1;
     const email = briefEmail(conversation.briefSnapshot);
-    return { state: "generating", ...who, ...(email ? { email } : {}), activity: recentActivity(calls), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
+    return { state: "generating", ...who, ...(email ? { email } : {}), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
   }
 
   /**
@@ -138,12 +152,12 @@ export class CodePages {
    * first, before any model call; every step is keyed by the code, so a second submit (a double click, a retry) finds the same conversation
    * and replays the same Run.
    */
-  async intake(rawCode: string, answers: Record<string, unknown>, headers?: http.IncomingHttpHeaders): Promise<CodePageStatus> {
+  async intake(rawCode: string, answers: Record<string, unknown>): Promise<CodePageStatus> {
     const code = normalizeCode(rawCode);
     const { gate, corpora, repository } = this.deps;
-    const held = await limited(gate.codes(headers).lookup(code));
+    const held = await gate.codes().lookup(code);
     if (!held || !await gate.required(held.productId)) throw new ChatError("access_code_not_found", "兑换码不存在", 404);
-    const resolved = await corpora.resolveByProduct(held.productId);
+    const { resolved } = await this.resolved(held.productId);
     const spec = resolved.corpus.product.brief_spec as BriefSpec | undefined;
     if (!spec) throw new ChatError("brief_unavailable", "This Product has no Brief.", 409);
     const codeField = spec.fields.find((field) => field.type === "access_code");
@@ -153,9 +167,10 @@ export class CodePages {
     catch (error) { throw error instanceof BriefValidationError ? new ChatError("invalid_brief", error.message, 400) : error; }
     const scope = { creatorId: resolved.corpus.creator.id, userId: codeOwner(code), productId: held.productId, corpusDigest: resolved.digest, explicit: true };
     const id = durableConversationId(scope, codeConversationId(code));
-    await gate.admit(held.productId, id, brief, headers);
+    await gate.admit(held.productId, id, brief);
     const { conversation } = await repository.createConversation({ ...conversationBinding(scope), id, publicId: codeConversationId(code), briefSnapshot: brief });
     await this.deps.start(conversation, codeIntakeKey(code));
-    return this.status(code, headers);
+    this.statuses.delete(code);
+    return this.status(code);
   }
 }

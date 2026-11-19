@@ -17,9 +17,6 @@ type StoredRow = {
 class FakePostgres implements PostgresQueryExecutor {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];
   readonly rows: StoredRow[] = [];
-  readonly usage = new Map<string, { eventCount: number; totalBytes: number }>();
-  readonly migrationVersions = new Set<string>();
-  historicalUsageBackfills = 0;
 
   async query<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
@@ -29,50 +26,8 @@ class FakePostgres implements PostgresQueryExecutor {
     if (/^\s*CREATE TABLE/i.test(text)) {
       return { rows: [] };
     }
-    if (/claimed_migration AS/i.test(text) && /conversation-usage-v1/i.test(text)) {
-      if (this.migrationVersions.has("conversation-usage-v1")) {
-        return { rows: [] };
-      }
-      this.migrationVersions.add("conversation-usage-v1");
-      this.historicalUsageBackfills += 1;
-      for (const row of this.rows) {
-        const bytes = Buffer.byteLength(JSON.stringify(row.payload));
-        const keys = ["global"];
-        if (row.conversation_id) {
-          keys.push(`conversation:${row.conversation_id}`);
-          const match = row.conversation_id.match(/^scope:([a-f0-9]{24}):/);
-          if (match?.[1]) keys.push(`binding:${match[1]}`);
-        }
-        for (const key of keys) {
-          const current = this.usage.get(key) ?? { eventCount: 0, totalBytes: 0 };
-          this.usage.set(key, { eventCount: current.eventCount + 1, totalBytes: current.totalBytes + bytes });
-        }
-      }
-      return { rows: [] };
-    }
-    if (/reserved AS/i.test(text) && /INSERT INTO hatch_conversation_usage/i.test(text)) {
-      const [conversationId, runId, eventType, payload, reservationsValue] = values ?? [];
-      const reservations = JSON.parse(String(reservationsValue)) as Array<{
-        scope_key: string;
-        event_count: number;
-        total_bytes: number;
-        max_events: number;
-        max_bytes: number;
-      }>;
-      if (reservations.some((reservation) => {
-        const current = this.usage.get(reservation.scope_key) ?? { eventCount: 0, totalBytes: 0 };
-        return current.eventCount + reservation.event_count > reservation.max_events
-          || current.totalBytes + reservation.total_bytes > reservation.max_bytes;
-      })) {
-        return { rows: [] };
-      }
-      for (const reservation of reservations) {
-        const current = this.usage.get(reservation.scope_key) ?? { eventCount: 0, totalBytes: 0 };
-        this.usage.set(reservation.scope_key, {
-          eventCount: current.eventCount + reservation.event_count,
-          totalBytes: current.totalBytes + reservation.total_bytes
-        });
-      }
+    if (/INSERT INTO hatch_conversation_events/i.test(text)) {
+      const [conversationId, runId, eventType, payload] = values ?? [];
       this.rows.push({
         conversation_id: typeof conversationId === "string" ? conversationId : null,
         run_id: typeof runId === "string" ? runId : null,
@@ -164,37 +119,6 @@ test("Postgres Runtime store never falls back to Registry or generic database se
   );
 });
 
-test("Postgres quota migration backfills global, binding, and conversation usage from existing rows", async () => {
-  const pool = new FakePostgres();
-  pool.rows.push({
-    conversation_id: "scope:0123456789abcdef01234567:one",
-    run_id: "old-one",
-    event_type: "message.created",
-    payload: { type: "message.created", content: "one" }
-  }, {
-    conversation_id: "scope:0123456789abcdef01234567:two",
-    run_id: "old-two",
-    event_type: "message.created",
-    payload: { type: "message.created", content: "two" }
-  }, {
-    conversation_id: "legacy-conversation",
-    run_id: "old-three",
-    event_type: "message.created",
-    payload: { type: "message.created", content: "three" }
-  });
-  const store = new PostgresStore({ pool });
-  await store.ensureSchema();
-  assert.equal(pool.usage.get("global")?.eventCount, 3);
-  assert.equal(pool.usage.get("binding:0123456789abcdef01234567")?.eventCount, 2);
-  assert.equal(pool.usage.get("conversation:legacy-conversation")?.eventCount, 1);
-  assert.equal(pool.historicalUsageBackfills, 1);
-
-  const reopenedStore = new PostgresStore({ pool });
-  await reopenedStore.ensureSchema();
-  assert.equal(pool.historicalUsageBackfills, 1);
-  assert.equal(pool.usage.get("global")?.eventCount, 3);
-});
-
 test("Postgres Runtime queries have a bounded outer deadline", async () => {
   const pool = {
     query: async () => new Promise<{ rows: [] }>(() => undefined)
@@ -205,44 +129,7 @@ test("Postgres Runtime queries have a bounded outer deadline", async () => {
   assert.ok(Date.now() - started < 500);
 });
 
-test("Postgres Runtime enforces per-conversation event and byte quotas", async () => {
-  const pool = new FakePostgres();
-  const eventLimited = new PostgresStore({
-    pool,
-    maxConversationEvents: 1,
-    maxConversationBytes: 64 * 1024
-  });
-  await append(eventLimited, {
-    type: "message.created",
-    conversation_id: "quota-conversation",
-    run_id: "quota-one",
-    role: "user",
-    content: "first"
-  });
-  await assert.rejects(append(eventLimited, {
-    type: "message.created",
-    conversation_id: "quota-conversation",
-    run_id: "quota-two",
-    role: "user",
-    content: "second"
-  }), /storage quota exceeded/);
-
-  const bytePool = new FakePostgres();
-  const byteLimited = new PostgresStore({
-    pool: bytePool,
-    maxConversationEvents: 10,
-    maxConversationBytes: 1_024
-  });
-  await assert.rejects(append(byteLimited, {
-    type: "message.created",
-    conversation_id: "byte-conversation",
-    run_id: "byte-run",
-    role: "user",
-    content: "x".repeat(2_000)
-  }), /storage quota exceeded/);
-});
-
-test("one near-quota conversation does not serialize writes for another conversation", async () => {
+test("one slow conversation does not serialize writes for another conversation", async () => {
   let markBlocked!: () => void;
   const blocked = new Promise<void>((resolve) => { markBlocked = resolve; });
   let releaseBlocked!: () => void;
@@ -252,7 +139,7 @@ test("one near-quota conversation does not serialize writes for another conversa
       text: string,
       values?: unknown[]
     ): Promise<{ rows: T[] }> {
-      if (/reserved AS/i.test(text) && values?.[0] === "slow-conversation") {
+      if (/INSERT INTO hatch_conversation_events/i.test(text) && values?.[0] === "slow-conversation") {
         markBlocked();
         await blocker;
       }
@@ -266,7 +153,7 @@ test("one near-quota conversation does not serialize writes for another conversa
     conversation_id: "slow-conversation",
     run_id: "slow-run",
     role: "user",
-    content: "near quota"
+    content: "slow"
   });
   await blocked;
   const fast = append(store, {
@@ -282,54 +169,6 @@ test("one near-quota conversation does not serialize writes for another conversa
   ]), true);
   releaseBlocked();
   await slow;
-});
-
-test("Postgres Runtime caps global session events that cannot be bypassed with conversation ids", async () => {
-  const pool = new FakePostgres();
-  const store = new PostgresStore({
-    pool,
-    maxGlobalEvents: 1,
-    maxGlobalBytes: 64 * 1024
-  });
-  await append(store, {
-    type: "session.started",
-    local_tools: []
-  });
-  await assert.rejects(append(store, {
-    type: "session.started",
-    local_tools: []
-  }), /global event storage quota exceeded/);
-});
-
-test("Postgres Runtime scope quota cannot be bypassed by rotating client conversation ids", async () => {
-  const pool = new FakePostgres();
-  const store = new PostgresStore({
-    pool,
-    maxConversationEvents: 10,
-    maxConversationBytes: 64 * 1024,
-    maxScopeEvents: 2,
-    maxScopeBytes: 64 * 1024,
-    maxGlobalEvents: 10,
-    maxGlobalBytes: 256 * 1024
-  });
-  for (const index of [1, 2]) {
-    await append(store, {
-      type: "message.created",
-      conversation_id: `scope:0123456789abcdef01234567:conversation-${index}`,
-      run_id: `scope-run-${index}`,
-      role: "user",
-      content: "bounded"
-    });
-  }
-  await assert.rejects(append(store, {
-    type: "message.created",
-    conversation_id: "scope:0123456789abcdef01234567:conversation-3",
-    run_id: "scope-run-3",
-    role: "user",
-    content: "must fail"
-  }), /storage quota exceeded/);
-  assert.equal(pool.usage.get("binding:0123456789abcdef01234567")?.eventCount, 2);
-  assert.equal(pool.usage.get("global")?.eventCount, 2);
 });
 
 function storeFixture(): { store: PostgresStore; pool: FakePostgres } {

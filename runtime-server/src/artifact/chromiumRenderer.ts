@@ -9,18 +9,14 @@ const RENDER_TIMEOUT_MS = 120_000;
 const PRINT = { format: "A4", printBackground: true, preferCSSPageSize: true } as const;
 
 /**
- * A report document printed by headless Chromium inside the Runtime: its PDF, the page count, and page 1 as an image. One
- * render at a time, each in a fresh browser that loads nothing but the document itself, and ended at a deadline.
+ * A report document printed by headless Chromium inside the Runtime: its PDF, the page count, and page 1 as an image. Each
+ * render in a fresh browser that loads nothing but the document itself, and ended at a deadline.
  */
 export class ChromiumReportRenderer implements ReportRenderer {
-  private queue: Promise<unknown> = Promise.resolve();
-
   constructor(private readonly options: { timeoutMs?: number; launch?: () => Promise<Browser>; pages?: PdfParsePageRenderer } = {}) {}
 
   render(html: string, signal?: AbortSignal): Promise<RenderedReport> {
-    const run = this.queue.then(() => this.once(html, signal));
-    this.queue = run.catch(() => undefined);
-    return run;
+    return this.once(html, signal);
   }
 
   private async once(html: string, signal?: AbortSignal): Promise<RenderedReport> {

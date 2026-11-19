@@ -17,6 +17,8 @@ export type DeliverableFollowupDeps = {
   /** Whether the conversation's buyer published a page since the conversation began. */
   hasPage(conversation: ConversationRecord): Promise<boolean>;
   prompts: Prompts;
+  /** Conversations another mechanism owns the ending of (an access code's: CodeConversations). */
+  skip?(conversation: ConversationRecord): Promise<boolean>;
   /** Posts the follow-up as a user message and starts its Run, under `key`. */
   start(conversation: ConversationRecord, key: string, content: string): Promise<unknown>;
 };
@@ -29,7 +31,7 @@ export class DeliverableFollowups {
     const { capabilities, repository, hasPage, prompts, start } = this.deps;
     try {
       const conversation = await repository.getConversation(run.conversationId);
-      if (!conversation || !await capabilities.has(conversation.productId, DELIVERABLE_HTML_CAPABILITY) || await hasPage(conversation)) return;
+      if (!conversation || !await capabilities.has(conversation.productId, DELIVERABLE_HTML_CAPABILITY) || await this.deps.skip?.(conversation) || await hasPage(conversation)) return;
       const ordered = (await repository.listRuns(run.conversationId)).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
       if (ordered.at(-1)?.id !== run.id) return; // someone wrote since: nobody is waiting for this Run
       let followups = 0;

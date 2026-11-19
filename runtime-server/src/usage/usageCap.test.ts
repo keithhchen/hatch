@@ -116,7 +116,7 @@ async function chat(cap: (scope: { creatorId: string }) => Promise<void>) {
   const hub = new RunEventHub();
   const adopted: string[] = [];
   const service = new ChatService<{ creatorId: string }>({
-    repository, terminator: new RunTerminator(repository, hub), hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry(), cap,
+    repository, terminator: new RunTerminator(repository, hub), hub, registry: new RunRegistry(), cap,
     supervisor: { adopt: (run: ConversationRunRecord) => { adopted.push(run.id); }, executorId: "exec", holdsConversation: () => false, steered: () => undefined }
   });
   const submit = (n: number) => service.submit({

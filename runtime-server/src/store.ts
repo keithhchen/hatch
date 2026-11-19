@@ -300,7 +300,6 @@ export class LocalRuntimeAuthority {
   compactions = new Map<string, CompactionClaim>();
   journal: ConversationJournalEvent[] = [];
   events: StoreEvent[] = [];
-  private usage = new Map<string, { count: number; bytes: number }>();
   private chain: Promise<void> = Promise.resolve();
   private opening?: Promise<void>;
   private database?: DatabaseSync;
@@ -366,13 +365,7 @@ export class LocalRuntimeAuthority {
     for (const row of commit.toolCalls ?? []) this.toolCalls.set(`${row.runId}\n${row.toolCallId}`, row);
     for (const row of commit.compactions ?? []) this.compactions.set(row.id, row);
     for (const event of commit.journal ?? []) this.journal.push(event);
-    for (const event of commit.events ?? []) {
-      this.events.push(event);
-      for (const key of eventQuotaKeys(event)) {
-        const previous = this.usage.get(key) ?? { count: 0, bytes: 0 };
-        this.usage.set(key, { count: previous.count + 1, bytes: previous.bytes + Buffer.byteLength(JSON.stringify(event)) });
-      }
-    }
+    for (const event of commit.events ?? []) this.events.push(event);
   }
 
   /** Serialize readers with local commits; incorporate other processes' log tail. */
@@ -399,7 +392,6 @@ export class LocalRuntimeAuthority {
         this.refresh();
         const { result, commit } = await prepare();
         if (commit) {
-          this.checkQuota(commit.events ?? []);
           const payload = JSON.stringify(commit);
           if (db) db.prepare("INSERT INTO commits(payload) VALUES (?)").run(payload);
         }
@@ -417,34 +409,6 @@ export class LocalRuntimeAuthority {
     this.chain = operation.then(() => undefined, () => undefined);
     return operation;
   }
-
-  private checkQuota(events: StoreEvent[]): void {
-    const additions = new Map<string, { count: number; bytes: number }>();
-    for (const event of events) for (const key of eventQuotaKeys(event)) {
-      const current = additions.get(key) ?? { count: 0, bytes: 0 };
-      additions.set(key, { count: current.count + 1, bytes: current.bytes + Buffer.byteLength(JSON.stringify(event)) });
-    }
-    for (const [key, addition] of additions) {
-      const current = this.usage.get(key) ?? { count: 0, bytes: 0 };
-      const scope = key === "global" ? "GLOBAL" : key.startsWith("binding:") ? "SCOPE" : "CONVERSATION";
-      const defaults = scope === "GLOBAL" ? [1_000_000, 1024 ** 3] : scope === "SCOPE" ? [100_000, 256 * 1024 ** 2] : [10_000, 64 * 1024 ** 2];
-      const limits = ["EVENTS", "BYTES"].map((unit, index) => {
-        const suffix = unit === "BYTES" && scope !== "CONVERSATION" ? "EVENT_BYTES" : unit;
-        const value = Number(process.env[`HATCH_RUNTIME_MAX_${scope}_${suffix}`] ?? defaults[index]);
-        if (!Number.isSafeInteger(value) || value < 1) throw new Error("Invalid Runtime storage quota");
-        return value;
-      });
-      if (current.count + addition.count > limits[0]! || current.bytes + addition.bytes > limits[1]!) {
-        throw new Error(`Runtime ${scope.toLowerCase()} storage quota exceeded`);
-      }
-    }
-  }
-}
-
-function eventQuotaKeys(event: StoreEvent): string[] {
-  const id = "conversation_id" in event ? event.conversation_id : undefined;
-  const binding = id?.match(/^scope:([a-f0-9]{24}):/)?.[1];
-  return ["global", ...(binding ? [`binding:${binding}`] : []), ...(id ? [`conversation:${id}`] : [])];
 }
 
 const localAuthorities = new Map<string, LocalRuntimeAuthority>();
@@ -607,6 +571,12 @@ export class RuntimeStore {
   async readRunActivity(conversationId: string, runId: string): Promise<Pick<VisibleConversationMessage, "tool_calls" | "skill_events" | "skill_runs">> {
     const events = (await this.readEvents(conversationId)).filter((event) => event.type === "tool.call" || event.type === "skill.activated" || event.type === "skill.invoked" || event.type === "skill.run");
     return this.projectRunActivity(conversationId, runId, events);
+  }
+
+  /** The distinct names of the tools a conversation has called. */
+  async toolNames(conversationId: string): Promise<string[]> {
+    const events = await this.readEvents(conversationId);
+    return [...new Set(events.flatMap((event) => event.type === "tool.call" ? [event.name] : []))];
   }
 
   protected async projectRunActivity(conversationId: string, runId: string, events: StoreEvent[]): Promise<Pick<VisibleConversationMessage, "tool_calls" | "skill_events" | "skill_runs">> {

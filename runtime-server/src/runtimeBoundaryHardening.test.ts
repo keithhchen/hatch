@@ -414,182 +414,7 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
   }
 });
 
-test("global per-turn authorization capacity rejects N+1 without another Registry call", async () => {
-  const entitlement = fixtureEntitlement();
-  const tokenCalls = new Map<string, number>();
-  const pendingReleases: Array<(identity: { sub: string }) => void> = [];
-  const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async (token) => {
-      const calls = (tokenCalls.get(token ?? "") ?? 0) + 1;
-      tokenCalls.set(token ?? "", calls);
-      if (calls === 1) return { sub: entitlement.user_id };
-      return new Promise<{ sub: string }>((resolve) => pendingReleases.push(resolve));
-    }
-  };
-  let runCalls = 0;
-  const conversationRepository = await authBoundaryConversations(entitlement, ["turn-conversation-one", "turn-conversation-two", "turn-conversation-three"]);
-  const runtime = createRuntimeServer({
-    createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
-    authIdentityResolver: identityResolver,
-    agentCorpusResolver: fixtureCorpusResolver(entitlement),
-    maxPendingTurnAuthorizations: 2,
-    maxActiveRunsGlobal: 10,
-    conversationRepository
-  });
-  const port = await listen(runtime);
-  const sockets: WebSocket[] = [];
-  try {
-    for (const index of [1, 2, 3]) {
-      sockets.push(await connectEntitledSocket(
-        port,
-        entitlement,
-        `turn-session-${index}`,
-        `turn-conversation-${["one", "two", "three"][index - 1]}`
-      ));
-    }
-    sockets[0]!.send(JSON.stringify(clientMessage("turn-capacity-one", "turn-conversation-one")));
-    sockets[1]!.send(JSON.stringify(clientMessage("turn-capacity-two", "turn-conversation-two")));
-    await waitUntil(() => pendingReleases.length === 2);
-
-    const rejected = waitForMessage(sockets[2]!, (message) => message.run_id === "turn-capacity-overflow"
-      && (message.error as { code?: string } | undefined)?.code === "authorization_busy");
-    sockets[2]!.send(JSON.stringify(clientMessage("turn-capacity-overflow", "turn-conversation-three")));
-    assert.equal(((await rejected).error as { code?: string }).code, "authorization_busy");
-    assert.equal([...tokenCalls.values()].reduce((sum, calls) => sum + calls, 0), 5);
-    assert.equal(runCalls, 0);
-
-    const firstCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.completed" && message.run_id === "turn-capacity-one");
-    pendingReleases[0]?.({ sub: entitlement.user_id });
-    await firstCompleted;
-
-    sockets[2]!.send(JSON.stringify(clientMessage("turn-capacity-admitted", "turn-conversation-three")));
-    await waitUntil(() => pendingReleases.length === 3);
-    assert.equal(tokenCalls.get("turn-session-3"), 2);
-  } finally {
-    for (const release of pendingReleases) release({ sub: entitlement.user_id });
-    for (const socket of sockets) socket.close();
-    await runtime.close();
-  }
-});
-
-test("per-user turn authorization capacity prevents one account from occupying the global gate", async () => {
-  const entitlement = fixtureEntitlement();
-  const tokenCalls = new Map<string, number>();
-  let markPendingStarted!: () => void;
-  const pendingStarted = new Promise<void>((resolve) => { markPendingStarted = resolve; });
-  let releasePending!: (identity: { sub: string }) => void;
-  const pendingIdentity = new Promise<{ sub: string }>((resolve) => { releasePending = resolve; });
-  const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async (token) => {
-      const calls = (tokenCalls.get(token ?? "") ?? 0) + 1;
-      tokenCalls.set(token ?? "", calls);
-      if (token === "fair-user-one" && calls === 2) {
-        markPendingStarted();
-        return pendingIdentity;
-      }
-      return { sub: entitlement.user_id };
-    }
-  };
-  let runCalls = 0;
-  const conversationRepository = await authBoundaryConversations(entitlement, ["fair-auth-conversation-first", "fair-auth-conversation-overflow", "fair-auth-conversation-admitted"]);
-  const runtime = createRuntimeServer({
-    createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
-    authIdentityResolver: identityResolver,
-    agentCorpusResolver: fixtureCorpusResolver(entitlement),
-    maxPendingTurnAuthorizations: 4,
-    maxPendingTurnAuthorizationsPerUser: 1,
-    conversationRepository
-  });
-  const port = await listen(runtime);
-  let first: WebSocket | undefined;
-  let second: WebSocket | undefined;
-  try {
-    first = await connectEntitledSocket(port, entitlement, "fair-user-one", "fair-auth-conversation-first");
-    second = await connectEntitledSocket(port, entitlement, "fair-user-two", "fair-auth-conversation-overflow");
-    first.send(JSON.stringify(clientMessage("fair-auth-first", "fair-auth-conversation-first")));
-    await pendingStarted;
-
-    const rejected = waitForMessage(second, (message) => message.run_id === "fair-auth-overflow"
-      && (message.error as { code?: string } | undefined)?.code === "user_authorization_busy");
-    second.send(JSON.stringify(clientMessage("fair-auth-overflow", "fair-auth-conversation-overflow")));
-    assert.equal(((await rejected).error as { code?: string }).code, "user_authorization_busy");
-    assert.equal(tokenCalls.get("fair-user-two"), 1);
-    assert.equal(runCalls, 0);
-
-    const firstCompleted = waitForMessage(first, (message) => message.type === "turn.completed" && message.run_id === "fair-auth-first");
-    releasePending({ sub: entitlement.user_id });
-    await firstCompleted;
-    const secondCompleted = waitForMessage(second, (message) => message.type === "turn.completed" && message.run_id === "fair-auth-admitted");
-    second.send(JSON.stringify(clientMessage("fair-auth-admitted", "fair-auth-conversation-overflow")));
-    await secondCompleted;
-    assert.equal(tokenCalls.get("fair-user-two"), 2);
-  } finally {
-    releasePending({ sub: entitlement.user_id });
-    first?.close();
-    second?.close();
-    await runtime.close();
-  }
-});
-
-test("global active-run capacity rejects excess model work and releases on completion", async () => {
-  let runCalls = 0;
-  const runReleases: Array<() => void> = [];
-  const releaseByRun = new Map<string, () => void>();
-  const agentRuntime: AgentRuntime = {
-    async *run(input) {
-      runCalls += 1;
-      await new Promise<void>((resolve) => { runReleases.push(resolve); releaseByRun.set(input.run_id, resolve); });
-      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
-    }
-  };
-  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-active-capacity-")));
-  const conversationIds = ["active-conversation-one", "active-conversation-two", "active-conversation-three"];
-  const runtime = createRuntimeServer({ insecureLocalMode: true,
-    createRuntime: () => agentRuntime,
-    conversationStore: store,
-    conversationRepository: await seedLocalConversations(store, conversationIds),
-    maxActiveRunsGlobal: 2
-  });
-  const port = await listen(runtime);
-  const sockets = [await openSocket(port), await openSocket(port), await openSocket(port)];
-  try {
-    for (const [index, socket] of sockets.entries()) {
-      const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify(hello(`active-token-${index}`, conversationIds[index]!)));
-      await ready;
-    }
-
-    sockets[0]!.send(JSON.stringify(clientMessage("active-one", "active-conversation-one")));
-    sockets[1]!.send(JSON.stringify(clientMessage("active-two", "active-conversation-two")));
-    await waitUntil(() => runCalls === 2);
-
-    const globalRejected = waitForMessage(sockets[2]!, (message) => message.run_id === "active-global-overflow"
-      && (message.error as { code?: string } | undefined)?.code === "runtime_run_capacity");
-    sockets[2]!.send(JSON.stringify(clientMessage("active-global-overflow", "active-conversation-three")));
-    assert.equal(((await globalRejected).error as { code?: string }).code, "runtime_run_capacity");
-    assert.equal(runCalls, 2);
-
-    const firstCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.completed" && message.run_id === "active-one");
-    const firstStateCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.state"
-      && message.run_id === "active-one" && message.status === "completed");
-    // Runs start in whatever order the server schedules them: release the one the test waits on.
-    releaseByRun.get("active-one")?.();
-    await firstCompleted;
-    await firstStateCompleted;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    sockets[2]!.send(JSON.stringify(clientMessage("active-after-release", "active-conversation-three")));
-    await waitUntil(() => runCalls === 3);
-  } finally {
-    for (const release of runReleases) release();
-    for (const socket of sockets) socket.close();
-    await runtime.close();
-  }
-});
-
-test("one account may run several tasks at once: only the global capacity applies", async () => {
+test("one account may run several tasks at once", async () => {
   let runCalls = 0;
   const runReleases: Array<() => void> = [];
   const agentRuntime: AgentRuntime = {
@@ -614,7 +439,6 @@ test("one account may run several tasks at once: only the global capacity applie
         sub: token === "fair-run-token-three" ? "fair-run-other-account" : "fair-run-shared-account",
       })
     },
-    maxActiveRunsGlobal: 3
   });
   const port = await listen(runtime);
   const first = await openSocket(port);
@@ -633,7 +457,7 @@ test("one account may run several tasks at once: only the global capacity applie
 
     first.send(JSON.stringify(clientMessage("fair-run-first", "fair-run-conversation-first")));
     await waitUntil(() => runCalls === 1);
-    // One account runs as many tasks at once as the Runtime has room for: no per-account cap.
+    // One account runs as many tasks at once as it likes.
     sameUser.send(JSON.stringify(clientMessage("fair-run-same-user", "fair-run-conversation-same-user")));
     await waitUntil(() => runCalls === 2);
 
@@ -644,55 +468,6 @@ test("one account may run several tasks at once: only the global capacity applie
     first.close();
     sameUser.close();
     otherUser.close();
-    await runtime.close();
-  }
-});
-
-test("socket close retains global run capacity until an abort-ignoring Runtime settles", async () => {
-  let runCalls = 0;
-  const runReleases: Array<() => void> = [];
-  const agentRuntime: AgentRuntime = {
-    async *run(input) {
-      runCalls += 1;
-      // Deliberately ignore the Runtime AbortSignal. Capacity must describe
-      // unfinished model work, not merely the lifetime of its client socket.
-      await new Promise<void>((resolve) => runReleases.push(resolve));
-      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
-    }
-  };
-  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-close-capacity-")));
-  const conversationIds = ["close-capacity-conversation-first", "close-capacity-conversation-overflow"];
-  const runtime = createRuntimeServer({ insecureLocalMode: true,
-    createRuntime: () => agentRuntime,
-    conversationStore: store,
-    conversationRepository: await seedLocalConversations(store, conversationIds),
-    maxActiveRunsGlobal: 1
-  });
-  const port = await listen(runtime);
-  const first = await openSocket(port);
-  const second = await openSocket(port);
-  try {
-    for (const [index, socket] of [first, second].entries()) {
-      const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify(hello(`close-capacity-token-${index}`, conversationIds[index]!)));
-      await ready;
-    }
-
-    first.send(JSON.stringify(clientMessage("close-capacity-first", "close-capacity-conversation-first")));
-    await waitUntil(() => runCalls === 1);
-    const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
-    first.close();
-    await firstClosed;
-
-    const rejected = waitForMessage(second, (message) => message.run_id === "close-capacity-overflow"
-      && (message.error as { code?: string } | undefined)?.code === "runtime_run_capacity");
-    second.send(JSON.stringify(clientMessage("close-capacity-overflow", "close-capacity-conversation-overflow")));
-    assert.equal(((await rejected).error as { code?: string }).code, "runtime_run_capacity");
-    assert.equal(runCalls, 1);
-  } finally {
-    for (const release of runReleases) release();
-    first.close();
-    second.close();
     await runtime.close();
   }
 });
@@ -719,7 +494,6 @@ test("turn.cancel retains the conversation lease until an abort-ignoring Runtime
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["cancel-conversation-shared"]),
-    maxActiveRunsGlobal: 4,
   });
   const port = await listen(runtime);
   const first = await openSocket(port);
@@ -757,7 +531,7 @@ test("turn.cancel retains the conversation lease until an abort-ignoring Runtime
   }
 });
 
-test("network-tool cancellation and timeout settle the run before releasing global capacity", async () => {
+test("network-tool cancellation and timeout settle the run", async () => {
   const originalFetch = globalThis.fetch;
   const originalProvider = process.env.HATCH_WEB_SEARCH_PROVIDER;
   const originalUrl = process.env.HATCH_WEB_SEARCH_URL;
@@ -799,19 +573,17 @@ test("network-tool cancellation and timeout settle the run before releasing glob
         }
       };
       const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), `hatch-runtime-tool-${mode}-`)));
-      const conversationIds = [`${mode}-tool-conversation-first`, `${mode}-tool-conversation-second`];
+      const conversationIds = [`${mode}-tool-conversation-first`];
       const runtime = createRuntimeServer({ insecureLocalMode: true,
         createRuntime: () => agentRuntime,
         conversationStore: store,
         conversationRepository: await seedLocalConversations(store, conversationIds),
-        maxActiveRunsGlobal: 1,
         serverToolTimeoutMs: mode === "timeout" ? 25 : 10_000
       });
       const port = await listen(runtime);
       const first = await openSocket(port);
-      const second = await openSocket(port);
       try {
-        for (const [index, socket] of [first, second].entries()) {
+        for (const [index, socket] of [first].entries()) {
           const ready = waitForMessage(socket, (message) => message.type === "session.ready");
           socket.send(JSON.stringify(hello(`${mode}-tool-token-${index}`, conversationIds[index]!)));
           await ready;
@@ -831,13 +603,9 @@ test("network-tool cancellation and timeout settle the run before releasing glob
           await timedOut;
         }
         await firstSettled;
-        await new Promise<void>((resolve) => setImmediate(resolve));
-
-        second.send(JSON.stringify(clientMessage(`${mode}-tool-second`, `${mode}-tool-conversation-second`)));
-        await waitUntil(() => fetchCalls === 2);
+        assert.equal(fetchCalls, 1);
       } finally {
         first.close();
-        second.close();
         await runtime.close();
       }
     }
@@ -1081,7 +849,6 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["outbound-pressure-conversation"]),
-    maxActiveRunsGlobal: 1,
     maxSocketBufferedBytes: MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES
   });
   let acceptedSocket: WebSocket | undefined;
@@ -1773,7 +1540,7 @@ test("turn.cancel while a steer is still being admitted cancels the live Run, an
       }
       : Reflect.get(target, property, receiver)
   });
-  const runtime = createRuntimeServer({ insecureLocalMode: true, createRuntime: () => agentRuntime, conversationStore: store, conversationRepository: slow, maxActiveRunsGlobal: 4 });
+  const runtime = createRuntimeServer({ insecureLocalMode: true, createRuntime: () => agentRuntime, conversationStore: store, conversationRepository: slow });
   const port = await listen(runtime);
   const socket = await openSocket(port);
   try {

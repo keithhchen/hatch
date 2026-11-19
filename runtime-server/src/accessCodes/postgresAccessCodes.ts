@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from "node:crypto";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
-import type { AccessCodes, AccessCodeOrder, AccessCodeSource, AccessCodeStatus, AccessCodeView, Activation, PayChannel, RedeemResult } from "./accessCodes.js";
+import type { AccessCodes, AccessCodeOrder, AccessCodeSource, AccessCodeStatus, AccessCodeView, Activation, PayChannel, RedeemResult, CodeOutcome, DueCode } from "./accessCodes.js";
 
 export const ACCESS_CODES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS hatch_access_codes (
@@ -18,14 +18,17 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
   used_at TIMESTAMPTZ,
   used_by_conversation_id TEXT
 );
-ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS name TEXT;`;
+ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
+ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS outcome TEXT CHECK (outcome IN ('ready', 'failed'));`;
 
 // MSC and six characters, free or bought. No 0, 1, I, L or O: a code is read and typed by hand.
 const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const newCode = () => `MSC${Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("")}`;
 const normalize = (code: string) => code.trim().toUpperCase();
 
-type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; name: string | null; used_by_conversation_id: string | null };
+type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; name: string | null; used_by_conversation_id: string | null; outcome: CodeOutcome | null; attempts: number };
 const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, name: row.name, status: row.status, source: row.source });
 
 export class PostgresAccessCodes implements AccessCodes {
@@ -74,8 +77,27 @@ export class PostgresAccessCodes implements AccessCodes {
   }
 
   async lookup(code: string) {
-    const view = await this.peek(code);
-    return view ? { status: view.status, source: view.source, productId: view.productId, conversationId: view.usedByConversationId } : null;
+    const row = (await this.db.query<Row>("SELECT * FROM hatch_access_codes WHERE code = $1", [normalize(code)])).rows[0];
+    return row ? { status: row.status, source: row.source, productId: row.product_id, conversationId: row.used_by_conversation_id, outcome: row.outcome } : null;
+  }
+
+  async due(now: Date, limit: number): Promise<DueCode[]> {
+    const rows = (await this.db.query<Row>(
+      `SELECT code, product_id, used_by_conversation_id, attempts FROM hatch_access_codes
+       WHERE status = 'used' AND outcome IS NULL AND used_by_conversation_id IS NOT NULL AND COALESCE(next_attempt_at, used_at + interval '15 seconds') <= $1
+       ORDER BY used_at, code LIMIT $2`, [now, limit])).rows;
+    return rows.map(row => ({ code: row.code, productId: row.product_id, conversationId: row.used_by_conversation_id!, attempts: row.attempts }));
+  }
+
+  async claim(code: string, attempts: number, nextAt: Date): Promise<boolean> {
+    const won = await this.db.query(
+      "UPDATE hatch_access_codes SET attempts = attempts + 1, next_attempt_at = $3 WHERE code = $1 AND attempts = $2 AND outcome IS NULL AND status = 'used' RETURNING code",
+      [normalize(code), attempts, nextAt]);
+    return won.rows.length > 0;
+  }
+
+  async conclude(code: string, outcome: CodeOutcome): Promise<void> {
+    await this.db.query("UPDATE hatch_access_codes SET outcome = $2 WHERE code = $1 AND outcome IS NULL", [normalize(code), outcome]);
   }
 
   async peek(code: string): Promise<AccessCodeView | undefined> {

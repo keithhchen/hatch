@@ -21,7 +21,6 @@ test("errors: every domain refusal is told in the OpenAI shape the contract tabl
   assert.deepEqual(shape(new ChatError("product_requires_local_tools", "x", 409)), [400, "invalid_request_error", "model_requires_local_tools"]);
   assert.deepEqual(shape(new ChatError("too_large", "x", 413)), [413, "invalid_request_error", "file_too_large"]);
   assert.deepEqual(shape(new ChatError("unsupported_type", "x", 415)), [415, "invalid_request_error", "unsupported_file_type"]);
-  assert.deepEqual(shape(new ChatError("runtime_run_capacity", "x", 503)), [503, "service_unavailable", "service_unavailable"]);
   assert.deepEqual(shape(new AuthorizationError("auth_registry_unavailable", "x")), [503, "service_unavailable", "service_unavailable"]);
   assert.deepEqual(shape(new AuthorizationError("auth_invalid", "x")), [401, "authentication_error", "invalid_api_key"]);
   assert.deepEqual(shape(new AuthorizationError("entitlement_required", "x")), [403, "permission_error", "access_denied"]);
@@ -30,7 +29,6 @@ test("errors: every domain refusal is told in the OpenAI shape the contract tabl
 });
 
 test("errors: retry-after travels with 429 and 503, and an unexpected failure is generic and marked internal", () => {
-  assert.equal(toApiError(new ChatError("runtime_run_capacity", "x", 503)).error.retryAfterSeconds, 5);
   const internal = toApiError(new Error("database password is hunter2"));
   assert.equal(internal.internal, true);
   assert.deepEqual(errorBody(internal.error), { error: { message: "The server had an error processing your request.", type: "server_error", param: null, code: "internal_error" } });

@@ -383,7 +383,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     ingest.onSettled(job => assistant.ingested(job));
     // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
     failures.attach(new PostgresFailureLedger(registryPool as never));
-    const transcripts = new PostgresStore({ pool: registryPool, maxConversationEvents: 1_000_000, maxConversationBytes: 1024 * 1024 * 1024 });
+    const transcripts = new PostgresStore({ pool: registryPool });
     const conversations = new PostgresConversationRepository({ pool: registryPool });
     conversations.bindSubmissionStore(transcripts);
     await conversations.initialize();

@@ -29,14 +29,18 @@ async function withBackend(name: "memory" | "file" | "postgres", body: (harness:
     const root = name === "file" ? await mkdtemp(path.join(os.tmpdir(), "hatch-hardening-")) : undefined;
     const authority = new LocalRuntimeAuthority(root);
     const repository = new InMemoryConversationRepository(authority);
-    const previousLimit = process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS;
+    let crash = false;
+    const transact = authority.transact.bind(authority);
+    authority.transact = async (prepare) => transact(async () => {
+      const prepared = await prepare();
+      if (crash && prepared.commit?.events?.length) throw new Error("the process died while writing the transcript");
+      return prepared;
+    });
     try {
       await repository.createConversation({ ...binding, id, publicId: "hardening" });
       const store = new RuntimeStore(authority);
-      // The commit log refuses a commit over its storage quota: a failure at the moment the transcript is written.
-      await body({ repository, store, crashNextTranscriptWrite: () => { process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS = "1"; return () => { delete process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS; }; } });
+      await body({ repository, store, crashNextTranscriptWrite: () => { crash = true; return () => { crash = false; }; } });
     } finally {
-      if (previousLimit === undefined) delete process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS; else process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS = previousLimit;
       await repository.close();
       if (root) await rm(root, { recursive: true, force: true });
     }
