@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect } from "../server.mjs";
-import { CodeRoute, accessCodePayUrl, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
+import { CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 
@@ -21,6 +21,13 @@ test("the pay link names the Product and the email, and comes back to the landin
   assert.equal(url.searchParams.get("email"), "buyer+x@example.com");
   assert.equal(url.searchParams.get("back"), "https://gethatchapp.com/c/");
   assert.match(url.search, /back=https%3A%2F%2Fgethatchapp\.com%2Fc%2F/);
+});
+
+test("WeChat's in-app browser is told by its user agent; phone browsers are not", () => {
+  assert.equal(inWeChat("Mozilla/5.0 (iPhone) AppleWebKit MicroMessenger/8.0.40"), true);
+  assert.equal(inWeChat("Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1"), false);
+  assert.equal(inWeChat("Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36"), false);
+  assert.equal(inWeChat(undefined), false);
 });
 
 test("a typed code is trimmed and upper-cased, or it is not a code", () => {
