@@ -1,0 +1,14 @@
+.code-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--web-paper); }
+.code-page__card { animation: none; }
+.code-page__pay { display: flex; justify-content: center; margin-top: 12px; text-decoration: none; }
+.code-page__pay.is-disabled { opacity: .45; pointer-events: none; }
+.code-page__rule { margin: 28px 0; border: 0; border-top: 1px solid var(--chat-border); }
+.code-page__steps { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 12px; text-align: left; }
+.code-page__step { display: flex; align-items: center; gap: 12px; color: var(--chat-muted); }
+.code-page__step--now { color: var(--chat-ink); font-weight: 650; }
+.code-page__step--done { color: var(--chat-body); }
+.code-page__pulse { width: 24px; height: 24px; border-radius: 8px; }
+.code-page__dot { width: 8px; height: 8px; margin: 0 8px; border-radius: 50%; background: var(--chat-border); }
+.code-page__done { display: grid; place-items: center; padding: 24px 0; }
+.code-page__report { padding: 18px 56px; font-size: 20px; text-decoration: none; }
+.code-page__failed { margin: 0; padding: 24px 0; text-align: center; font-size: 17px; color: var(--chat-ink); }

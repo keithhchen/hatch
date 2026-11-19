@@ -19,8 +19,6 @@ export type SessionBinding = {
   corpusDigest: string;
   runtimeDigest?: string;
   briefSpec?: BriefSpec;
-  /** From an access code: the one conversation (public id) this session may open. */
-  only?: { productId: string; conversationId: string };
   agentCorpus?: AgentCorpus;
   agentCorpusRoot?: string;
   /** Creator tools resolved when the message was authorized; a Run taken over by another instance resolves them again. */
@@ -103,13 +101,9 @@ export async function resolveSessionBinding(
     if (resolved.corpus.product.id !== hello.product_id) {
       throw new AuthorizationError("agent_corpus_unavailable", "The requested Expert Agent is not available.");
     }
-    if (authClaims.only && authClaims.only.productId !== resolved.corpus.product.id) {
-      throw new AuthorizationError("access_denied", "This access code is for another Product.");
-    }
     return {
       creatorId: resolved.corpus.creator.id,
       userId: authClaims.sub,
-      ...(authClaims.only ? { only: authClaims.only } : {}),
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
       ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),

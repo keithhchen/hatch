@@ -78,6 +78,9 @@ export type ReportEmailJob = {
   productName: string;
   expertName?: string;
   website?: string;
+  /** The access code of a code-gated Product and the page of it (/c/<code>). */
+  code?: string;
+  codeUrl?: string;
   template?: ReportEmailTemplate;
 };
 
@@ -121,7 +124,7 @@ export class ReportEmails {
     if (!sender) return this.log("report_email_off", { page_id: job.pageId, reason: "RESEND_API_KEY is not set" });
     if (!await pages.claimEmail(job.pageId, to, STALE_CLAIM_SECONDS)) return this.log("report_email_skipped", { page_id: job.pageId, to });
     try {
-      const values = { report_url: job.reportUrl, chat_url: job.chatUrl, product_name: job.productName, expert_name: job.expertName, website: job.website };
+      const values = { report_url: job.reportUrl, chat_url: job.chatUrl, product_name: job.productName, expert_name: job.expertName, website: job.website, code: job.code, code_url: job.codeUrl };
       const [html, subject] = await Promise.all([
         job.template?.html ?? prompts.get("report-email-default"),
         job.template?.subject ?? prompts.get("report-email-default-subject")

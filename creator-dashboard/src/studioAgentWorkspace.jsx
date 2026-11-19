@@ -222,7 +222,7 @@ function nextFieldId(fields) {
 }
 
 function BriefSpecForm({ product, productId, request, t, onSaved }) {
-  const initial = useMemo(() => arrayOf(product.brief_spec?.fields).map((field) => ({ id: String(field.id), label: String(field.label ?? ""), required: field.required === true })), [product.brief_spec]);
+  const initial = useMemo(() => arrayOf(product.brief_spec?.fields).map((field) => ({ id: String(field.id), label: String(field.label ?? ""), required: field.required === true, ...field.type ? { type: field.type } : {} })), [product.brief_spec]);
   const [fields, setFields] = useState(initial);
   const [state, setState] = useState({ busy: false, error: "", saved: false });
   useEffect(() => { setFields(initial); }, [initial]);
@@ -234,7 +234,7 @@ function BriefSpecForm({ product, productId, request, t, onSaved }) {
     if (!dirty || !valid) return;
     setState({ busy: true, error: "", saved: false });
     try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/brief-spec`, { method: "PUT", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ brief_spec: { contract_version: "1", fields: fields.map((field) => ({ id: field.id, label: field.label.trim(), required: field.required })) }, expected_updated_at: product.updated_at }) });
+      await request(`/v1/creator/products/${encodeURIComponent(productId)}/brief-spec`, { method: "PUT", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ brief_spec: { contract_version: "1", fields: fields.map((field) => ({ id: field.id, label: field.label.trim(), required: field.required, ...field.type ? { type: field.type } : {} })) }, expected_updated_at: product.updated_at }) });
       setState({ busy: false, error: "", saved: true });
       onSaved();
     } catch (error) { setState({ busy: false, error: friendlyError(error, t), saved: false }); }

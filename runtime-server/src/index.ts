@@ -58,7 +58,8 @@ import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
 import { accountPrincipal } from "./chat/principal.js";
 import { RestartRetrier } from "./chat/restartRetry.js";
-import { clientMessageInputDigest } from "./protocol.js";
+import { TASK_START_MESSAGE_CONTENT, clientMessageInputDigest } from "./protocol.js";
+import { CodePages } from "./codePages/codePages.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
 import { openArtifactMode } from "./artifact/open.js";
@@ -82,13 +83,15 @@ import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { openAgentBoxMode } from "./agentBox/open.js";
-import { AccessCodeIdentityResolver } from "./accessCodeIdentity.js";
-import { AccessGate, type AccessCodes } from "./accessGate.js";
+import { AccessGate } from "./accessGate.js";
 import { PostgresProductCapabilities, type ProductCapabilities } from "./agentBox/capabilities.js";
 import { DeliverableFollowups } from "./chat/deliverableFollowup.js";
 import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
 import type { BuyerFiles } from "./agentBox/files.js";
+import { openHatchPay } from "./hatchPay/open.js";
+import type { HatchPay } from "./hatchPay/routes.js";
+import type { AccessCodes } from "./accessCodes/accessCodes.js";
 import { openSiteResearchMode } from "./siteTools/open.js";
 import type { SiteResearchMode } from "./siteTools/tools.js";
 import { GUEST_PREFIX } from "./chat/principal.js";
@@ -217,6 +220,11 @@ export type RuntimeServerOptions = {
   accessGate?: AccessGate;
   /** Which Products have which capabilities; with it, `deliverable_html` Products are followed up until they publish an HTML report. */
   productCapabilities?: ProductCapabilities;
+  /** Access codes (redeemed when a chat starts) and the WeChat Pay pages that sell them (/hatch-pay/). */
+  accessCodes?: AccessCodes;
+  /** The same codes as one client sees them (rate-limited by its address): the chat start redeems and looks up through this, answering a TooManyAttempts with its 429. */
+  accessCodesFor?: (headers: http.IncomingHttpHeaders) => AccessCodes;
+  hatchPay?: HatchPay;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -247,16 +255,22 @@ export async function reportEmailContext(conversation: ConversationRecord, bindi
   const recipient = briefEmail(conversation.briefSnapshot);
   if (!recipient) return undefined;
   const expert = binding.agentCorpus?.creator.name;
-  // The code opens the conversation again from anywhere, so the mail's chat link carries it.
+  // The code's own page is where the report is found again: the mail carries it, with the code.
   const code = briefAccessCode(conversation.briefSnapshot);
   return {
     recipient,
-    chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}${code ? `?code=${encodeURIComponent(code)}` : ""}`,
+    chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}`,
+    ...code ? { code, codeUrl: `${origin}/c/${encodeURIComponent(code)}` } : {},
     productName: binding.agentCorpus?.product.name ?? "Hatch",
     ...expert && expert !== "Expert" ? { expertName: expert } : {},
     ...briefAnswer(conversation.briefSnapshot, "website") ? { website: briefAnswer(conversation.briefSnapshot, "website")! } : {},
     ...(template => template ? { template } : {})(await readCorpusEmailTemplate(binding.agentCorpusRoot))
   };
+}
+
+/** The report email is for the Products with the access code capability only: any other Product mails nothing. */
+export async function gatedReportEmailContext(gate: Pick<AccessGate, "required"> | undefined, conversation: ConversationRecord, binding: SessionBinding, origin?: string): Promise<ReportEmailContext | undefined> {
+  return await gate?.required(binding.productId) ? reportEmailContext(conversation, binding, origin) : undefined;
 }
 
 export async function createRuntimeServerFromEnvironment(
@@ -302,11 +316,12 @@ export async function createRuntimeServerFromEnvironment(
   const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
   // Site research, for the Products that have it switched on: off without any of its keys.
   const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
-  // Access codes: the Postgres AccessCodes adapter (feat/wxpay-access-codes, on hatch_access_codes) is plugged in here. Until it is, a Product with the capability refuses every Run.
-  const accessCodes: AccessCodes | undefined = undefined;
   const productCapabilities = conversationStore instanceof PostgresStore ? new PostgresProductCapabilities(conversationStore.pool) : undefined;
   await productCapabilities?.initialize();
-  const accessGate = productCapabilities ? new AccessGate(productCapabilities, accessCodes) : undefined;
+  // Access codes and, when fully configured, WeChat Pay.
+  const hatchPay = conversationStore instanceof PostgresStore ? await openHatchPay({ pool: conversationStore.pool, environment }) : undefined;
+  // The access code gate reads the codes through the limiter that counts a client's failed attempts by its address.
+  const accessGate = productCapabilities ? new AccessGate(productCapabilities, hatchPay ? (headers) => hatchPay.accessCodesFor(headers ?? {}) : undefined) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -337,6 +352,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(siteResearch ? { siteResearch } : {}),
     ...(accessGate ? { accessGate } : {}),
     ...(productCapabilities ? { productCapabilities } : {}),
+    ...(hatchPay ? { accessCodes: hatchPay.codes, accessCodesFor: hatchPay.accessCodesFor, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -369,13 +385,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const accountIdentities = options.authIdentityResolver
     ?? (entitlementResolver instanceof RegistryEntitlementResolver ? entitlementResolver : undefined);
   // A guest is told apart by its signed token; every other token is an account's, and the Registry decides.
-  const guestAware = accountIdentities && options.guestTokens
+  const authIdentityResolver = accountIdentities && options.guestTokens
     ? new GuestAwareIdentityResolver(options.guestTokens, accountIdentities)
     : accountIdentities;
-  // A used access code opens its conversation to whoever holds it, through the same identity the rest of the Runtime asks.
-  const authIdentityResolver = guestAware && options.accessGate
-    ? new AccessCodeIdentityResolver(guestAware, options.accessGate.codes, id => conversationRepository.getConversation(id))
-    : guestAware;
   const agentCorpusResolver = unconfigured ? unconfiguredAgentCorpusResolver : options.agentCorpusResolver;
   const legacyHmacSecret = options.legacyHmacSecret?.trim() || undefined;
   if (options.enableLegacyHmacAuth === true && !legacyHmacSecret) {
@@ -515,8 +527,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation, report ? "flat" : "messages"));
         if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
         const box = report ? undefined : await agentBox?.mode.turnFor({
-          productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX) && !await options.accessGate?.required(binding.productId),
-          email: await reportEmailContext(turn.conversation, binding, agentBox.origin)
+          productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX),
+          email: await gatedReportEmailContext(options.accessGate, turn.conversation, binding, agentBox.origin)
         });
         serverTools.setBox(box?.tools);
         const site = report ? undefined : await options.siteResearch?.turnFor(binding.productId);
@@ -587,13 +599,27 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const deliverableFollowups = options.productCapabilities && agentBox ? new DeliverableFollowups({
     capabilities: options.productCapabilities, repository: conversationRepository,
     prompts: conversationStore instanceof PostgresStore ? new PostgresPrompts(conversationStore.pool) : new FilePrompts(),
-    hasPage: conversation => agentBox.pages.hasPublishedSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt)),
+    hasPage: async conversation => Boolean(await agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt))),
     start: async (conversation, key, content) => {
       const scope = await scopes.resolve(conversation, new AbortController().signal);
       return chat.service.submit({
         principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
         clientMessageId: key, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
         runId: `run_${randomUUID().replaceAll("-", "")}`, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
+      });
+    }
+  }) : undefined;
+  // The page of an access code: its intake starts the Run of the Brief, its status reads that Run and the report.
+  const codePages = options.accessGate && agentBox && agentCorpusResolver ? new CodePages({
+    gate: options.accessGate, corpora: agentCorpusResolver, repository: conversationRepository, store: conversationStore,
+    reportUrl: conversation => agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt)),
+    start: async (conversation, key) => {
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.submit({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        clientMessageId: key, message: async () => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }),
+        digest: clientMessageInputDigest({ content: "", task_start: true }), runId: `run_${randomUUID().replaceAll("-", "")}`,
+        corpusDigest: scope.corpusDigest, requiresLocalTools: false
       });
     }
   }) : undefined;
@@ -670,6 +696,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       allowedOrigins,
       artifact,
       htmlPages: agentBox?.pages,
+      hatchPay: options.hatchPay,
+      codePages,
       buyerFiles: agentBox?.files,
       guests: options.guestTokens,
       ...(options.library ? { carryOver: new GuestCarryOver({ repository: conversationRepository, library: options.library }) } : {})

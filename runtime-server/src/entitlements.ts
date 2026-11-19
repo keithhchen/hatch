@@ -9,8 +9,6 @@ export type AuthIdentity = {
   /** The verified Registry session (an API key is one) and what kind of client holds it; absent for a legacy token. */
   sessionId?: string;
   clientType?: string;
-  /** Set when the identity came from an access code: it may use only this one conversation of this Product. */
-  only?: { productId: string; conversationId: string };
 };
 
 export type AuthorizationRequestOptions = { signal?: AbortSignal };

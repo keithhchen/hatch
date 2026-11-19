@@ -12,8 +12,8 @@ export interface HtmlPageRepository {
   /** The page of this file, created on the first call: one step, so two calls never make two pages. */
   publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title">): Promise<HtmlPage>;
   get(id: string): Promise<HtmlPage | undefined>;
-  /** Whether this buyer has published a page of this Product since `since`. */
-  publishedSince(productId: string, userId: string, since: Date): Promise<boolean>;
+  /** The latest page this buyer published of this Product since `since`. */
+  latestSince(productId: string, userId: string, since: Date): Promise<HtmlPage | undefined>;
   /**
    * Take the right to email this page, in one conditional step: true for exactly one caller. A claim whose send never finished
    * (no message id) can be taken again after `staleSeconds`.
@@ -65,9 +65,9 @@ export class PostgresHtmlPageRepository implements HtmlPageRepository {
   async releaseEmail(id: string): Promise<void> {
     await this.db.query("UPDATE hatch_html_pages SET emailed_at = NULL, emailed_to = NULL WHERE id = $1 AND email_message_id IS NULL", [id]);
   }
-  async publishedSince(productId: string, userId: string, since: Date): Promise<boolean> {
-    const result = await this.db.query("SELECT 1 FROM hatch_html_pages WHERE product_id = $1 AND user_id = $2 AND created_at >= $3 LIMIT 1", [productId, userId, since]);
-    return result.rows.length > 0;
+  async latestSince(productId: string, userId: string, since: Date): Promise<HtmlPage | undefined> {
+    const row = (await this.db.query("SELECT * FROM hatch_html_pages WHERE product_id = $1 AND user_id = $2 AND created_at >= $3 ORDER BY created_at DESC LIMIT 1", [productId, userId, since])).rows[0] as Row | undefined;
+    return row && pageOf(row);
   }
   async get(id: string): Promise<HtmlPage | undefined> {
     const row = (await this.db.query("SELECT * FROM hatch_html_pages WHERE id = $1", [id])).rows[0] as Row | undefined;
@@ -86,8 +86,9 @@ export class MemoryHtmlPageRepository implements HtmlPageRepository {
     return { ...created };
   }
   async get(id: string) { const page = this.pages.find(p => p.id === id); return page && { ...page }; }
-  async publishedSince(productId: string, userId: string, since: Date) {
-    return this.pages.some(p => p.productId === productId && p.userId === userId && Date.parse(p.createdAt) >= since.getTime());
+  async latestSince(productId: string, userId: string, since: Date) {
+    const found = this.pages.filter(p => p.productId === productId && p.userId === userId && Date.parse(p.createdAt) >= since.getTime()).at(-1);
+    return found && { ...found };
   }
   async claimEmail(id: string, _recipientHash: string, staleSeconds: number) {
     const sent = this.emails.get(id);
@@ -131,7 +132,11 @@ export function checkPage(name: string, mime: string, bytes: Buffer): string {
 export class HtmlPages {
   constructor(private readonly repository: HtmlPageRepository, private readonly files: BuyerFiles, private readonly links: HtmlLinks) {}
 
-  hasPublishedSince(productId: string, userId: string, since: Date): Promise<boolean> { return this.repository.publishedSince(productId, userId, since); }
+  /** The signed link of the latest page this buyer published of this Product since `since`. */
+  async latestUrlSince(productId: string, userId: string, since: Date): Promise<string | undefined> {
+    const page = await this.repository.latestSince(productId, userId, since);
+    return page && this.links.url(page.id);
+  }
 
   async publish(scope: BuyerScope, fileId: string, title: string): Promise<{ page_id: string; url: string }> {
     const file = await this.files.find(scope, fileId);

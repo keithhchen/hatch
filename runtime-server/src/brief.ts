@@ -6,8 +6,6 @@ export const MAX_BRIEF_FIELD_LABEL_CHARS = 500;
 export const MAX_BRIEF_ANSWER_CHARS = 32_000;
 export const MAX_BRIEF_ANSWER_TOTAL_CHARS = 128_000;
 
-/** The optional Brief field a Product uses to ask where the report is mailed. */
-export const BRIEF_EMAIL_FIELD_ID = "email";
 const EMAIL_ADDRESS = /^[^\s@<>"',;()\\]+@[^\s@<>"',;()\\]+\.[^\s@<>"',;()\\.]+$/;
 export const isEmailAddress = (value: string): boolean => value.length <= 254 && EMAIL_ADDRESS.test(value);
 
@@ -165,7 +163,7 @@ export function createBriefSnapshot(
       throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is too long or invalid`);
     }
     const asked = spec.fields.find((field) => field.id === fieldId)!;
-    if ((fieldId === BRIEF_EMAIL_FIELD_ID || asked.type === "email") && value && !isEmailAddress(value)) {
+    if (asked.type === "email" && value && !isEmailAddress(value)) {
       throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is not a valid email address`);
     }
     totalCharacters += value.length;
@@ -272,7 +270,8 @@ export function briefAnswer(snapshot: BriefSnapshot | undefined, fieldId: string
 
 /** Where this conversation's report is mailed: the Brief's email answer, when valid. */
 export function briefEmail(snapshot: BriefSnapshot | undefined): string | undefined {
-  const value = briefAnswer(snapshot, BRIEF_EMAIL_FIELD_ID);
+  const field = snapshot?.fields.find((entry) => entry.type === "email");
+  const value = field ? briefAnswer(snapshot, field.id) : undefined;
   return value && isEmailAddress(value) ? value : undefined;
 }
 

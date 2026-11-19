@@ -193,13 +193,11 @@ export async function handleRuntimeSocket(
             );
             connectionAbortController.signal.throwIfAborted();
             await repositoryReady;
+            // A Product whose buyers come in by access code has no conversations for them to open.
+            if (await edge.accessGate?.required(nextBinding.productId)) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${message.conversation_id} was not found`);
             // By the owner and the id the client knows: a conversation that moved to an account when its visitor signed in keeps its id.
             const owner = conversationBinding(nextBinding);
-            // A Product with an access code opens only the conversation the session's code was used for.
-            const allowed = !(nextBinding.only && nextBinding.only.conversationId !== message.conversation_id)
-              && await edge.accessGate?.opens(nextBinding, message.conversation_id) !== false;
-            const conversation = !allowed ? undefined
-              : nextBinding.explicit
+            const conversation = nextBinding.explicit
               ? await conversationRepository.findOwnedConversation({ ownerAccountId: owner.ownerAccountId, creatorId: owner.creatorId }, message.conversation_id)
               : await conversationRepository.getConversation(message.conversation_id);
             if (!conversation) {
