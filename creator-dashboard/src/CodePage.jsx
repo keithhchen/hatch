@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check } from "lucide-react";
 import { WebChatEgg } from "./webChatGate.jsx";
+import CoBrandLockup from "./CoBrandLockup.jsx";
 import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
@@ -21,16 +22,15 @@ const WeChatPayMark = () => <svg className="code-page__wxmark" viewBox="0 0 24 2
   <path fill="currentColor" d="M22 14.2c0-2.8-2.7-5-6-5s-6 2.2-6 5 2.7 5 6 5c.8 0 1.6-.1 2.3-.4l2 1.1-.6-1.8c1.5-.9 2.3-2.3 2.3-3.9Zm-7.9-.7a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Zm3.8 0a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Z" />
 </svg>;
 
-/** The header of every state of a code's page: the mark, the Product, the expert, and the website being diagnosed. */
-function Header({ product, creator, website }) {
+/** The header of every state of a code's page: the MSC × Hatch lockup, the Product, and the website being diagnosed. The lockup carries the expert. */
+function Header({ product, website }) {
   const domain = siteDomain(website);
   return <header className="code-page__header">
-    <WebChatEgg size={36} />
-    <div className="code-page__who">
-      <strong>{product?.name ?? "出海官网获客诊断"}</strong>
-      {creator?.name ? <span>{creator.name}</span> : null}
+    <CoBrandLockup cap={20} />
+    <div className="code-page__headline">
+      <div className="code-page__who"><strong>{product?.name ?? "出海官网获客诊断"}</strong></div>
+      {domain ? <span className="code-page__site">{domain}</span> : null}
     </div>
-    {domain ? <span className="code-page__site">{domain}</span> : null}
   </header>;
 }
 
@@ -72,9 +72,9 @@ function Hook({ landing, reason, onStart, navigate }) {
   return <main className="code-page code-page--hook">
     {reason ? <p className="code-page__error" role="alert">{REFUSALS[reason]}</p> : null}
     <div className="code-page__intro">
-      <WebChatEgg size={72} />
+      <CoBrandLockup cap={28} />
       {hook ? <h1 className="code-page__hook">{hook}</h1> : null}
-      <p className="code-page__by"><strong>{agentName}</strong>{landing?.creator_name ? <span>{landing.creator_name}</span> : null}</p>
+      <p className="code-page__by"><strong>{agentName}</strong></p>
     </div>
     <div className="code-page__actions">
       <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{cta}</button>
@@ -172,7 +172,7 @@ function Intake({ status, code, request, onStatus }) {
     void send(values);
   };
   if (sending) return <Card><div className="web-chat__loading code-page__sending" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>正在开始诊断</span></div></Card>;
-  return <Card><Header product={status.product} creator={status.creator} website={values.website} /><form onSubmit={submit} noValidate>
+  return <Card><Header product={status.product} website={values.website} /><form onSubmit={submit} noValidate>
     {status.fields.map((field, index) => <Field key={field.id} field={field} autoFocus={index === 0} value={values[field.id] ?? ""} onChange={value => setValues(current => ({ ...current, [field.id]: value }))} />)}
     {error ? <p className="code-page__error" role="alert">{error}</p> : null}
     <button type="submit" className="code-page__button">开始诊断</button>
@@ -188,7 +188,7 @@ function Generating({ status, navigate }) {
   const [tick, setTick] = useState(0);
   useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), FEED_MS); return () => clearInterval(timer); }, []);
   const lines = feedWindow(feedPool({ activity: status.activity, steps, step: status.step }), tick);
-  return <Card><Header product={status.product} creator={status.creator} website={status.website} /><div className="code-page__wait">
+  return <Card><Header product={status.product} website={status.website} /><div className="code-page__wait">
     <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>报告正在生成</span></div>
     {steps.length ? <ol className="code-page__steps">{steps.map(step => <li key={step.id} className={`code-page__step code-page__step--${step.state}`} aria-current={step.state === "now" ? "step" : undefined}>
       {step.state === "done" ? <Check size={16} aria-hidden /> : step.state === "now" ? <span className="code-page__spinner" aria-hidden /> : <span className="code-page__dot" aria-hidden />}
@@ -227,11 +227,11 @@ function CodePageBody({ code, request, navigate }) {
     case "entry": return <Landing request={request} navigate={navigate} reason={status.reason} />;
     case "intake": return <Intake status={status} code={code} request={request} onStatus={next => poller.current.accept(next)} />;
     case "generating": return <Generating status={status} navigate={navigate} />;
-    case "ready": return <Card><Header product={status.product} creator={status.creator} website={status.website} /><div className="code-page__done">
+    case "ready": return <Card><Header product={status.product} website={status.website} /><div className="code-page__done">
       <a className="code-page__button code-page__report" href={status.report_url} rel="noopener">查看报告</a>
       <NewReport navigate={navigate} />
     </div></Card>;
-    default: return <Card><Header product={status.product} creator={status.creator} website={status.website} /><p className="code-page__failed" role="alert">生成遇到问题，我们会尽快处理</p></Card>;
+    default: return <Card><Header product={status.product} website={status.website} /><p className="code-page__failed" role="alert">生成遇到问题，我们会尽快处理</p></Card>;
   }
 }
 
