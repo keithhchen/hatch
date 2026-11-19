@@ -132,6 +132,7 @@ test("/html/<id> serves the page sandboxed, and a wrong link as a plain 404", as
     const csp = ok.headers.get("content-security-policy")!;
     assert.match(csp, /^sandbox allow-scripts/);
     assert.doesNotMatch(csp, /allow-same-origin/);
+    assert.doesNotMatch(csp, /default-src|style-src|script-src|font-src/);
     assert.equal((await fetch(`${base}${path.pathname}?t=wrong`)).status, 404);
   } finally { server.close(); }
 });
