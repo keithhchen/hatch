@@ -47,6 +47,18 @@ export async function readProgressMap(corpusRoot: string | undefined): Promise<P
   } catch { return undefined; }
 }
 
+/** The Agent's own introduction on the landing: `runtime/landing.json` in its Corpus. Any field may be absent; nothing is made up for it. */
+export type LandingCopy = { agent_name?: string; hook?: string; cta?: string };
+
+export async function readLandingCopy(corpusRoot: string | undefined): Promise<LandingCopy | undefined> {
+  if (!corpusRoot) return undefined;
+  try {
+    const parsed = JSON.parse(await readFile(path.join(corpusRoot, "runtime", "landing.json"), "utf8")) as Record<string, unknown>;
+    const text = (key: string) => typeof parsed[key] === "string" && (parsed[key] as string).trim() ? { [key]: (parsed[key] as string).trim() } : {};
+    return { ...text("agent_name"), ...text("hook"), ...text("cta") };
+  } catch { return undefined; }
+}
+
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 export const normalizeCode = (code: string) => code.trim().toUpperCase();
 /** One conversation per code, named by the code: the same code always means the same conversation. */
@@ -77,9 +89,11 @@ export class CodePages {
   constructor(private readonly deps: CodePagesDeps) {}
 
   /** The product page before any code: what is sold, in the Product's own words, and for how much. */
-  async landing(productId: string): Promise<{ product: { id: string; name: string; description?: string }; price_fen?: number }> {
-    const { product } = (await this.deps.corpora.resolveByProduct(productId)).corpus;
-    return { product: { id: productId, name: product.name, ...(product.description ?? product.promise ? { description: product.description ?? product.promise } : {}) }, ...(this.deps.priceFen ? { price_fen: this.deps.priceFen } : {}) };
+  async landing(productId: string): Promise<{ product: { id: string; name: string; description?: string }; creator: { name: string }; landing?: LandingCopy; price_fen?: number }> {
+    const resolved = await this.deps.corpora.resolveByProduct(productId);
+    const { product, creator } = resolved.corpus;
+    const copy = await readLandingCopy(resolved.root);
+    return { creator: { name: creator.name }, ...(copy ? { landing: copy } : {}), product: { id: productId, name: product.name, ...(product.description ?? product.promise ? { description: product.description ?? product.promise } : {}) }, ...(this.deps.priceFen ? { price_fen: this.deps.priceFen } : {}) };
   }
 
   async status(rawCode: string, headers?: http.IncomingHttpHeaders): Promise<CodePageStatus> {

@@ -61,7 +61,7 @@ async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "re
     })
   });
   const conversationOf = (code: string) => repository.findOwnedConversation({ ownerAccountId: `code:${code}`, creatorId: "creator" }, codeConversationId(code));
-  return { pages, codes, repository, world, conversationOf };
+  return { pages, codes, repository, world, conversationOf, root };
 }
 
 test("entry: no code, an unknown code, an unpaid code, and the code of a Product without the capability all get the entry", async () => {
@@ -77,7 +77,15 @@ test("entry: no code, an unknown code, an unpaid code, and the code of a Product
 
 test("landing: the product page reads the Product's name and the configured price", async () => {
   const { pages } = await setup();
-  assert.deepEqual(await pages.landing(PRODUCT), { product: { id: PRODUCT, name: "出海官网获客诊断" }, price_fen: 990 });
+  assert.deepEqual(await pages.landing(PRODUCT), { creator: { name: "MSC咨询" }, product: { id: PRODUCT, name: "出海官网获客诊断" }, price_fen: 990 });
+});
+
+test("landing: the Agent's own introduction is read from runtime/landing.json, and only the strings in it", async () => {
+  const { pages, root } = await setup();
+  await writeFile(path.join(root, "runtime", "landing.json"), JSON.stringify({ agent_name: "出海官网诊断 Agent", hook: " 你好 ", cta: 5 }));
+  assert.deepEqual((await pages.landing(PRODUCT)).landing, { agent_name: "出海官网诊断 Agent", hook: "你好" });
+  await writeFile(path.join(root, "runtime", "landing.json"), "not json");
+  assert.equal((await pages.landing(PRODUCT)).landing, undefined);
 });
 
 test("intake: an active code gets the Brief's fields, without the code itself", async () => {

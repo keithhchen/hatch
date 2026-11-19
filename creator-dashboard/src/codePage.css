@@ -3,7 +3,7 @@
 .code-page {
   --chat-canvas: var(--web-paper); --chat-card: var(--web-card); --chat-ink: var(--web-ink); --chat-body: var(--web-body);
   --chat-muted: var(--web-muted); --chat-border: var(--web-rule); --chat-motion: 180ms cubic-bezier(.2, .7, .2, 1);
-  min-height: 100dvh; display: grid; place-items: start center; padding: 24px 16px 48px;
+  min-height: 100vh; min-height: 100dvh; display: grid; place-items: start center; padding: 24px 16px 48px;
   color: var(--web-ink); font-family: var(--web-sans); background: var(--web-paper);
 }
 .code-page__card {
@@ -84,3 +84,18 @@
 @media (prefers-reduced-motion: reduce) { .code-page__spinner { animation-duration: 2s; } .code-page__feed li { animation: none; } }
 .code-page__done { display: grid; padding: 8px 0; }
 .code-page__failed { margin: 0; padding: 24px 0; text-align: center; font-size: 17px; color: var(--web-ink); }
+
+/* The landing's screens: a plain swap, flex only. */
+.code-page--hook { box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 48px 24px 32px; }
+.code-page__intro { display: flex; flex: 1; flex-direction: column; justify-content: center; align-items: center; max-width: 440px; text-align: center; }
+.code-page__hook { margin: 24px 0 0; color: var(--web-ink); font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.4; }
+.code-page__by { display: flex; flex-direction: column; margin: 12px 0 0; color: var(--web-muted); font-size: 13px; }
+.code-page__by strong { color: var(--web-body); font-size: 14px; }
+.code-page__actions { width: 100%; max-width: 440px; }
+.code-page--hook > .code-page__error { width: 100%; max-width: 440px; }
+.code-page__back { display: flex; width: 40px; height: 40px; margin: -10px 0 8px -10px; align-items: center; justify-content: center; border: 0; border-radius: 50%; color: var(--web-ink); background: none; cursor: pointer; }
+.code-page__back:focus-visible { outline: 3px solid var(--web-yolk-soft); }
+.code-page__order { margin: 0; }
+.code-page__order div { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--web-rule); font-size: 15px; }
+.code-page__order dt { flex: none; margin-right: 16px; color: var(--web-muted); }
+.code-page__order dd { margin: 0; min-width: 0; color: var(--web-ink); text-align: right; word-break: break-all; }

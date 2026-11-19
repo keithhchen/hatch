@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Check } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check } from "lucide-react";
 import { WebChatEgg } from "./webChatGate.jsx";
-import { BUYER_FIELDS, CodeRoute, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -62,35 +62,83 @@ function CodeBox({ navigate }) {
   </form>;
 }
 
-/** /c/: the product page. What is sold, what it costs, what the audit needs; paying is the one way forward, and answers wait for the way back. */
+/** The way back to the screen before. */
+const BackArrow = ({ onClick }) => <button type="button" className="code-page__back" aria-label="返回" onClick={onClick}><ArrowLeft size={22} aria-hidden /></button>;
+
+/** Step 1: the Agent introduces itself, in the Product's own words. */
+function Hook({ landing, reason, onStart, navigate }) {
+  const { agentName, hook, cta } = hookCopy(landing);
+  const [codeOpen, setCodeOpen] = useState(false);
+  return <main className="code-page code-page--hook">
+    {reason ? <p className="code-page__error" role="alert">{REFUSALS[reason]}</p> : null}
+    <div className="code-page__intro">
+      <WebChatEgg size={72} />
+      {hook ? <h1 className="code-page__hook">{hook}</h1> : null}
+      <p className="code-page__by"><strong>{agentName}</strong>{landing?.creator_name ? <span>{landing.creator_name}</span> : null}</p>
+    </div>
+    <div className="code-page__actions">
+      <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{cta}</button>
+      <button type="button" className="code-page__link" aria-expanded={codeOpen} onClick={() => setCodeOpen(open => !open)}>有兑换码？</button>
+      {codeOpen ? <CodeBox navigate={navigate} /> : null}
+    </div>
+  </main>;
+}
+
+/** /c/: the product page, three screens: the Agent's hook, the form, and the order with its payment. The hash says which; Back moves between them. */
 function Landing({ request, navigate, reason }) {
   const [landing, setLanding] = useState(null);
   const [failed, setFailed] = useState(false);
   const [values, setValues] = useState({});
   const [error, setError] = useState(null);
-  const [codeOpen, setCodeOpen] = useState(false);
+  const [wanted, setWanted] = useState(() => stepFromHash(window.location.hash));
+  const pushed = useRef(0);
+  const step = reachableStep(wanted, values);
+  const path = `${window.location.pathname}${window.location.search}`;
   useEffect(() => { request("/v1/web-chat/code-landing").then(setLanding, () => setFailed(true)); }, [request]);
+  useEffect(() => {
+    const sync = () => { setWanted(stepFromHash(window.location.hash)); setError(null); };
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+  useEffect(() => { if (step !== wanted) window.history.replaceState(null, "", `${path}${stepHash(step)}`); }, [step, wanted, path]);
+  const go = to => { pushed.current += 1; window.history.pushState(null, "", `${path}${stepHash(to)}`); setWanted(to); setError(null); };
+  const back = () => {
+    if (pushed.current > 0) { pushed.current -= 1; window.history.back(); return; }
+    window.history.replaceState(null, "", `${path}${stepHash(step === "pay" ? "form" : "hook")}`);
+    setWanted(step === "pay" ? "form" : "hook");
+  };
+  const next = event => {
+    event?.preventDefault();
+    const result = advance(step, values);
+    if (result.error) { setError(result.error); return; }
+    go(result.step);
+  };
   const ready = Boolean(landing?.product_id && landing.price_fen);
-  const pay = event => {
-    event.preventDefault();
-    const invalid = invalidField(values);
-    if (invalid) { setError(invalid); return; }
+  const pay = () => {
     PendingIntake.save(window.localStorage, values);
     window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name }));
   };
   if (failed) return <Card><p className="code-page__error" role="alert">暂时无法打开，请稍后再试</p></Card>;
-  return <Card>
-    {reason ? <p className="code-page__error" role="alert">{REFUSALS[reason]}</p> : null}
-    <form onSubmit={pay} noValidate>
-      <h1 className="code-page__title">{landing?.name ?? "出海官网获客诊断"}</h1>
-      {landing?.description ? <p className="code-page__lead">{landing.description}</p> : null}
-      {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
+  if (step === "hook") return <Hook landing={landing} reason={reason} onStart={next} navigate={navigate} />;
+  if (step === "form") return <Card>
+    <BackArrow onClick={back} />
+    <form onSubmit={next} noValidate>
       {BUYER_FIELDS.map(field => <Field key={field.id} field={field} value={values[field.id] ?? ""} onChange={value => { setValues(current => ({ ...current, [field.id]: value })); setError(null); }} />)}
       {error ? <p className="code-page__error" role="alert">{error}</p> : null}
-      <button type="submit" className="code-page__button code-page__button--wechat" disabled={!ready}><WeChatPayMark /><span>微信支付 {landing?.price_fen ? formatPrice(landing.price_fen) : ""}<small>开始诊断</small></span></button>
+      <button type="submit" className="code-page__button">下一步</button>
     </form>
-    <button type="button" className="code-page__link" aria-expanded={codeOpen} onClick={() => setCodeOpen(open => !open)}>有兑换码？</button>
-    {codeOpen ? <CodeBox navigate={navigate} /> : null}
+  </Card>;
+  return <Card>
+    <BackArrow onClick={back} />
+    <dl className="code-page__order">
+      <div><dt>产品</dt><dd>{landing?.name}</dd></div>
+      {landing?.creator_name ? <div><dt>专家</dt><dd>{landing.creator_name}</dd></div> : null}
+      <div><dt>网站</dt><dd>{siteDomain(values.website)}</dd></div>
+      <div><dt>姓名</dt><dd>{values.name?.trim()}</dd></div>
+      <div><dt>邮箱</dt><dd>{values.email?.trim()}</dd></div>
+    </dl>
+    {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
+    <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready} onClick={pay}><WeChatPayMark /><span>微信支付 {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
   </Card>;
 }
 

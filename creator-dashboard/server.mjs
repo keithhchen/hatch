@@ -409,7 +409,7 @@ export async function createDashboardApp(options = {}) {
         // The product page: what is sold and its price are the Runtime's (the Product's corpus, HATCH_PAY_PRICE_FEN); only the Product id is ours.
         const upstream = await fetchImpl(new URL(`/v1/codes/landing?product=${encodeURIComponent(codePageProductId)}`, runtimeUrl));
         const landing = upstream.ok ? await upstream.json() : {};
-        return send(response, 200, { product_id: codePageProductId, name: landing.product?.name, description: landing.product?.description, price_fen: landing.price_fen });
+        return send(response, 200, landingResponse(codePageProductId, landing));
       }
       const codePage = CODE_PAGE_PATH.exec(url.pathname);
       if (codePage && request.method === (codePage[2] ? "POST" : "GET")) {
@@ -2563,6 +2563,20 @@ function sendHtml(response, status, body, headers = {}) {
 
 
 // Retired buyer routes. /home goes to Studio; buyer orders live under /explore.
+/**
+ * The product page's data from the Runtime's landing: the Agent's own words (runtime/landing.json) when the Product has them; otherwise the
+ * name and description stand in for them, and nothing is invented.
+ */
+export function landingResponse(productId, landing) {
+  const { agent_name: agentName, hook, cta } = landing.landing ?? {};
+  const name = landing.product?.name;
+  const description = landing.product?.description;
+  return {
+    product_id: productId, name, description, price_fen: landing.price_fen, creator_name: landing.creator?.name,
+    agent_name: agentName ?? name, hook: hook ?? description ?? name, ...(cta ? { cta } : {})
+  };
+}
+
 /** `/c` or `/c/` with `?code=` (any case, spaces around) goes to `/c/<CODE>`; anything else is not this redirect. */
 export function accessCodeRedirect(pathname, code) {
   const normalized = String(code ?? "").trim().toUpperCase();

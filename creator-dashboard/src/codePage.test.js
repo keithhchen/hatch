@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { accessCodeRedirect } from "../server.mjs";
-import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
+import { accessCodeRedirect, landingResponse } from "../server.mjs";
+import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash } from "./codePageModel.js";
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 
@@ -155,4 +155,36 @@ test("answers kept for the way back are read once and forgotten", () => {
   PendingIntake.save(storage, { name: " A ", email: "a@b.co", extra: "dropped" });
   assert.deepEqual(PendingIntake.take(storage), { name: "A", phone: "", email: "a@b.co", website: "", markets: "" });
   assert.equal(PendingIntake.take(storage), undefined);
+});
+
+const FILLED = { name: "A", phone: "1", email: "a@b.co", website: "example.com" };
+
+test("the steps go hook, form, pay; the form only passes when valid", () => {
+  assert.deepEqual(advance("hook", {}), { step: "form" });
+  assert.deepEqual(advance("form", { ...FILLED, website: "" }), { step: "form", error: "请填写：网址" });
+  assert.deepEqual(advance("form", { ...FILLED, email: "nope" }), { step: "form", error: "邮箱格式不对" });
+  assert.deepEqual(advance("form", FILLED), { step: "pay" });
+});
+
+test("the address hash names the step; pay without valid answers is the form", () => {
+  assert.equal(stepFromHash(""), "hook");
+  assert.equal(stepFromHash("#form"), "form");
+  assert.equal(stepFromHash("#pay"), "pay");
+  assert.equal(stepFromHash("#other"), "hook");
+  assert.equal(stepHash("hook"), "");
+  assert.equal(stepHash("pay"), "#pay");
+  assert.equal(reachableStep("pay", {}), "form");
+  assert.equal(reachableStep("pay", FILLED), "pay");
+  assert.equal(reachableStep("form", {}), "form");
+});
+
+test("the landing endpoint carries the Agent's words from landing.json, else the name and description", () => {
+  const product = { name: "出海官网获客诊断", description: "诊断官网" };
+  const full = landingResponse("p1", { product, creator: { name: "MSC咨询" }, price_fen: 990, landing: { agent_name: "诊断 Agent", hook: "你好", cta: "开始诊断" } });
+  assert.deepEqual(full, { product_id: "p1", name: "出海官网获客诊断", description: "诊断官网", price_fen: 990, creator_name: "MSC咨询", agent_name: "诊断 Agent", hook: "你好", cta: "开始诊断" });
+  const bare = landingResponse("p1", { product, creator: { name: "MSC咨询" }, price_fen: 990 });
+  assert.equal(bare.agent_name, "出海官网获客诊断");
+  assert.equal(bare.hook, "诊断官网");
+  assert.equal("cta" in bare, false);
+  assert.equal(hookCopy(bare).cta, "开始诊断");
 });
