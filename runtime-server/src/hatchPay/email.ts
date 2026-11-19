@@ -25,15 +25,3 @@ export class ResendSender implements EmailSender {
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ESCAPES[c]!);
-
-/** The access code and, when the way back is known, the link that opens the chat with it filled in. */
-export function accessCodeEmail(input: { from: string; to: string; code: string; link?: string }): EmailMessage {
-  const { code, link } = input;
-  return {
-    from: input.from, to: input.to, subject: `你的兑换码：${code}`,
-    html: `<p style="font:16px/1.7 system-ui,sans-serif">你的兑换码</p><p style="font:700 28px ui-monospace,monospace;letter-spacing:4px">${escapeHtml(code)}</p><p style="font:16px/1.7 system-ui,sans-serif">用这个兑换码随时查看你的诊断结果。</p>${link ? `<p><a href="${escapeHtml(link)}">打开对话</a></p>` : ""}`,
-    text: `你的兑换码：${code}\n用这个兑换码随时查看你的诊断结果。${link ? `\n${link}` : ""}`,
-    // The same code is mailed at most once, whatever retries.
-    idempotencyKey: `access-code-${code}`
-  };
-}

@@ -281,8 +281,18 @@ export async function createRuntimeServerFromEnvironment(
   const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
   // Site research, for the Products that have it switched on: off without any of its keys.
   const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
+  const agentCorpusResolver = runtimeRegistryToken && registryUrl
+      ? new RuntimeReleaseAgentCorpusResolver({
+        registryUrl,
+        serviceToken: runtimeRegistryToken,
+        corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
+        timeoutMs: registryAuthorizationTimeoutMs(environment)
+      })
+      : runtimeCorpusRoot
+        ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
+        : undefined;
   // Access codes and, when fully configured, WeChat Pay.
-  const hatchPay = conversationStore instanceof PostgresStore ? await openHatchPay({ pool: conversationStore.pool, environment }) : undefined;
+  const hatchPay = conversationStore instanceof PostgresStore ? await openHatchPay({ pool: conversationStore.pool, environment, ...agentCorpusResolver ? { corpora: agentCorpusResolver } : {} }) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -294,16 +304,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(commerceServiceToken && environment.HATCH_COMMERCE_URL?.trim() ? { library: new HttpLibrary(environment.HATCH_COMMERCE_URL.trim(), commerceServiceToken) } : {}),
     insecureLocalMode: config.insecureLocalMode,
     authIdentityResolver: registryAuth,
-    agentCorpusResolver: runtimeRegistryToken && registryUrl
-      ? new RuntimeReleaseAgentCorpusResolver({
-        registryUrl,
-        serviceToken: runtimeRegistryToken,
-        corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
-        timeoutMs: registryAuthorizationTimeoutMs(environment)
-      })
-      : runtimeCorpusRoot
-        ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
-        : undefined,
+    agentCorpusResolver,
     conversationStore,
     analytics,
     ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment), { analytics }) }; })() : {}),

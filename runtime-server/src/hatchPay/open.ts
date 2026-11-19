@@ -6,6 +6,8 @@ import type { AccessCodes } from "../accessCodes/accessCodes.js";
 import { log } from "../observability/log.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { hatchPayConfigFromEnvironment } from "./config.js";
+import type { AgentCorpusResolverLike } from "../agentCorpus.js";
+import { AccessCodeMailer, CorpusProductMailInfos, PostgresPromptRows } from "./codeMail.js";
 import { ResendSender } from "./email.js";
 import { HatchPay } from "./routes.js";
 import { WeChatOAuth } from "./wechatOAuth.js";
@@ -15,7 +17,7 @@ import { WeChatPayV3 } from "./wechatPay.js";
  * Access codes (always, so an operator's free codes redeem) and WeChat Pay (only with every setting present; the log line says what is
  * missing). The pay routes answer 503 while it is off.
  */
-export async function openHatchPay(options: { pool: PostgresQueryExecutor; environment: NodeJS.ProcessEnv }): Promise<{ codes: AccessCodes; accessCodesFor: (headers: http.IncomingHttpHeaders) => AccessCodes; pay?: HatchPay }> {
+export async function openHatchPay(options: { pool: PostgresQueryExecutor; environment: NodeJS.ProcessEnv; corpora?: AgentCorpusResolverLike }): Promise<{ codes: AccessCodes; accessCodesFor: (headers: http.IncomingHttpHeaders) => AccessCodes; pay?: HatchPay }> {
   const configured = hatchPayConfigFromEnvironment(options.environment);
   const codes = new PostgresAccessCodes(options.pool, "config" in configured ? configured.config.priceFen : undefined);
   await codes.initialize();
@@ -38,8 +40,11 @@ export async function openHatchPay(options: { pool: PostgresQueryExecutor; envir
   return {
     codes, accessCodesFor,
     pay: new HatchPay({
-      capabilities, codes, wechat, openids: new WeChatOAuth(config.wechat.appid, config.mpAppSecret), email: new ResendSender(config.resendApiKey),
-      emailFrom: config.emailFrom, publicBase: config.publicBase, priceFen: config.priceFen
+      capabilities, codes, wechat, openids: new WeChatOAuth(config.wechat.appid, config.mpAppSecret), mailer: new AccessCodeMailer({
+        sender: new ResendSender(config.resendApiKey), from: config.emailFrom, prompts: new PostgresPromptRows(options.pool),
+        products: new CorpusProductMailInfos(options.corpora), priceFen: config.priceFen
+      }),
+      publicBase: config.publicBase, priceFen: config.priceFen
     })
   };
 }

@@ -4,7 +4,8 @@ import { payerIp as payerIpOf } from "../accessCodes/rateLimit.js";
 import type { ProductCapabilities } from "../agentBox/capabilities.js";
 import { log } from "../observability/log.js";
 import { readBoundedBytes } from "../http/httpSupport.js";
-import { accessCodeEmail, escapeHtml, type EmailSender } from "./email.js";
+import type { CodeMailer } from "./codeMail.js";
+import { escapeHtml } from "./email.js";
 import type { OpenIdResolver } from "./wechatOAuth.js";
 import { NotificationRejected, type OrderState, type WeChatPay } from "./wechatPay.js";
 
@@ -16,8 +17,7 @@ export type HatchPayDeps = {
   codes: AccessCodes;
   wechat: WeChatPay;
   openids: OpenIdResolver;
-  email: EmailSender;
-  emailFrom: string;
+  mailer: CodeMailer;
   /** `https://anyteach.cn/hatch-pay`: where the merchant's pages are reached, whatever host Runtime sits behind. */
   publicBase: string;
   priceFen: number;
@@ -29,7 +29,6 @@ const ORDER_ORIGINS = ["https://anyteach.cn"];
 const PRODUCT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 const TRADE_NO = /^hp[0-9a-f]{24}$/;
-const ATTACH_MAX = 128;
 const ORDER_MINUTES = 15;
 
 const isChatUrl = (value: string | null): value is string => {
@@ -141,10 +140,8 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, payChannel: openid ? "jsapi" : "h5" });
     const returnUrl = `${this.deps.publicBase}/return?${new URLSearchParams({ o: outTradeNo, back: ask.back })}`;
     const order = {
-      outTradeNo, description: "Hatch 访问码", amountFen: this.deps.priceFen,
-      expiresAt: new Date((this.deps.now?.() ?? new Date()).getTime() + ORDER_MINUTES * 60_000),
-      // The notification has no page to come back to: the way back rides along, if it fits.
-      ...ask.back.length <= ATTACH_MAX ? { attach: ask.back } : {}
+      outTradeNo, description: "Hatch 兑换码", amountFen: this.deps.priceFen,
+      expiresAt: new Date((this.deps.now?.() ?? new Date()).getTime() + ORDER_MINUTES * 60_000)
     };
     try {
       if (openid) {
@@ -170,7 +167,7 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
       return this.html(res, 502, this.waiting(url, order, back, "查询失败，请稍后重试"));
     }
     if (state.tradeState !== "SUCCESS") return this.html(res, 200, this.waiting(url, order, back));
-    const settled = await this.settle(state, isChatUrl(back) ? back : undefined);
+    const settled = await this.settle(state);
     if (!settled || settled.status === "pending" || settled.status === "void") {
       return this.html(res, 409, page("<p>支付金额与订单不符，请联系我们</p>"));
     }
@@ -196,7 +193,7 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     }
     // A verified notification of anything but a paid transaction needs no work.
     if (state.tradeState !== "SUCCESS") { res.writeHead(204); return void res.end(); }
-    try { await this.settle(state, isChatUrl(state.attach ?? null) ? state.attach : undefined); } catch (error) {
+    try { await this.settle(state); } catch (error) {
       log.error("hatch_pay_notification_failed", { outTradeNo: state.outTradeNo, error });
       return this.json(res, 500, { code: "FAIL", message: "try again" });
     }
@@ -205,14 +202,14 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
   }
 
   /** A paid order: activate (once) and, for the call that did, mail the code. The mail never undoes the activation. */
-  private async settle(state: OrderState, back: string | undefined): Promise<Activation | undefined> {
+  private async settle(state: OrderState): Promise<Activation | undefined> {
     if (!state.transactionId || state.amountFen === undefined) throw new Error(`Paid order ${state.outTradeNo} has no transaction or amount.`);
     const activation = await this.deps.codes.activatePaid({ outTradeNo: state.outTradeNo, transactionId: state.transactionId, amountFen: state.amountFen });
     if (!activation) log.error("hatch_pay_unknown_paid_order", { outTradeNo: state.outTradeNo, transactionId: state.transactionId });
     else if (activation.status === "pending") log.error("hatch_pay_amount_mismatch", { outTradeNo: state.outTradeNo, transactionId: state.transactionId, amountFen: state.amountFen });
     else if (activation.activated && activation.email) {
       try {
-        await this.deps.email.send(accessCodeEmail({ from: this.deps.emailFrom, to: activation.email, code: activation.code, ...back ? { link: withCode(back, activation.code) } : {} }));
+        await this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email });
       } catch (error) { log.error("hatch_pay_email_failed", { outTradeNo: state.outTradeNo, code: activation.code, error }); }
     }
     return activation;

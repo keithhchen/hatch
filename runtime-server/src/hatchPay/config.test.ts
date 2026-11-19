@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hatchPayConfigFromEnvironment } from "./config.js";
-import { ResendSender, accessCodeEmail } from "./email.js";
+import { ResendSender } from "./email.js";
 import { fakeWeChat } from "./wechatPay.testkit.js";
 
 const env = {
@@ -30,7 +30,7 @@ test("Resend: bearer key, idempotency key, and the access code with its link", a
   const server = await fakeWeChat(() => ({ body: { id: "mail-1" } }));
   try {
     const sender = new ResendSender("re_x", { endpoint: `${server.url}/emails` });
-    const message = accessCodeEmail({ from: "Hatch <noreply@send.gethatchapp.com>", to: "a@b.co", code: "ABCD2345", link: "https://gethatchapp.com/p/1?code=ABCD2345" });
+    const message = { from: "Hatch <noreply@gethatchapp.com>", to: "a@b.co", subject: "s", html: "<p>ABCD2345</p>", text: "https://gethatchapp.com/c/ABCD2345", idempotencyKey: "access-code-ABCD2345" };
     assert.deepEqual(await sender.send(message), { id: "mail-1" });
     const request = server.requests[0]!;
     assert.equal(request.headers.authorization, "Bearer re_x");
@@ -38,8 +38,8 @@ test("Resend: bearer key, idempotency key, and the access code with its link", a
     const sent = JSON.parse(request.body);
     assert.deepEqual(sent.to, ["a@b.co"]);
     assert.match(sent.html, /ABCD2345/);
-    assert.match(sent.text, /gethatchapp\.com\/p\/1\?code=ABCD2345/);
+    assert.match(sent.text, /gethatchapp\.com\/c\/ABCD2345/);
   } finally { await server.close(); }
   const failing = await fakeWeChat(() => ({ status: 422, body: { message: "bad from" } }));
-  try { await assert.rejects(new ResendSender("k", { endpoint: `${failing.url}/emails` }).send(accessCodeEmail({ from: "x", to: "a@b.co", code: "C" })), /422/); } finally { await failing.close(); }
+  try { await assert.rejects(new ResendSender("k", { endpoint: `${failing.url}/emails` }).send({ from: "x", to: "a@b.co", subject: "s", html: "h", text: "t", idempotencyKey: "k" }), /422/); } finally { await failing.close(); }
 });

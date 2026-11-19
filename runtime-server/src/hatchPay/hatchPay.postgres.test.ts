@@ -6,6 +6,7 @@ import test from "node:test";
 import { Pool } from "pg";
 import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
 import { PostgresAccessCodes } from "../accessCodes/postgresAccessCodes.js";
+import { AccessCodeMailer, type ProductMailInfos, type PromptRows } from "./codeMail.js";
 import type { EmailMessage, EmailSender } from "./email.js";
 import { HatchPay, handleHatchPayRoute } from "./routes.js";
 import { WeChatOAuth } from "./wechatOAuth.js";
@@ -16,6 +17,11 @@ import { fakeWeChat, signedNotification, testKeys } from "./wechatPay.testkit.js
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 const BACK = `https://gethatchapp.com/p/${PRODUCT}`;
+const mailer = (sender: EmailSender) => new AccessCodeMailer({
+  sender, from: "Hatch <noreply@gethatchapp.com>", priceFen: 990,
+  prompts: { get: async name => name.endsWith("-subject") ? "码 {{code}}" : "<p>{{product_name}} {{amount}} <a href=\"{{code_url}}\">{{code}}</a></p>" } satisfies PromptRows,
+  products: { describe: async () => ({ productName: "网站诊断" }) } satisfies ProductMailInfos
+});
 const ORIGIN = { origin: "https://anyteach.cn" };
 
 async function isolated() {
@@ -47,7 +53,7 @@ async function harness(db: Awaited<ReturnType<typeof isolated>>) {
   const email: EmailSender = { send: async message => { mails.push(message); return { id: `mail-${mails.length}` }; } };
   const publicBase = "https://anyteach.cn/hatch-pay";
   const pay = new HatchPay({
-    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, email, emailFrom: "Hatch <noreply@send.gethatchapp.com>", publicBase, priceFen: 990,
+    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, mailer: mailer(email), publicBase, priceFen: 990,
     wechat: new WeChatPayV3(keys.config, { hosts: [wechat.url], log: () => undefined }),
     openids: new WeChatOAuth("wxtestappid", "secret", { apiBase: wechat.url })
   });
@@ -58,7 +64,7 @@ async function harness(db: Awaited<ReturnType<typeof isolated>>) {
   const order = async (body: Record<string, unknown>, headers: Record<string, string> = ORIGIN) =>
     fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, ...body }) });
   const pay_ = (outTradeNo: string, extra: Record<string, unknown> = {}) =>
-    trades.set(outTradeNo, { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: `42${outTradeNo}`, mchid: "1639838957", amount: { total: 990 }, attach: BACK, ...extra });
+    trades.set(outTradeNo, { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: `42${outTradeNo}`, mchid: "1639838957", amount: { total: 990 }, ...extra });
   const notify = (transaction: Record<string, unknown>, tweak?: (n: ReturnType<typeof signedNotification>) => void) => {
     const n = signedNotification({ platformPrivatePem: keys.platformPrivatePem, transaction });
     tweak?.(n);
@@ -131,7 +137,6 @@ run("order creation: only from the merchant's page; H5 sends the first forwarded
     assert.equal(body.mode, "h5");
     const sent = JSON.parse(h.wechat.requests.find(r => r.url === "/v3/pay/transactions/h5")!.body);
     assert.equal(sent.scene_info.payer_client_ip, "203.0.113.9");
-    assert.equal(sent.attach, BACK);
     const redirect = new URL(new URL(body.url).searchParams.get("redirect_url")!);
     assert.equal(redirect.origin + redirect.pathname, "https://anyteach.cn/hatch-pay/return");
     assert.match(redirect.searchParams.get("o")!, /^hp[0-9a-f]{24}$/);
@@ -225,13 +230,28 @@ run("return page: not paid shows the query and re-pay buttons; paid redirects to
     assert.equal(h.mails.length, 1);
     assert.equal(h.mails[0]!.to, "a@b.co");
     assert.match(h.mails[0]!.text, new RegExp(code));
-    assert.match(h.mails[0]!.text, new RegExp(`${BACK}\\?code=${code}`));
+    assert.match(h.mails[0]!.text, new RegExp(`https://gethatchapp.com/c/${code}`));
+    assert.equal(h.mails[0]!.subject, `码 ${code}`);
+    assert.match(h.mails[0]!.html, /网站诊断 9\.90/);
 
     // Back on the page again: the same code, no second mail.
     const again = await h.get(returnPath(outTradeNo));
     assert.equal(new URL(again.headers.get("location")!).searchParams.get("code"), code);
     assert.equal(h.mails.length, 1);
     assert.deepEqual(await db.codes.redeem({ code, productId: PRODUCT, conversationId: "c1" }), { ok: true });
+  } finally { await h.close(); }
+});
+
+run("return page: a back of https://gethatchapp.com/c/ gets ?code= appended", async db => {
+  const h = await harness(db);
+  try {
+    const CODE_PAGE = "https://gethatchapp.com/c/";
+    const body = await (await h.order({ back: CODE_PAGE }, { ...ORIGIN, "x-real-ip": "203.0.113.9" })).json() as { url: string };
+    const outTradeNo = new URL(new URL(body.url).searchParams.get("redirect_url")!).searchParams.get("o")!;
+    h.pay(outTradeNo);
+    const paid = await h.get(returnPath(outTradeNo, CODE_PAGE));
+    assert.equal(paid.status, 302);
+    assert.match(paid.headers.get("location")!, /^https:\/\/gethatchapp\.com\/c\/\?code=MSC[2-9A-Z]{6}$/);
   } finally { await h.close(); }
 });
 
@@ -267,11 +287,11 @@ run("notify: twice at once and again after the return page, still exactly one ac
   const h = await harness(db);
   try {
     const outTradeNo = await startOrder(h);
-    const transaction = { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: "42000", mchid: "1639838957", amount: { total: 990 }, attach: BACK };
+    const transaction = { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: "42000", mchid: "1639838957", amount: { total: 990 } };
     const answers = await Promise.all([h.notify(transaction), h.notify(transaction)]);
     assert.deepEqual(answers.map(a => a.status), [204, 204]);
     assert.equal(h.mails.length, 1);
-    assert.match(h.mails[0]!.text, new RegExp(`${BACK}\\?code=`));
+    assert.match(h.mails[0]!.text, /https:\/\/gethatchapp\.com\/c\/MSC[2-9A-Z]{6}/);
 
     h.pay(outTradeNo);
     assert.equal((await h.get(returnPath(outTradeNo))).status, 302);
@@ -304,8 +324,8 @@ run("an email that fails does not undo the activation", async db => {
     h.pay(outTradeNo);
     // The harness' sender is replaced by a failing one through a second HatchPay on the same codes.
     const failing = new HatchPay({
-      capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, emailFrom: "x", publicBase: "https://anyteach.cn/hatch-pay", priceFen: 990,
-      email: { send: async () => { throw new Error("resend down"); } },
+      capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, publicBase: "https://anyteach.cn/hatch-pay", priceFen: 990,
+      mailer: mailer({ send: async () => { throw new Error("resend down"); } }),
       wechat: new WeChatPayV3(testKeys().config, { hosts: [h.wechat.url], log: () => undefined }),
       openids: new WeChatOAuth("wx", "s", { apiBase: h.wechat.url })
     });
