@@ -21,6 +21,7 @@ import { ResponsesHttpApi } from "../responses/router.js";
 import type { ArtifactMode } from "../artifact/mode.js";
 import { handleProductArtifactRequest } from "../artifact/routes.js";
 import { handleFileRoute, type BuyerFiles } from "../agentBox/files.js";
+import { handleReportAssetRoute } from "../agentBox/reportAssets.js";
 import { handleHtmlRoute, type HtmlPages } from "../agentBox/htmlPages.js";
 import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
@@ -89,6 +90,7 @@ export async function handleHttpRequest(
     return;
   }
   if (url.pathname.startsWith("/html/") && await handleHtmlRoute(req, res, url, deps.htmlPages)) return;
+  if (url.pathname.startsWith("/report-assets/") && await handleReportAssetRoute(req, res, url)) return;
   if (url.pathname.startsWith("/file/") && await handleFileRoute(req, res, url, deps.buyerFiles)) return;
   if (req.method === "GET" && url.pathname === "/readyz") {
     const repository = readiness?.repository ?? "failed";
