@@ -1,10 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { MODEL_ROLES, MODEL_ROLES_SCHEMA, type ModelRole } from "./modelRoles.js";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
 
-/** The model-facing instructions the Runtime reads, keyed by the model role they are given to. The files in prompts/ are only each one's first value. */
-export const PROMPT_FILES = { title: "conversation-title/TITLE.md" } as const satisfies Partial<Record<ModelRole, string>>;
+/** The platform's own model-facing instructions, by name. The files in prompts/ are only each one's first row. */
+export const PROMPT_FILES = { "conversation-title": "conversation-title/TITLE.md" } as const;
 export type PromptName = keyof typeof PROMPT_FILES;
 
 export interface Prompts {
@@ -19,8 +18,8 @@ export class FilePrompts implements Prompts {
 }
 
 /**
- * A role's prompt is the `prompt` column of its `hatch_model_roles` row, read at each use: changing it is an UPDATE, no deploy,
- * like switching the role's model. The column is added and the row set from its file only while the prompt is null, so an edit is never overwritten.
+ * The prompts in `hatch_prompts`, read at each use: changing one is an UPDATE, no deploy. The table is made on first use and a
+ * row is inserted from its file only when its name has none, so an edited row is never overwritten.
  */
 export class PostgresPrompts implements Prompts {
   private ready?: Promise<void>;
@@ -28,18 +27,20 @@ export class PostgresPrompts implements Prompts {
 
   private ensure(): Promise<void> {
     return this.ready ??= (async () => {
-      await this.db.query(MODEL_ROLES_SCHEMA);
+      await this.db.query(`CREATE TABLE IF NOT EXISTS hatch_prompts (
+        name TEXT PRIMARY KEY,
+        body TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
       for (const name of Object.keys(PROMPT_FILES) as PromptName[]) {
-        await this.db.query("INSERT INTO hatch_model_roles (role, profile) VALUES ($1, $2) ON CONFLICT (role) DO NOTHING", [name, MODEL_ROLES[name]]);
-        await this.db.query("UPDATE hatch_model_roles SET prompt = $2 WHERE role = $1 AND prompt IS NULL", [name, await read(name)]);
+        await this.db.query("INSERT INTO hatch_prompts (name, body) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING", [name, await read(name)]);
       }
     })().catch(error => { this.ready = undefined; throw error; });
   }
 
   async get(name: PromptName) {
     await this.ensure();
-    const body = (await this.db.query<{ prompt: string | null }>("SELECT prompt FROM hatch_model_roles WHERE role = $1", [name])).rows[0]?.prompt;
-    if (!body?.trim()) throw new Error(`hatch_model_roles has no prompt for role ${name}`);
+    const body = (await this.db.query<{ body: string }>("SELECT body FROM hatch_prompts WHERE name = $1", [name])).rows[0]?.body;
+    if (!body?.trim()) throw new Error(`hatch_prompts has no prompt named ${name}`);
     return body;
   }
 }

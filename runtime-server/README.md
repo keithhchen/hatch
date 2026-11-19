@@ -313,8 +313,8 @@ in the conversation's language comes out. It is written by one conditional `UPDA
 so concurrent instances and retries write at most once and a title the user set (`PATCH`) is never replaced. The call is background, bounded
 (20 s) and never changes the Run: a failure leaves the title empty and the next completed Run tries again. Open pages hear it as the live event
 `conversation.titled {conversation_id, title}`; the list endpoints return `title`, and clients show "New conversation" only while it is null.
-The instruction text is the nullable `prompt` column of the `title` row of `hatch_model_roles`, set from `prompts/conversation-title/TITLE.md` while null and
-changed with `UPDATE hatch_model_roles SET prompt = ... WHERE role = 'title'`, no deploy. Conversations that predate this are titled the next time one of their Runs completes.
+The instruction text lives in `hatch_prompts` (name `conversation-title`), seeded from `prompts/conversation-title/TITLE.md` when absent and
+changed with `UPDATE hatch_prompts SET body = ... WHERE name = 'conversation-title'`, no deploy. Platform prompts live in `hatch_prompts`; a Product Chat's own prompts stay in the Product Corpus. Conversations that predate this are titled the next time one of their Runs completes.
 
 ## Protocol
 
