@@ -30,6 +30,7 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@spectrum-ts/core": "12.14.0",
     "@spectrum-ts/imessage": "12.14.0",
+    "@vercel/sandbox": "^4.0.0",
     "ali-oss": "^6.23.0",
     "dotenv": "^17.2.0",
     "fflate": "^0.8.3",
