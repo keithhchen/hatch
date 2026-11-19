@@ -81,6 +81,9 @@ import { openAgentBoxMode } from "./agentBox/open.js";
 import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
 import type { BuyerFiles } from "./agentBox/files.js";
+import { openHatchPay } from "./hatchPay/open.js";
+import type { HatchPay } from "./hatchPay/routes.js";
+import type { AccessCodes } from "./accessCodes/accessCodes.js";
 import { openSiteResearchMode } from "./siteTools/open.js";
 import type { SiteResearchMode } from "./siteTools/tools.js";
 import { GUEST_PREFIX } from "./chat/principal.js";
@@ -205,6 +208,9 @@ export type RuntimeServerOptions = {
   agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
+  /** Access codes (redeemed when a chat starts) and the WeChat Pay pages that sell them (/hatch-pay/). */
+  accessCodes?: AccessCodes;
+  hatchPay?: HatchPay;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -273,6 +279,8 @@ export async function createRuntimeServerFromEnvironment(
   const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
   // Site research, for the Products that have it switched on: off without any of its keys.
   const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
+  // Access codes and, when fully configured, WeChat Pay.
+  const hatchPay = conversationStore instanceof PostgresStore ? await openHatchPay({ pool: conversationStore.pool, environment }) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -301,6 +309,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(artifact ? { artifact } : {}),
     ...(agentBox ? { agentBox } : {}),
     ...(siteResearch ? { siteResearch } : {}),
+    ...(hatchPay ? { accessCodes: hatchPay.codes, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -611,6 +620,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       allowedOrigins,
       artifact,
       htmlPages: agentBox?.pages,
+      hatchPay: options.hatchPay,
       buyerFiles: agentBox?.files,
       guests: options.guestTokens,
       ...(options.library ? { carryOver: new GuestCarryOver({ repository: conversationRepository, library: options.library }) } : {})

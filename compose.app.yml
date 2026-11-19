@@ -169,6 +169,20 @@ services:
       HATCH_MANAGED_AGENTS_API_KEY: ${HATCH_MANAGED_AGENTS_API_KEY:-}
       # Public web search for report mode (HATCH_SEARCH_PROVIDER picks the provider; default parallel).
       PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
+      # WeChat Pay (/hatch-pay/) and the access-code email. All of them or the pay routes answer 503 (the Runtime logs hatch_pay_disabled with what is missing).
+      WECHATPAY_MCHID: ${WECHATPAY_MCHID:-}
+      WECHATPAY_SERIAL: ${WECHATPAY_SERIAL:-}
+      WECHATPAY_PRIVATE_KEY_B64: ${WECHATPAY_PRIVATE_KEY_B64:-}
+      WECHATPAY_APIV3_KEY: ${WECHATPAY_APIV3_KEY:-}
+      WECHATPAY_PUBLIC_KEY_ID: ${WECHATPAY_PUBLIC_KEY_ID:-}
+      WECHATPAY_PUBLIC_KEY_B64: ${WECHATPAY_PUBLIC_KEY_B64:-}
+      WECHAT_MP_APPID: ${WECHAT_MP_APPID:-}
+      WECHAT_MP_APPSECRET: ${WECHAT_MP_APPSECRET:-}
+      HATCH_PAY_PUBLIC_BASE: ${HATCH_PAY_PUBLIC_BASE:-}
+      HATCH_PAY_NOTIFY_URL: ${HATCH_PAY_NOTIFY_URL:-}
+      HATCH_PAY_PRICE_FEN: ${HATCH_PAY_PRICE_FEN:-}
+      HATCH_PAY_EMAIL_FROM: ${HATCH_PAY_EMAIL_FROM:-Hatch <noreply@gethatchapp.com>}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       # What one contact may send to one Product, in all.
       HATCH_RUNTIME_MAX_CONTACT_MESSAGES: ${HATCH_RUNTIME_MAX_CONTACT_MESSAGES:-1000}
       # Voice messages are transcribed by the first of these that works: gemini (GEMINI_API_KEY), then qwen (DASHSCOPE_API_KEY).
