@@ -65,3 +65,34 @@ test("report.js gives each hand-written red line, reason and minor reason its ow
     assert.equal(packed.journey, 4);
   } finally { await browser.close(); }
 });
+
+test("report.js shows the content at once: no loader is built, and an old page's own .loader is removed", async () => {
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ headless: true, ...(process.env.HATCH_CHROMIUM_PATH ? { executablePath: process.env.HATCH_CHROMIUM_PATH } : {}) }).catch(() => undefined);
+  if (!browser) return; // no browser on this machine: the render check is skipped
+  try {
+    const css = (await import("node:fs")).readFileSync(new URL("../../report-assets/v1/report.css", import.meta.url), "utf8");
+    const open = async (body: string) => {
+      const p = await browser.newPage();
+      await p.setContent(`<style>${css}</style>${page(body)}`);
+      await p.evaluate(SCRIPT);
+      return p;
+    };
+    const fresh = await open("");
+    assert.equal(await fresh.locator(".loader").count(), 0);
+    assert.equal(await fresh.evaluate(() => document.body.classList.contains("ready")), true);
+    assert.equal(await fresh.locator(".ring strong").isVisible(), true);
+    assert.equal(await fresh.locator("#journey").isVisible(), true);
+    assert.equal(await fresh.evaluate(() => typeof (window as unknown as { reportFinish: unknown }).reportFinish), "function");
+    await fresh.evaluate(() => (window as unknown as { reportFinish: () => void }).reportFinish());
+    assert.equal(await fresh.locator("main>section.visible").count(), 5);
+    // an old report: the agent wrote a .loader into the HTML before the script ran
+    const old = await browser.newPage();
+    await old.setContent(`<style>${css}</style><div class="loader"><div class="loadbox">精准分析中…</div></div>${page("")}`);
+    assert.equal(await old.locator(".loader").isVisible(), false, "hidden by the stylesheet before the script runs");
+    await old.evaluate(SCRIPT);
+    assert.equal(await old.locator(".loader").count(), 0);
+    assert.equal(await old.locator(".ring strong").isVisible(), true);
+    assert.equal(await old.evaluate(() => document.elementFromPoint(100, 100)?.closest(".loader") === null), true);
+  } finally { await browser.close(); }
+});

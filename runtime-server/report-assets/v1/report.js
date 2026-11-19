@@ -1,6 +1,6 @@
 /* Hatch audit report script, v1. Reads <script type="application/json" id="report-data"> and draws the data parts:
-   loading overlay, score ring, level scale, 10x10 dots, radar and bars, D9 meter, paid services, appendix, footer.
-   Bug fixes only; a changed design is a new /report-assets/vN/ path. window.reportFinish() jumps to the final state (screenshots, PDF). */
+   score ring, level scale, 10x10 dots, radar and bars, D9 meter, paid services, appendix, footer.
+   Bug fixes only; a changed design is a new /report-assets/vN/ path. window.reportFinish() opens every section and the appendix (screenshots, PDF). */
 (() => {
   const NAMES = ["D1 首屏 3 秒", "D2 技术与性能", "D3 信息架构", "D4 内容与英文", "D5 信任与证明", "D6 转化路径", "D7 SEO 与 AI 搜索", "D8 设计与品牌", "D9 可持续与社会影响"];
   const MAX = [15, 8, 14, 12, 14, 14, 8, 5, 10];
@@ -111,35 +111,12 @@
   const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("visible"); io.unobserve(e.target); } }), { threshold: .08 });
   sections.forEach(s => io.observe(s));
 
-  // loading overlay
-  const loader = html(Object.assign(document.createElement("div"), { className: "loader" }),
-    `<div class="loadbox"><div class="spinner"></div><div class="loadtitle">精准分析中…</div><div class="sources"><div>${D.sources.map(s => `<p>${esc(s)}</p>`).join("")}</div></div><div class="track"><div class="progress"></div></div><div class="percent">0%</div></div>`);
-  document.body.prepend(loader);
-  const lines = [...loader.querySelectorAll("p")], list = loader.querySelector(".sources div"), bar = loader.querySelector(".progress"), pct = loader.querySelector(".percent");
-  const duration = matchMedia("(prefers-reduced-motion: reduce)").matches ? 500 : 6500, t0 = performance.now();
-  let finished = false;
-  function finish() {
-    if (finished) return;
-    finished = true;
-    loader.classList.add("done");
-    setTimeout(() => loader.remove(), 700);
-    document.body.classList.add("ready");
-  }
-  function tick(t) {
-    if (finished) return;
-    const p = Math.min(1, (t - t0) / duration), k = Math.min(lines.length - 1, Math.floor(p * lines.length));
-    bar.style.width = p * 100 + "%";
-    pct.textContent = Math.round(p * 100) + "%";
-    list.style.setProperty("--k", k);
-    lines.forEach((l, i) => l.classList.toggle("on", i === k));
-    p < 1 ? requestAnimationFrame(tick) : finish();
-  }
-  requestAnimationFrame(tick);
+  // no loading overlay: the content shows at once. Old reports still carry a .loader element, so drop it
+  document.querySelectorAll(".loader").forEach(l => l.remove());
+  document.body.classList.add("ready");
 
-  // final state for screenshots and PDF: no overlay, everything revealed, appendix open
+  // final state for screenshots and PDF: everything revealed, appendix open
   window.reportFinish = () => {
-    finish();
-    loader.remove();
     sections.forEach(s => s.classList.add("visible"));
     document.querySelectorAll("#appendix details").forEach(d => { d.open = true; });
   };
