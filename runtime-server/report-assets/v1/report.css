@@ -178,6 +178,7 @@ footer small{color:#888}
   main>section:not(.hero){padding:34px 0;border-top:1px solid var(--line)}
   .hero{padding:12px 0 24px;break-inside:avoid;gap:40px}
   footer{padding:20px 0}
+  main>#services{padding:34px 30px}
   .dot{transform:none!important;transition:none!important}
   .radar .rv{transform:none!important;transition:none!important}
   .bar-fill{width:var(--w)!important;transition:none!important}
