@@ -3,7 +3,7 @@ import type { StallLimits } from "./providerStall.js";
 import { ModelProfileError } from "./errors/modelProfile.js";
 
 /** The catalogue of usable models. Which role runs on which profile is data (`hatch_model_roles`), not code: see modelRoles.ts. */
-export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "deepseek-flash", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "deepseek-flash", "deepseek-flash-thinking", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
@@ -35,8 +35,10 @@ export type LlmProfile = {
   displayName?: string;
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   thinkingType?: "enabled" | "disabled";
-  /** Moonshot's top-level `reasoning_effort`, sent on every request in place of a `thinking` field. */
+  /** The top-level `reasoning_effort` sent on every request: in place of a `thinking` field at Moonshot, beside `thinking: enabled` at DeepSeek. */
   reasoningEffort?: "low" | "high" | "max";
+  /** DeepSeek with tools: every earlier turn's `reasoning_content` must be sent back too (a 400 otherwise), so earlier thinking is not dropped from the request. */
+  replaysEarlierReasoning?: boolean;
   /** What the model reads; both text and images when absent. */
   input?: Array<"text" | "image">;
   /** How long a call may stay silent; the default of providerStall when absent. */
@@ -93,6 +95,27 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
+  },
+  // deepseek-flash with thinking on, for long agentic Runs (20-40 tool calls in one turn). Without thinking the model writes
+  // "next I will..." as a text-only message and the turn ends early. Thinking mode (api-docs.deepseek.com/guides/thinking_mode):
+  // `thinking: {type: "enabled"}` plus top-level `reasoning_effort` (low | high | max, default high). The stream's `reasoning_content`
+  // is rendered as thinking, and with tools every assistant message's `reasoning_content` must be sent back (pi-ai does).
+  "deepseek-flash-thinking": {
+    name: "deepseek-flash-thinking",
+    family: "openai-compatible",
+    provider: "deepseek",
+    providerName: "DeepSeek",
+    api: "openai-completions",
+    model: "deepseek-flash",
+    baseUrl: "https://api.deepseek.com",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    thinkingLevel: "low",
+    thinkingType: "enabled",
+    reasoningEffort: "low",
+    replaysEarlierReasoning: true
   },
   "gemini-api": {
     name: "gemini-api",

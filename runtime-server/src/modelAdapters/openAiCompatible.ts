@@ -54,7 +54,11 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
 
   normalizePayload(profile: LlmProfile, payload: unknown): unknown {
     if (!profile.thinkingType || !payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
-    return { ...(payload as Record<string, unknown>), thinking: { type: profile.thinkingType } };
+    return {
+      ...(payload as Record<string, unknown>),
+      thinking: { type: profile.thinkingType },
+      ...(profile.thinkingType === "enabled" && profile.reasoningEffort ? { reasoning_effort: profile.reasoningEffort } : {})
+    };
   }
 
   /** Whether the profile's thinking level is sent with every request. */
