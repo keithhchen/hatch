@@ -32,12 +32,8 @@ main>section:not(.hero) .kicker::before{content:counter(sec,decimal-leading-zero
 .ring svg{width:100%;height:100%;transform:rotate(-90deg)}
 .ring .bg{fill:none;stroke:#edf0f1;stroke-width:12}
 .ring .val{fill:none;stroke:url(#ringGrad);stroke-width:12;stroke-linecap:round;stroke-dasharray:741.4;stroke-dashoffset:741.4;transition:stroke-dashoffset 1.2s ease}
-.ready .ring .val{stroke-dashoffset:calc(741.4*(1 - var(--p)))}
 .ring .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.ring strong{font:700 88px/1 var(--serif);counter-reset:n var(--n)}
-.ring strong::after{content:counter(n)}
-.ready .ring strong{animation:count 1.2s ease-out forwards}
-@keyframes count{to{--n:var(--s)}}
+.ring strong{font:700 88px/1 var(--serif)}
 .ring span{font-size:18px;margin-top:12px}
 .scale{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:20px;padding-top:22px;border-top:1px solid var(--line)}
 .scale div{font-size:13px;color:#999;border-top:4px solid #e5e7e8;padding-top:9px}
