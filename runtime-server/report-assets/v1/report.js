@@ -115,12 +115,10 @@
   document.querySelectorAll(".loader").forEach(l => l.remove());
   document.body.classList.add("ready");
 
-  // ring and score drawn by script: Safari cannot animate a registered custom property into a counter, so CSS alone showed 0
+  // ring and score shown as final values straight away, no animation: the number must always show, on every browser
   const score = Math.round(D.score), val = $(".ring .val"), num = $(".ring strong");
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  num.textContent = still ? score : 0;
-  requestAnimationFrame(() => requestAnimationFrame(() => { val.style.strokeDashoffset = String(741.4 * (1 - D.score / 100)); }));
-  if (!still) { const t0 = performance.now(); const tick = t => { const k = Math.min(1, (t - t0) / 1200); num.textContent = Math.round(score * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+  num.textContent = score;
+  val.style.strokeDashoffset = String(741.4 * (1 - D.score / 100));
 
   // final state for screenshots and PDF: everything revealed, appendix open
   window.reportFinish = () => {

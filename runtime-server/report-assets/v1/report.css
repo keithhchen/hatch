@@ -33,7 +33,7 @@ main>section:not(.hero) .kicker::before{content:counter(sec,decimal-leading-zero
 .ring{width:280px;height:280px;position:relative;margin:auto;--p:0}
 .ring svg{width:100%;height:100%;transform:rotate(-90deg)}
 .ring .bg{fill:none;stroke:#edf0f1;stroke-width:12}
-.ring .val{fill:none;stroke:url(#ringGrad);stroke-width:12;stroke-linecap:round;stroke-dasharray:741.4;stroke-dashoffset:741.4;transition:stroke-dashoffset 1.2s ease}
+.ring .val{fill:none;stroke:url(#ringGrad);stroke-width:12;stroke-linecap:round;stroke-dasharray:741.4;stroke-dashoffset:741.4}
 .ring .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .ring strong{font:700 88px/1 var(--serif)}
 .ring span{font-size:18px;margin-top:12px}
