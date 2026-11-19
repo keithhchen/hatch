@@ -31,3 +31,12 @@ test("Gemini 4 profiles: the API's own limits, thinking low, and valid for the r
     assert.deepEqual(profile.stall, llmProfile("gemini-3.1-pro").stall);
   }
 });
+
+test("deepseek-flash is the vision-capable DeepSeek profile: images allowed, thinking disabled, same key as the other DeepSeek profiles", () => {
+  const profile = llmProfile("deepseek-flash");
+  assert.equal(profile.model, "deepseek-flash");
+  assert.equal(profile.family, "openai-compatible");
+  assert.equal(profile.apiKeyEnv, "DEEPSEEK_API_KEY");
+  assert.equal(profile.thinkingType, "disabled");
+  assert.equal(profile.input, undefined, "text and image");
+});

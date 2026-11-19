@@ -3,7 +3,7 @@ import type { StallLimits } from "./providerStall.js";
 import { ModelProfileError } from "./errors/modelProfile.js";
 
 /** The catalogue of usable models. Which role runs on which profile is data (`hatch_model_roles`), not code: see modelRoles.ts. */
-export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "deepseek-flash", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
@@ -76,6 +76,23 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     thinkingLevel: "minimal",
     thinkingType: "disabled",
     input: ["text"],
+  },
+  // DeepSeek V4.1 Flash (api-docs.deepseek.com/quick_start/pricing): the vision-capable DeepSeek model (deepseek-v4-pro reads text only).
+  // Thinking is on by default at DeepSeek, so it is sent disabled like the other DeepSeek profiles; images go in as image_url parts.
+  "deepseek-flash": {
+    name: "deepseek-flash",
+    family: "openai-compatible",
+    provider: "deepseek",
+    providerName: "DeepSeek",
+    api: "openai-completions",
+    model: "deepseek-flash",
+    baseUrl: "https://api.deepseek.com",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: false,
+    thinkingLevel: "minimal",
+    thinkingType: "disabled",
   },
   "gemini-api": {
     name: "gemini-api",
