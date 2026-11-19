@@ -4,7 +4,7 @@ import type { AgentCorpusResolverLike } from "../agentCorpus.js";
 import { log } from "../observability/log.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import type { EmailSender } from "./email.js";
-import { htmlToText, renderTemplate } from "../agentBox/reportEmail.js";
+import { DEFAULT_RETRY_DELAYS_MS, htmlToText, renderTemplate, retryTransient } from "../agentBox/reportEmail.js";
 
 export const DEFAULT_TEMPLATE_PROMPT = "access-code-email-default";
 export const DEFAULT_SUBJECT_PROMPT = "access-code-email-default-subject";
@@ -55,6 +55,8 @@ export class AccessCodeMailer implements CodeMailer {
     sender: EmailSender; from: string; prompts: PromptRows; products: ProductMailInfos; priceFen: number;
     /** Where a code's page is: `<origin>/c/<CODE>`. */
     origin?: string;
+    /** Waits before each retry of a transient failure (1s, 5s, 20s), as the report email. */
+    retryDelaysMs?: number[];
   }) {}
 
   async send({ code, productId, to, name }: { code: string; productId: string; to: string; name?: string }): Promise<void> {
@@ -66,10 +68,12 @@ export class AccessCodeMailer implements CodeMailer {
       amount: (this.deps.priceFen / 100).toFixed(2), code_url: `${this.deps.origin ?? "https://gethatchapp.com"}/c/${code}`
     };
     const rendered = renderTemplate(html, values);
-    await this.deps.sender.send({
+    const message = {
       from: this.deps.from, to, subject: renderTemplate(subject, values, true).replace(/\s+/g, " ").trim(), html: rendered, text: htmlToText(rendered),
       // The same code is mailed at most once, whatever retries.
       idempotencyKey: `access-code-${code}`
-    });
+    };
+    await retryTransient(() => this.deps.sender.send(message), this.deps.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS,
+      (attempt, error) => log.warn("hatch_pay_email_retry", { code, attempt, error }));
   }
 }

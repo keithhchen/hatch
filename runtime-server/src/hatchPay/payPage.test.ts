@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import test from "node:test";
+import test, { mock } from "node:test";
 import vm from "node:vm";
 import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
 import { HatchPay, handleHatchPayRoute, siteDomain } from "./routes.js";
@@ -137,4 +137,28 @@ test("the order stores the buyer's name with the pending code; an invalid name i
     await fetch(`${base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK })}`, { redirect: "manual" });
     assert.deepEqual(mailed, [{ code: "MSC222222", productId: PRODUCT, to: "a@b.co", name: "王小明" }]);
   } finally { server.closeAllConnections(); server.close(); }
+});
+
+test("the code email is sent in the background: the return page does not wait for it, and its final failure is logged", async () => {
+  const errors = mock.method(console, "error", () => undefined);
+  let fail!: (error: Error) => void;
+  const pay = new HatchPay({
+    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
+    wechat: { ready: () => true, queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState: "SUCCESS", transactionId: "42", amountFen: 1 }) },
+    codes: {
+      order: async () => ({ productId: PRODUCT, email: "a@b.co" }),
+      activatePaid: async () => ({ code: "MSC999999", productId: PRODUCT, email: "a@b.co", status: "active", source: "paid", activated: true })
+    },
+    openids: {}, mailer: { send: () => new Promise<void>((_, reject) => { fail = reject; }) }
+  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
+  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
+  try {
+    const res = await fetch(`${base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK })}`, { redirect: "manual" });
+    assert.equal(res.status, 302, "answered while the mail is still being sent");
+    fail(new Error("gave up"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(errors.mock.calls.some(c => String(c.arguments[0]).includes("hatch_pay_email_failed")));
+  } finally { errors.mock.restore(); server.closeAllConnections(); server.close(); }
 });
