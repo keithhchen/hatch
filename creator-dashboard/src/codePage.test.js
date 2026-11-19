@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect } from "../server.mjs";
-import { CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
+import { BUYER_FIELDS, PendingIntake, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 
@@ -58,4 +58,26 @@ test("back from paying, /c/?code= goes to that code's page: any case, trimmed; a
   assert.equal(accessCodeRedirect("/c/", "../../etc"), null);
   assert.equal(accessCodeRedirect("/c/MSC123456", "MSC123456"), null);
   assert.equal(accessCodeRedirect("/chat/product/x", "MSC123456"), null);
+});
+
+test("the price is fen shown as yuan with two decimals", () => {
+  assert.equal(formatPrice(1), "¥0.01");
+  assert.equal(formatPrice(990), "¥9.90");
+});
+
+test("the product form needs name, phone, email and website; markets is optional; email must look like one", () => {
+  const full = { name: "A", phone: "1", email: "a@b.co", website: "x.com" };
+  assert.equal(invalidField(full), undefined);
+  assert.equal(invalidField({ ...full, phone: " " }), "请填写：电话");
+  assert.equal(invalidField({ ...full, email: "nope" }), "邮箱格式不对");
+  assert.equal(BUYER_FIELDS.find(field => field.id === "markets").required, false);
+});
+
+test("answers kept for the way back are read once and forgotten", () => {
+  const data = new Map();
+  const storage = { setItem: (key, value) => data.set(key, value), getItem: key => data.get(key) ?? null, removeItem: key => data.delete(key) };
+  assert.equal(PendingIntake.take(storage), undefined);
+  PendingIntake.save(storage, { name: " A ", email: "a@b.co", extra: "dropped" });
+  assert.deepEqual(PendingIntake.take(storage), { name: "A", phone: "", email: "a@b.co", website: "", markets: "" });
+  assert.equal(PendingIntake.take(storage), undefined);
 });

@@ -51,6 +51,7 @@ async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "re
   });
   const world = { report: undefined as string | undefined, tools: [] as string[] };
   const pages = new CodePages({
+    priceFen: 990,
     gate: gateOver(options.codes ?? codes, options.capable !== false), corpora, repository,
     store: { readRunActivity: async () => ({ tool_calls: world.tools.map((name) => ({ name })) }) } as never,
     reportUrl: async () => world.report,
@@ -73,6 +74,11 @@ test("entry: no code, an unknown code, an unpaid code, and the code of a Product
   assert.deepEqual(await ungated.pages.status(CODE), { state: "entry", reason: "not_found" });
   await assert.rejects(ungated.pages.intake(CODE, answers), /兑换码不存在/);
   assert.equal(ungated.codes.rows[CODE]!.status, "active", "nothing was spent");
+});
+
+test("landing: the product page reads the Product's name and the configured price", async () => {
+  const { pages } = await setup();
+  assert.deepEqual(await pages.landing(PRODUCT), { product: { id: PRODUCT, name: "外贸官网获客诊断" }, price_fen: 990 });
 });
 
 test("intake: an active code gets the Brief's fields, without the code itself", async () => {

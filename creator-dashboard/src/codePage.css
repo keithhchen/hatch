@@ -1,16 +1,64 @@
-.code-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--web-paper); }
-.code-page__card { animation: none; }
-.code-page__guide { min-height: 100dvh; padding: 120px 24px 0; text-align: center; font-size: 20px; color: var(--chat-ink); background: var(--web-paper); }
-.code-page__arrow { position: fixed; top: 12px; right: 16px; color: var(--chat-ink); }
-.code-page__pay { display: flex; justify-content: center; margin-top: 12px; text-decoration: none; }
-.code-page__pay.is-disabled { opacity: .45; pointer-events: none; }
-.code-page__rule { margin: 28px 0; border: 0; border-top: 1px solid var(--chat-border); }
+/* /c: the product page and the page of one code. Tokens are webTheme's; the --chat-* names the shared pieces read are not
+ * defined outside .web-chat, so they are set here (their absence is what left the old inputs and buttons without borders). */
+.code-page {
+  --chat-canvas: var(--web-paper); --chat-card: var(--web-card); --chat-ink: var(--web-ink); --chat-body: var(--web-body);
+  --chat-muted: var(--web-muted); --chat-border: var(--web-rule); --chat-motion: 180ms cubic-bezier(.2, .7, .2, 1);
+  min-height: 100dvh; display: grid; place-items: start center; padding: 24px 16px 48px;
+  color: var(--web-ink); font-family: var(--web-sans); background: var(--web-paper);
+}
+.code-page__card {
+  width: min(440px, 100%); margin-top: 4vh; padding: 28px 22px 22px; border: 1px solid var(--web-rule); border-radius: 24px;
+  background: var(--web-card); box-shadow: var(--web-shadow-lift);
+}
+.code-page__title { margin: 0; color: var(--web-ink); font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.25; text-wrap: balance; }
+.code-page__lead { margin: 10px 0 0; color: var(--web-body); font-size: 15px; line-height: 1.6; }
+.code-page__price { margin: 18px 0 24px; color: var(--web-ink); font-size: 36px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.code-page__title + .code-page__field { margin-top: 22px; }
+
+.code-page__field { margin: 0 0 16px; }
+.code-page__field label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; color: var(--web-ink); font-size: 14px; font-weight: 650; }
+.code-page__field em { color: var(--web-muted); font-size: 12px; font-style: normal; font-weight: 500; }
+.code-page input,
+.code-page textarea {
+  display: block; width: 100%; min-height: 48px; padding: 12px 14px; border: 1px solid #cfc7b2; border-radius: 12px; outline: 0;
+  color: var(--web-ink); background: #fff; font: inherit; font-size: 16px; line-height: 1.5; box-shadow: 0 1px 2px rgba(23, 21, 15, .05);
+  transition: border-color var(--chat-motion), box-shadow var(--chat-motion);
+}
+.code-page textarea { resize: vertical; }
+.code-page input::placeholder { color: var(--web-muted); opacity: .7; }
+.code-page input:focus,
+.code-page textarea:focus { border-color: var(--web-yolk); box-shadow: 0 0 0 4px var(--web-yolk-soft); }
+
+.code-page__button {
+  display: flex; width: 100%; min-height: 52px; margin-top: 8px; align-items: center; justify-content: center; padding: 0 20px;
+  border: 1px solid var(--web-yolk); border-radius: 14px; color: var(--web-on-yolk); background: var(--web-yolk);
+  font: inherit; font-size: 17px; font-weight: 700; text-decoration: none; cursor: pointer;
+  box-shadow: 0 6px 16px rgba(245, 183, 0, .32); transition: transform var(--chat-motion), box-shadow var(--chat-motion);
+}
+.code-page__button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(245, 183, 0, .4); }
+.code-page__button:focus-visible { outline: 3px solid var(--web-yolk-soft); outline-offset: 2px; }
+.code-page__button:disabled { border-color: var(--web-rule); color: var(--web-muted); background: var(--web-panel); box-shadow: none; cursor: not-allowed; }
+.code-page__button--quiet { width: auto; margin: 0; border-color: #cfc7b2; color: var(--web-ink); background: #fff; font-size: 15px; box-shadow: none; }
+.code-page__button--quiet:disabled { border-color: var(--web-rule); }
+
+.code-page__link {
+  display: block; margin: 18px auto 0; padding: 6px 8px; border: 0; color: var(--web-muted); background: none;
+  font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.code-page__link:hover { color: var(--web-ink); }
+.code-page__code { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.code-page__code input { flex: 1; min-width: 0; text-transform: uppercase; }
+.code-page__error { margin: 0 0 12px; color: var(--web-fail); font-size: 14px; font-weight: 600; }
+.code-page__code .code-page__error { flex-basis: 100%; margin: 0; }
+.code-page__sending { justify-content: center; padding: 28px 0; }
+
+.code-page__guide { min-height: 100dvh; padding: 120px 24px 0; text-align: center; font-size: 20px; color: var(--web-ink); background: var(--web-paper); }
+.code-page__arrow { position: fixed; top: 12px; right: 16px; color: var(--web-ink); }
 .code-page__steps { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 12px; text-align: left; }
-.code-page__step { display: flex; align-items: center; gap: 12px; color: var(--chat-muted); }
-.code-page__step--now { color: var(--chat-ink); font-weight: 650; }
-.code-page__step--done { color: var(--chat-body); }
+.code-page__step { display: flex; align-items: center; gap: 12px; color: var(--web-muted); }
+.code-page__step--now { color: var(--web-ink); font-weight: 650; }
+.code-page__step--done { color: var(--web-body); }
 .code-page__pulse { width: 24px; height: 24px; border-radius: 8px; }
-.code-page__dot { width: 8px; height: 8px; margin: 0 8px; border-radius: 50%; background: var(--chat-border); }
-.code-page__done { display: grid; place-items: center; padding: 24px 0; }
-.code-page__report { padding: 18px 56px; font-size: 20px; text-decoration: none; }
-.code-page__failed { margin: 0; padding: 24px 0; text-align: center; font-size: 17px; color: var(--chat-ink); }
+.code-page__dot { width: 8px; height: 8px; margin: 0 8px; border-radius: 50%; background: var(--web-rule); }
+.code-page__done { display: grid; padding: 8px 0; }
+.code-page__failed { margin: 0; padding: 24px 0; text-align: center; font-size: 17px; color: var(--web-ink); }

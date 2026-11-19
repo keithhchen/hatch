@@ -616,6 +616,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   // The page of an access code: its intake starts the Run of the Brief, its status reads that Run and the report.
   const codePages = options.accessGate && agentBox && agentCorpusResolver ? new CodePages({
     gate: options.accessGate, corpora: agentCorpusResolver, repository: conversationRepository, store: conversationStore,
+    ...Number(process.env.HATCH_PAY_PRICE_FEN) > 0 ? { priceFen: Number(process.env.HATCH_PAY_PRICE_FEN) } : {},
     reportUrl: conversation => agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt)),
     start: async (conversation, key) => {
       const scope = await scopes.resolve(conversation, new AbortController().signal);

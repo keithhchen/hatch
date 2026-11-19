@@ -54,6 +54,8 @@ export type CodePagesDeps = {
   reportUrl(conversation: ConversationRecord): Promise<string | undefined>;
   /** Starts the Run of the Brief, under `key`: the same key again is the same Run. */
   start(conversation: ConversationRecord, key: string): Promise<unknown>;
+  /** What one code costs, in fen (HATCH_PAY_PRICE_FEN); absent when payment is not configured. */
+  priceFen?: number;
 };
 
 /**
@@ -64,6 +66,12 @@ export type CodePagesDeps = {
 export class CodePages {
   private readonly reported = new Set<string>();
   constructor(private readonly deps: CodePagesDeps) {}
+
+  /** The product page before any code: what is sold, in the Product's own words, and for how much. */
+  async landing(productId: string): Promise<{ product: { id: string; name: string; description?: string }; price_fen?: number }> {
+    const { product } = (await this.deps.corpora.resolveByProduct(productId)).corpus;
+    return { product: { id: productId, name: product.name, ...(product.description ?? product.promise ? { description: product.description ?? product.promise } : {}) }, ...(this.deps.priceFen ? { price_fen: this.deps.priceFen } : {}) };
+  }
 
   async status(rawCode: string, headers?: http.IncomingHttpHeaders): Promise<CodePageStatus> {
     const code = normalizeCode(rawCode);
