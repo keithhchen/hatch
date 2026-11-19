@@ -1,12 +1,13 @@
 import { randomBytes, randomInt } from "node:crypto";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
-import type { AccessCodes, AccessCodeOrder, AccessCodeStatus, AccessCodeView, Activation, PayChannel, RedeemResult } from "./accessCodes.js";
+import type { AccessCodes, AccessCodeOrder, AccessCodeSource, AccessCodeStatus, AccessCodeView, Activation, PayChannel, RedeemResult } from "./accessCodes.js";
 
 export const ACCESS_CODES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS hatch_access_codes (
   code TEXT PRIMARY KEY,
   product_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'used', 'void')),
+  source TEXT NOT NULL DEFAULT 'free' CHECK (source IN ('free', 'paid')),
   out_trade_no TEXT UNIQUE,
   amount_fen INTEGER,
   email TEXT,
@@ -18,13 +19,12 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
   used_by_conversation_id TEXT
 );`;
 
-// No 0/O/1/I: a code is read aloud and typed by hand.
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const newCode = () => Array.from({ length: 8 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
+// MSC and six digits, free or bought: digits only, because letters are hard to read for the people typing them.
+const newCode = () => `MSC${String(randomInt(1_000_000)).padStart(6, "0")}`;
 const normalize = (code: string) => code.trim().toUpperCase();
 
-type Row = { code: string; product_id: string; status: AccessCodeStatus; email: string | null; used_by_conversation_id: string | null };
-const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, status: row.status });
+type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; used_by_conversation_id: string | null };
+const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, status: row.status, source: row.source });
 
 export class PostgresAccessCodes implements AccessCodes {
   /** `priceFen` is what a bought code costs: stored on the order, and the only amount that activates it. Without it codes can be redeemed, not sold. */
@@ -35,10 +35,10 @@ export class PostgresAccessCodes implements AccessCodes {
   async createPending(input: { productId: string; email: string; payChannel?: PayChannel }) {
     if (this.priceFen === undefined) throw new Error("Access codes are not for sale: no price is configured.");
     // A code that collides with another is drawn again; the primary key is the arbiter.
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 10; attempt++) {
       const code = newCode(), outTradeNo = `hp${randomBytes(12).toString("hex")}`;
       const inserted = await this.db.query(
-        `INSERT INTO hatch_access_codes (code, product_id, status, out_trade_no, amount_fen, email, pay_channel) VALUES ($1, $2, 'pending', $3, $4, $5, $6)
+        `INSERT INTO hatch_access_codes (code, product_id, status, source, out_trade_no, amount_fen, email, pay_channel) VALUES ($1, $2, 'pending', 'paid', $3, $4, $5, $6)
          ON CONFLICT DO NOTHING RETURNING code`,
         [code, input.productId, outTradeNo, this.priceFen, input.email, input.payChannel ?? null]);
       if (inserted.rows.length) return { code, outTradeNo };
@@ -49,7 +49,7 @@ export class PostgresAccessCodes implements AccessCodes {
   async activatePaid(input: { outTradeNo: string; transactionId: string; amountFen: number }): Promise<Activation | undefined> {
     const won = await this.db.query<Row>(
       `UPDATE hatch_access_codes SET status = 'active', transaction_id = $2, paid_at = now()
-       WHERE out_trade_no = $1 AND status = 'pending' AND amount_fen = $3 RETURNING code, product_id, status, email, used_by_conversation_id`,
+       WHERE out_trade_no = $1 AND status = 'pending' AND amount_fen = $3 RETURNING code, product_id, status, source, email, used_by_conversation_id`,
       [input.outTradeNo, input.transactionId, input.amountFen]);
     if (won.rows[0]) return { ...orderOf(won.rows[0]), activated: true };
     const order = await this.order(input.outTradeNo);
@@ -73,12 +73,12 @@ export class PostgresAccessCodes implements AccessCodes {
 
   async lookup(code: string) {
     const view = await this.peek(code);
-    return view ? { status: view.status, productId: view.productId, conversationId: view.usedByConversationId } : null;
+    return view ? { status: view.status, source: view.source, productId: view.productId, conversationId: view.usedByConversationId } : null;
   }
 
   async peek(code: string): Promise<AccessCodeView | undefined> {
     const row = (await this.db.query<Row>("SELECT * FROM hatch_access_codes WHERE code = $1", [normalize(code)])).rows[0];
-    return row && { code: row.code, productId: row.product_id, status: row.status, usedByConversationId: row.used_by_conversation_id };
+    return row && { code: row.code, productId: row.product_id, status: row.status, source: row.source, usedByConversationId: row.used_by_conversation_id };
   }
 
   async order(outTradeNo: string): Promise<AccessCodeOrder | undefined> {

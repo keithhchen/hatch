@@ -1,11 +1,12 @@
 /** An access code lets one conversation of one Product start. It is bought (pending until paid) or issued free by an operator (inserted active). */
 export type AccessCodeStatus = "pending" | "active" | "used" | "void";
+export type AccessCodeSource = "free" | "paid";
 export type PayChannel = "jsapi" | "h5";
 
-export type AccessCodeView = { code: string; productId: string; status: AccessCodeStatus; usedByConversationId: string | null };
+export type AccessCodeView = { code: string; productId: string; status: AccessCodeStatus; source: AccessCodeSource; usedByConversationId: string | null };
 
 /** The order behind a bought code, as the payment flow needs it. */
-export type AccessCodeOrder = { code: string; productId: string; email: string | null; status: AccessCodeStatus };
+export type AccessCodeOrder = { code: string; productId: string; email: string | null; status: AccessCodeStatus; source: AccessCodeSource };
 
 export type Activation = AccessCodeOrder & {
   /** True only for the call that moved the code from pending to active: that caller sends the email. */
@@ -25,7 +26,7 @@ export interface AccessCodes {
   /** active -> used by this conversation, in one step. The same conversation redeeming again is ok. */
   redeem(input: { code: string; productId: string; conversationId: string }): Promise<RedeemResult>;
   /** Where a code stands and, once used, the conversation it opened: opening the chat with a used code lands back in that conversation. Null when unknown. */
-  lookup(code: string): Promise<{ status: AccessCodeStatus; productId: string; conversationId: string | null } | null>;
+  lookup(code: string): Promise<{ status: AccessCodeStatus; source: AccessCodeSource; productId: string; conversationId: string | null } | null>;
   peek(code: string): Promise<AccessCodeView | undefined>;
   order(outTradeNo: string): Promise<AccessCodeOrder | undefined>;
 }

@@ -1,3 +1,5 @@
+import { MemoryAttemptLimiter, clientIp, rateLimitedAccessCodes } from "../accessCodes/rateLimit.js";
+import type http from "node:http";
 import { PostgresAccessCodes } from "../accessCodes/postgresAccessCodes.js";
 import type { AccessCodes } from "../accessCodes/accessCodes.js";
 import { log } from "../observability/log.js";
@@ -12,23 +14,26 @@ import { WeChatPayV3 } from "./wechatPay.js";
  * Access codes (always, so an operator's free codes redeem) and WeChat Pay (only with every setting present; the log line says what is
  * missing). The pay routes answer 503 while it is off.
  */
-export async function openHatchPay(options: { pool: PostgresQueryExecutor; environment: NodeJS.ProcessEnv }): Promise<{ codes: AccessCodes; pay?: HatchPay }> {
+export async function openHatchPay(options: { pool: PostgresQueryExecutor; environment: NodeJS.ProcessEnv }): Promise<{ codes: AccessCodes; accessCodesFor: (headers: http.IncomingHttpHeaders) => AccessCodes; pay?: HatchPay }> {
   const configured = hatchPayConfigFromEnvironment(options.environment);
   const codes = new PostgresAccessCodes(options.pool, "config" in configured ? configured.config.priceFen : undefined);
   await codes.initialize();
+  // One limiter for the whole Runtime: 10 failed redeems or lookups per client address per 10 minutes.
+  const limiter = new MemoryAttemptLimiter();
+  const accessCodesFor = (headers: http.IncomingHttpHeaders) => rateLimitedAccessCodes(codes, limiter, clientIp(headers));
   if (!("config" in configured)) {
     log.warn("hatch_pay_disabled", { reason: configured.disabled });
-    return { codes };
+    return { codes, accessCodesFor };
   }
   const { config } = configured;
   let wechat: WeChatPayV3;
   try { wechat = new WeChatPayV3(config.wechat); } catch (error) {
     log.warn("hatch_pay_disabled", { reason: `WeChat Pay keys do not load: ${error instanceof Error ? error.message : String(error)}` });
-    return { codes };
+    return { codes, accessCodesFor };
   }
   log.info("hatch_pay_enabled", { publicBase: config.publicBase, priceFen: config.priceFen });
   return {
-    codes,
+    codes, accessCodesFor,
     pay: new HatchPay({
       codes, wechat, openids: new WeChatOAuth(config.wechat.appid, config.mpAppSecret), email: new ResendSender(config.resendApiKey),
       emailFrom: config.emailFrom, publicBase: config.publicBase, priceFen: config.priceFen

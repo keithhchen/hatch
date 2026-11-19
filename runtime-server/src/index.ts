@@ -210,6 +210,8 @@ export type RuntimeServerOptions = {
   siteResearch?: SiteResearchMode;
   /** Access codes (redeemed when a chat starts) and the WeChat Pay pages that sell them (/hatch-pay/). */
   accessCodes?: AccessCodes;
+  /** The same codes as one client sees them (rate-limited by its address): the chat start redeems and looks up through this, answering a TooManyAttempts with its 429. */
+  accessCodesFor?: (headers: http.IncomingHttpHeaders) => AccessCodes;
   hatchPay?: HatchPay;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
@@ -309,7 +311,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(artifact ? { artifact } : {}),
     ...(agentBox ? { agentBox } : {}),
     ...(siteResearch ? { siteResearch } : {}),
-    ...(hatchPay ? { accessCodes: hatchPay.codes, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
+    ...(hatchPay ? { accessCodes: hatchPay.codes, accessCodesFor: hatchPay.accessCodesFor, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),

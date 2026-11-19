@@ -72,31 +72,32 @@ const activeCode = async (db: Awaited<ReturnType<typeof isolated>>, code: string
   void await db.pool.query("INSERT INTO hatch_access_codes (code, product_id, status) VALUES ($1, $2, 'active')", [code, productId]);
 
 run("redeem from two conversations at once: exactly one wins", async db => {
-  await activeCode(db, "ABCD2345");
-  const results = await Promise.all(["c1", "c2", "c3", "c4"].map(conversationId => db.codes.redeem({ code: "ABCD2345", productId: PRODUCT, conversationId })));
+  await activeCode(db, "MSC048213");
+  const results = await Promise.all(["c1", "c2", "c3", "c4"].map(conversationId => db.codes.redeem({ code: "MSC048213", productId: PRODUCT, conversationId })));
   assert.equal(results.filter(r => r.ok).length, 1);
   assert.deepEqual(results.filter(r => !r.ok), [{ ok: false, reason: "used" }, { ok: false, reason: "used" }, { ok: false, reason: "used" }]);
-  const winner = (await db.codes.peek("abcd2345"))!;
+  const winner = (await db.codes.peek(" msc048213 "))!;
   assert.equal(winner.status, "used");
-  assert.deepEqual(await db.codes.lookup("abcd2345"), { status: "used", productId: PRODUCT, conversationId: winner.usedByConversationId });
-  assert.equal(await db.codes.lookup("ZZZZ2345"), null);
+  assert.deepEqual(await db.codes.lookup(" msc048213 "), { status: "used", source: "free", productId: PRODUCT, conversationId: winner.usedByConversationId });
+  assert.equal(await db.codes.lookup("MSC000000"), null);
   // The same conversation redeeming again is the same redeem.
-  assert.deepEqual(await db.codes.redeem({ code: "ABCD2345", productId: PRODUCT, conversationId: winner.usedByConversationId! }), { ok: true });
+  assert.deepEqual(await db.codes.redeem({ code: "MSC048213", productId: PRODUCT, conversationId: winner.usedByConversationId! }), { ok: true });
 });
 
 run("redeem says why not: not_found, not_paid, wrong_product, void", async db => {
-  assert.deepEqual(await db.codes.redeem({ code: "NOPE2345", productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "not_found" });
+  assert.deepEqual(await db.codes.redeem({ code: "MSC333333", productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "not_found" });
   const { code } = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co" });
   assert.deepEqual(await db.codes.redeem({ code, productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "not_paid" });
-  await activeCode(db, "WRNG2345", "other-product");
-  assert.deepEqual(await db.codes.redeem({ code: "WRNG2345", productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "wrong_product" });
-  await db.pool.query("INSERT INTO hatch_access_codes (code, product_id, status) VALUES ('VOID2345', $1, 'void')", [PRODUCT]);
-  assert.deepEqual(await db.codes.redeem({ code: "VOID2345", productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "not_found" });
+  await activeCode(db, "MSC111111", "other-product");
+  assert.deepEqual(await db.codes.redeem({ code: "MSC111111", productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "wrong_product" });
+  await db.pool.query("INSERT INTO hatch_access_codes (code, product_id, status) VALUES ('MSC222222', $1, 'void')", [PRODUCT]);
+  assert.deepEqual(await db.codes.redeem({ code: "MSC222222", productId: PRODUCT, conversationId: "c" }), { ok: false, reason: "not_found" });
 });
 
 run("createPending draws a typable 8-character code and a unique trade number", async db => {
   const a = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co", payChannel: "h5" }), b = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co" });
-  assert.match(a.code, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
+  assert.match(a.code, /^MSC\d{6}$/);
+  assert.equal((await db.codes.peek(a.code))!.source, "paid");
   assert.notEqual(a.outTradeNo, b.outTradeNo);
   assert.equal((await db.codes.peek(a.code))!.status, "pending");
 });
@@ -202,7 +203,7 @@ run("return page: not paid shows the query and re-pay buttons; paid redirects to
     const location = new URL(paid.headers.get("location")!);
     assert.equal(location.origin + location.pathname, BACK);
     const code = location.searchParams.get("code")!;
-    assert.match(code, /^[A-Z2-9]{8}$/);
+    assert.match(code, /^MSC\d{6}$/);
     assert.equal(h.mails.length, 1);
     assert.equal(h.mails[0]!.to, "a@b.co");
     assert.match(h.mails[0]!.text, new RegExp(code));
@@ -223,7 +224,7 @@ run("return page: a wrong back shows the code instead; unknown orders and WeChat
     h.pay(outTradeNo);
     const noBack = await h.get(returnPath(outTradeNo, "https://evil.example/"));
     assert.equal(noBack.status, 200);
-    assert.match(await noBack.text(), /[A-Z2-9]{8}/);
+    assert.match(await noBack.text(), /MSC\d{6}/);
     assert.equal((await h.get("/return?o=hp000000000000000000000000")).status, 404);
     assert.equal((await h.get("/return?o=bogus")).status, 400);
 
