@@ -4,6 +4,7 @@ import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
+import type { AccessCodes } from "../accessCodes/accessCodes.js";
 import { AUDIT_SPEC, MemoryAccessCodes, PRODUCT, gateOver } from "../accessGate.testkit.js";
 import { ACCESS_CODE_CAPABILITY, AccessGate } from "../accessGate.js";
 import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
@@ -16,6 +17,9 @@ import { InMemoryConversationRepository } from "../conversationRepository.js";
 import { createRuntimeServer, type RuntimeServer } from "../index.js";
 import { clientMessageInputDigest } from "../protocol.js";
 import { RuntimeStore, LocalRuntimeAuthority } from "../store.js";
+import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
+import { PostgresAccessCodes } from "../accessCodes/postgresAccessCodes.js";
 import { endingOf } from "../testSupport.js";
 import { CodePages, codeConversationId, codeIntakeKey } from "./codePages.js";
 import { handleCodePageRoute } from "./routes.js";
@@ -27,7 +31,7 @@ const PROGRESS = { steps: [
   { id: "write", label: "撰写报告", tools: ["write"] }, { id: "publish", label: "发布", tools: ["publish_html"] }
 ] };
 
-async function setup(options: { capable?: boolean } = {}) {
+async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "redeem" | "lookup"> } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-code-pages-"));
   await mkdir(path.join(root, "runtime"), { recursive: true });
   await writeFile(path.join(root, "runtime", "progress.json"), JSON.stringify(PROGRESS));
@@ -47,7 +51,7 @@ async function setup(options: { capable?: boolean } = {}) {
   });
   const world = { report: undefined as string | undefined, tools: [] as string[] };
   const pages = new CodePages({
-    gate: gateOver(codes, options.capable !== false), corpora, repository,
+    gate: gateOver(options.codes ?? codes, options.capable !== false), corpora, repository,
     store: { readRunActivity: async () => ({ tool_calls: world.tools.map((name) => ({ name })) }) } as never,
     reportUrl: async () => world.report,
     start: async (conversation, key) => service.submit({
@@ -211,4 +215,27 @@ test("a Product with the access code capability has no conversations for its buy
   }
   assert.equal((await call(OPEN, "POST")).status, 201);
   assert.equal((await call(OPEN, "GET")).status, 200);
+});
+
+// Opt-in, against the real adapter: every run owns a random schema of HATCH_TEST_DATABASE_URL.
+test("the real Postgres adapter: a double submit spends the paid code once and starts one Run", { skip: !process.env.HATCH_TEST_DATABASE_URL }, async () => {
+  const schema = `codepages_test_${randomUUID().replaceAll("-", "")}`;
+  const admin = new Pool({ connectionString: process.env.HATCH_TEST_DATABASE_URL });
+  await admin.query(`CREATE SCHEMA "${schema}"`);
+  const pool = new Pool({ connectionString: process.env.HATCH_TEST_DATABASE_URL, options: `-c search_path=${schema}`, max: 8 });
+  try {
+    const real = new PostgresAccessCodes(pool, 990);
+    await real.initialize();
+    const { code, outTradeNo } = await real.createPending({ productId: PRODUCT, email: "a@b.co" });
+    const { pages, repository, conversationOf } = await setup({ codes: real });
+    assert.deepEqual(await pages.status(code), { state: "entry", reason: "not_paid" });
+    await real.activatePaid({ outTradeNo, transactionId: "tx1", amountFen: 990 });
+    assert.equal((await pages.status(code)).state, "intake");
+    await Promise.all([pages.intake(code, answers), pages.intake(code, answers), pages.intake(code, answers)]);
+    const conversation = (await conversationOf(code))!;
+    assert.equal((await real.lookup(code))?.status, "used");
+    assert.equal((await real.lookup(code))?.conversationId, conversation.id);
+    assert.equal((await repository.listRuns(conversation.id)).length, 1);
+    assert.equal((await pages.status(code)).state, "generating");
+  } finally { await pool.end(); await admin.query(`DROP SCHEMA "${schema}" CASCADE`); await admin.end(); }
 });

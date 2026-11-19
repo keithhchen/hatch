@@ -293,6 +293,8 @@ services:
       HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: ${HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:?set HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_GUEST_TOKEN_SECRET: ${HATCH_GUEST_TOKEN_SECRET:?set HATCH_GUEST_TOKEN_SECRET in /opt/hatch/.env}
       HATCH_OAUTH_STATE_KEY: ${HATCH_OAUTH_STATE_KEY:?set HATCH_OAUTH_STATE_KEY in /opt/hatch/.env}
+      # The Product the landing page (/c/) sells access codes for. The landing is off while unset.
+      HATCH_CODE_PAGE_PRODUCT_ID: ${HATCH_CODE_PAGE_PRODUCT_ID:-}
       HATCH_COMMERCE_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
       HATCH_PORTAL_STATE_PATH: /var/lib/hatch/commerce/portal-state.json
       HATCH_COMMERCE_PAYMENT_MODE: disabled

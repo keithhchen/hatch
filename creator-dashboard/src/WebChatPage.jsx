@@ -85,7 +85,7 @@ function WebChatWorkspace({ controller, dictate, agent, productId, navigate, pro
       <p className="web-chat__brief-intro">{t("briefIntro", { agent: agentName })}</p>
       {briefFields.map((field, index) => <label key={field.id}>
         <span className="web-chat__brief-label">{field.label}{field.required ? <em>{t("required")}</em> : null}</span>
-        {field.id === "email"
+        {field.type === "email"
           ? <input type="email" autoComplete="email" autoFocus={index === 0} required={field.required} maxLength={254} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} />
           : <textarea autoFocus={index === 0} required={field.required} maxLength={32000} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} />}
       </label>)}
