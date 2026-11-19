@@ -5,7 +5,7 @@
 - `https://gethatchapp.com/report-assets/v1/report.css`
 - `https://gethatchapp.com/report-assets/v1/report.js`
 
-版本路径只做缺陷修复（浏览器缓存 1 小时），改版或破坏性改动一律走 `v2`。Agent 的电脑和买家浏览器都用这两个地址；PDF 用 Playwright 打开本地报告 HTML 时同样加载它们。
+版本路径只做缺陷修复（浏览器缓存 1 小时），改版或破坏性改动一律走 `v2`。（例外：2026-11-19 应用户明确要求，服务卡片的推荐档高亮和「预约咨询」按钮直接加在 v1，让现有报告立即生效。）Agent 的电脑和买家浏览器都用这两个地址；PDF 用 Playwright 打开本地报告 HTML 时同样加载它们。
 
 ## 文件骨架
 
@@ -69,7 +69,10 @@
 <section id="sustain"><div class="kicker">可持续与社会影响</div><h2>标题</h2>
 <div class="sus"><div class="sus-copy"><p>官网缺什么</p><p>海外客户通常会问什么</p></div></div></section>
 
-<!-- 8 付费延伸服务：三张固定卡片和「联系你的 MSC咨询 顾问即可开通」自动生成 -->
+<!-- 8 付费延伸服务：三张固定卡片和「联系你的 MSC咨询 顾问即可开通」自动生成。
+     第一张卡片是推荐档（顶部绿蓝渐变条）；每张卡片有「预约咨询」按钮，点击弹出「MSC 的咨询顾问会尽快联系您」，
+     并向 POST /html/<页面 id>/lead?t=<页面签名> 记录一次 {tier_index, tier_name, tier_price}（同一页面同一档只记一行；
+     记录失败只写 console，弹窗照常）。报告不用写任何代码；按钮在 PDF 里不显示。 -->
 <section id="services"><div class="kicker">付费延伸服务</div><h2>标题</h2><p class="lead">一句话</p></section>
 
 <!-- 9 附录：折叠列表来自 items -->

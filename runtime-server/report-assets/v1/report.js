@@ -75,8 +75,27 @@
 
   // 8 paid services: fixed content
   $("#services").append(html(Object.assign(document.createElement("div"), { className: "cards" }),
-    SERVICES.map(s => `<div class="card"><div class="price">${s[0]}</div><h3>${s[1]}</h3><p>${s[2]}</p></div>`).join("")),
+    SERVICES.map((s, i) => `<div class="card${i ? "" : " rec"}"><div class="price">${s[0]}</div><h3>${s[1]}</h3><p>${s[2]}</p><button type="button" class="book" data-tier="${i}">预约咨询</button></div>`).join("")),
     Object.assign(document.createElement("p"), { className: "contact", textContent: "联系你的 MSC咨询 顾问即可开通" }));
+
+  // a tier's button: tell the consultants once per page and tier (the server keeps one row too), and always show the modal; a failed POST is only logged
+  const sent = new Set();
+  const lead = i => {
+    if (sent.has(i)) return;
+    sent.add(i);
+    fetch(location.pathname + "/lead" + location.search, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tier_index: i, tier_name: SERVICES[i][1], tier_price: SERVICES[i][0] }) })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); })
+      .catch(e => { sent.delete(i); console.error("预约咨询 was not recorded:", e); });
+  };
+  $("#services").addEventListener("click", e => {
+    const b = e.target.closest(".book");
+    if (!b) return;
+    lead(+b.dataset.tier);
+    if ($(".modal")) return;
+    const m = html(Object.assign(document.createElement("div"), { className: "modal" }), `<div class="modalbox" role="dialog" aria-modal="true"><p>MSC 的咨询顾问会尽快联系您</p><button type="button" class="modalclose">关闭</button></div>`);
+    m.addEventListener("click", ev => { if (ev.target === m || ev.target.closest(".modalclose")) m.remove(); });
+    document.body.append(m);
+  });
 
   // 9 appendix: items are [dimension, label, score, evidence, confidence]
   const groups = NAMES.map((_, i) => D.items.filter(x => x[0] === "D" + (i + 1)));

@@ -125,10 +125,19 @@ main>section:not(.hero) .kicker::before{content:counter(sec,decimal-leading-zero
 #services{background:var(--dark);color:#fff}
 #services .kicker,#services .lead{color:#aeb5ba}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:44px}
-.card{border:1px solid #3c4449;padding:30px;min-height:290px;break-inside:avoid}
+.card{border:1px solid #3c4449;padding:30px;min-height:290px;break-inside:avoid;position:relative;display:flex;flex-direction:column}
+.card.rec{border-color:#469A21}
+.card.rec::before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:4px;background:linear-gradient(90deg,#469A21,#0D7FBB)}
 .price{font:400 36px var(--serif);margin-bottom:18px}
 .card h3{font-size:21px}
 .card p{color:#b8c0c5;font-size:14px}
+.book{margin-top:auto;align-self:flex-start;font:inherit;font-size:14px;color:#fff;background:none;border:1px solid #6b747a;padding:10px 22px;cursor:pointer}
+.book:hover,.book:focus-visible{border-color:#fff}
+.card.rec .book{background:linear-gradient(90deg,#469A21,#0D7FBB);border-color:transparent}
+.modal{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:24px;background:rgba(26,29,31,.6)}
+.modalbox{background:#fff;color:#1a1d1f;padding:32px;max-width:420px;width:100%;text-align:center}
+.modalbox p{margin:0 0 24px;font-size:18px}
+.modalclose{font:inherit;font-size:14px;color:#fff;background:#1a1d1f;border:0;padding:10px 28px;cursor:pointer}
 .contact{margin:32px 0 0;color:#c4cacf}
 
 /* 9 appendix */
@@ -173,7 +182,7 @@ footer small{color:#888}
 }
 @page{size:A4;margin:12mm}
 @media print{
-  .loader{display:none!important}
+  .loader,.book,.modal{display:none!important}
   .reveal{opacity:1!important;transform:none!important;transition:none!important}
   main>section:not(.hero){padding:34px 0;border-top:1px solid var(--line)}
   .hero{padding:12px 0 24px;break-inside:avoid;gap:40px}
