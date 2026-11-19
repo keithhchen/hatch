@@ -486,7 +486,7 @@ export class LocalRuntimeAuthority {
     for (const [key, addition] of additions) {
       const current = this.usage.get(key) ?? { count: 0, bytes: 0 };
       const scope = key === "global" ? "GLOBAL" : key.startsWith("binding:") ? "SCOPE" : "CONVERSATION";
-      const defaults = scope === "GLOBAL" ? [1_000_000, 1024 ** 3] : scope === "SCOPE" ? [100_000, 256 * 1024 ** 2] : [10_000, 64 * 1024 ** 2];
+      const defaults = scope === "GLOBAL" ? [1_000_000, 1024 ** 3] : scope === "SCOPE" ? [100_000, 256 * 1024 ** 2] : [200_000, 64 * 1024 ** 2];
       const limits = ["EVENTS", "BYTES"].map((unit, index) => {
         const suffix = unit === "BYTES" && scope !== "CONVERSATION" ? "EVENT_BYTES" : unit;
         const value = Number(process.env[`HATCH_RUNTIME_MAX_${scope}_${suffix}`] ?? defaults[index]);

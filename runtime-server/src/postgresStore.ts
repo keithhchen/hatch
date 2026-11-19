@@ -248,7 +248,7 @@ export class PostgresStore extends RuntimeStore {
     super();
     if (typeof input === "string") {
       this.queryTimeoutMs = 5_000;
-      this.maxConversationEvents = 10_000;
+      this.maxConversationEvents = 200_000;
       this.maxConversationBytes = 64 * 1024 * 1024;
       this.maxGlobalEvents = 1_000_000;
       this.maxGlobalBytes = 1024 * 1024 * 1024;
@@ -266,7 +266,7 @@ export class PostgresStore extends RuntimeStore {
 
     if (isQueryExecutor(input)) {
       this.queryTimeoutMs = 5_000;
-      this.maxConversationEvents = 10_000;
+      this.maxConversationEvents = 200_000;
       this.maxConversationBytes = 64 * 1024 * 1024;
       this.maxGlobalEvents = 1_000_000;
       this.maxGlobalBytes = 1024 * 1024 * 1024;
@@ -287,7 +287,7 @@ export class PostgresStore extends RuntimeStore {
     this.maxConversationEvents = boundedDatabaseSetting(
       input.maxConversationEvents,
       environment.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS,
-      10_000,
+      200_000,
       "HATCH_RUNTIME_MAX_CONVERSATION_EVENTS",
       1,
       1_000_000
