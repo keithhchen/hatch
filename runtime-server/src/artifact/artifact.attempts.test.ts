@@ -37,7 +37,7 @@ async function world(script: Behavior[]) {
     publishing: { sleep: async () => undefined, pausesMs: [0, 0] } });
   const runs: string[] = [];
   const chat = new ChatRuntime<object>({
-    repository, store, scopes: { resolve: async () => ({}) }, admission: { reserve: () => () => undefined }, toolTimeoutMs: 1000,
+    repository, store, scopes: { resolve: async () => ({}) }, toolTimeoutMs: 1000,
     compactionStrategy: (() => { throw new Error("not used"); }) as never, artifacts: artifact.lifecycle,
     runner: { async run(turn) {
       runs.push(turn.run.id);

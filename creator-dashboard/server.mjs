@@ -402,8 +402,7 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
       }
-      // The page of an access code (/c/<code>): the code is the only credential, so these routes take no session. They reach the Runtime's
-      // /v1/codes/<code>, which limits wrong codes by the client address passed on here.
+      // The page of an access code (/c/<code>): the code is the only credential, so these routes take no session. They reach the Runtime's /v1/codes/<code>.
       if (request.method === "GET" && url.pathname === "/v1/web-chat/code-landing") {
         if (!codePageProductId) return send(response, 404, { error: { code: "not_found", message: "Not found." } });
         // The product page: what is sold and its price are the Runtime's (the Product's corpus, HATCH_PAY_PRICE_FEN); only the Product id is ours.
@@ -414,11 +413,9 @@ export async function createDashboardApp(options = {}) {
       const codePage = CODE_PAGE_PATH.exec(url.pathname);
       if (codePage && request.method === (codePage[2] ? "POST" : "GET")) {
         if (codePage[2] && !allowedPublicOrigins.has(String(request.headers.origin ?? ""))) return send(response, 403, { error: { code: "origin_not_allowed", message: "Open Hatch directly and try again." } });
-        // Cloudflare's CF-Connecting-IP is the visitor; X-Real-IP is client-controlled here and must not decide the wrong-code limit.
-        const clientAddress = String(request.headers["cf-connecting-ip"] ?? "").trim() || String(request.headers["x-forwarded-for"] ?? "").split(",")[0].trim() || request.socket.remoteAddress || "";
         const upstream = await fetchImpl(new URL(`/v1/codes/${codePage[1]}${codePage[2] ?? ""}`, runtimeUrl), {
           method: request.method,
-          headers: { "cf-connecting-ip": clientAddress, ...(codePage[2] ? { "content-type": "application/json" } : {}) },
+          headers: codePage[2] ? { "content-type": "application/json" } : {},
           ...(codePage[2] ? { body: JSON.stringify(await readJson(request)) } : {})
         });
         response.statusCode = upstream.status;

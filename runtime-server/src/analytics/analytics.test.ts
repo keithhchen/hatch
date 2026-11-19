@@ -53,7 +53,7 @@ async function chat(analytics: RecordingAnalytics | typeof throwingAnalytics, ow
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: () => undefined, executorId: "exec", holdsConversation: () => false, steered: () => undefined },
-    hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>(),
+    hub, registry: new RunRegistry<object>(),
     analytics: new ChatAnalytics(analytics, repository)
   });
   // Analytics counts in the background after a message is taken; a turn of the event loop lets it report.

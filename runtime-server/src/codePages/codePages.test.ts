@@ -9,7 +9,6 @@ import { AUDIT_SPEC, MemoryAccessCodes, PRODUCT, gateOver } from "../accessGate.
 import { ACCESS_CODE_CAPABILITY, AccessGate } from "../accessGate.js";
 import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
 import type { AgentCorpus, AgentCorpusResolver, AgentCorpusResolverLike } from "../agentCorpus.js";
-import { DELIVERABLE_FOLLOWUP_PREFIX } from "../chat/deliverableFollowup.js";
 import { ChatService, RunRegistry } from "../chat/chatService.js";
 import { RunEventHub } from "../chat/runEventHub.js";
 import { RunTerminator } from "../chat/runTerminator.js";
@@ -22,6 +21,7 @@ import { Pool } from "pg";
 import { PostgresAccessCodes } from "../accessCodes/postgresAccessCodes.js";
 import { endingOf } from "../testSupport.js";
 import { CodePages, codeConversationId, codeIntakeKey } from "./codePages.js";
+import { CodeConversations, MAX_CODE_ATTEMPTS, codeFollowupKey, codeRetryKey } from "./reconciler.js";
 import { handleCodePageRoute } from "./routes.js";
 
 const CODE = "MSC123456";
@@ -30,7 +30,7 @@ const PROGRESS = { steps: [
   { id: "fetch", label: "抓取网站", tools: ["fetch_url"] }, { id: "speed", label: "测速", tools: ["page_speed"] },
   { id: "write", label: "撰写报告", tools: ["write"] }] };
 
-async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "redeem" | "lookup"> } = {}) {
+async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "redeem" | "lookup" | "due" | "claim" | "conclude"> } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-code-pages-"));
   await mkdir(path.join(root, "runtime"), { recursive: true });
   await writeFile(path.join(root, "runtime", "progress.json"), JSON.stringify(PROGRESS));
@@ -41,27 +41,47 @@ async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "re
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: () => undefined, executorId: "exec", holdsConversation: () => false, steered: () => undefined },
-    hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>()
+    hub, registry: new RunRegistry<object>()
   });
   const codes = new MemoryAccessCodes({
     MSC123456: { status: "active", productId: PRODUCT, conversationId: null },
     MSC000002: { status: "pending", productId: PRODUCT, conversationId: null },
     MSC000009: { status: "active", productId: "another-product", conversationId: null }
   });
-  const world = { report: undefined as string | undefined, tools: [] as string[] };
+  const world = { report: undefined as string | undefined, tools: [] as string[], failStarts: 0, starts: 0 };
+  // Run ids sort in the order they are made, as the real ones' creation times do.
+  let runCount = 0;
+  const nextRunId = () => `run-${String(++runCount).padStart(6, "0")}`;
+  const start = async (conversation: { ownerAccountId: string }, key: string) => {
+    world.starts++;
+    if (world.failStarts > 0) { world.failStarts--; throw new Error("no capacity"); }
+    return service.submit({
+      principal: principal(conversation), conversation: conversation as never, scope: {}, client: { client: "web" },
+      clientMessageId: key, message: async () => ({ role: "user", content: "start", kind: "task_start" }),
+      digest: clientMessageInputDigest({ content: "", task_start: true }), runId: nextRunId(), corpusDigest: "corpus", requiresLocalTools: false
+    });
+  };
   const pages = new CodePages({
     priceFen: 990,
     gate: gateOver(options.codes ?? codes, options.capable !== false), corpora, repository,
-    store: { readRunActivity: async () => ({ tool_calls: world.tools.map((name) => ({ name })) }) } as never,
+    statusTtlMs: 0, corpusTtlMs: 0,
+    store: { toolNames: async () => world.tools },
     reportUrl: async () => world.report,
-    start: async (conversation, key) => service.submit({
-      principal: { kind: "account", accountId: conversation.ownerAccountId } as never, conversation, scope: {}, client: { client: "web" },
-      clientMessageId: key, message: async () => ({ role: "user", content: "start", kind: "task_start" }),
-      digest: clientMessageInputDigest({ content: "", task_start: true }), runId: `run-${key}`, corpusDigest: "corpus", requiresLocalTools: false
+    start
+  });
+  const principal = (conversation: { ownerAccountId: string }) => ({ kind: "account", accountId: conversation.ownerAccountId }) as never;
+  // Every instance of the Runtime has its own reconciler over the same codes and repository; `clock` is shared so a test can pass the backoffs.
+  const clock = { now: Date.now() + 20_000 };
+  const reconciler = () => new CodeConversations({
+    codes: (options.codes ?? codes) as MemoryAccessCodes, repository, reportUrl: async () => world.report, clock: () => new Date(clock.now), start,
+    retry: async (conversation, _run, key) => service.retry({ principal: principal(conversation), conversation, scope: {}, client: { client: "web" }, key, runId: nextRunId(), corpusDigest: "corpus", requiresLocalTools: false }),
+    followup: async (conversation, key) => service.submit({
+      principal: principal(conversation), conversation, scope: {}, client: { client: "web" }, clientMessageId: key, message: async () => ({ role: "user", content: "publish it" }),
+      digest: clientMessageInputDigest({ content: "publish it" }), runId: nextRunId(), corpusDigest: "corpus", requiresLocalTools: false, mode: "start_only"
     })
   });
   const conversationOf = (code: string) => repository.findOwnedConversation({ ownerAccountId: `code:${code}`, creatorId: "creator" }, codeConversationId(code));
-  return { pages, codes, repository, world, conversationOf, root };
+  return { pages, codes, repository, world, conversationOf, root, reconciler, clock };
 }
 
 test("entry: no code, an unknown code, an unpaid code, and the code of a Product without the capability all get the entry", async () => {
@@ -110,6 +130,124 @@ test("intake submit: the code is spent and the Run starts, once, even for a doub
   assert.equal(runs[0]!.clientMessageId, codeIntakeKey(CODE));
 });
 
+test("50 simultaneous intakes all start their Run: nothing caps concurrent Runs", async () => {
+  const { pages, codes, repository, conversationOf } = await setup();
+  const all = Array.from({ length: 50 }, (_, index) => `MSC9${String(index).padStart(5, "0")}`);
+  for (const code of all) codes.rows[code] = { status: "active", productId: PRODUCT, conversationId: null };
+  const statuses = await Promise.all(all.map((code) => pages.intake(code, answers)));
+  assert.ok(statuses.every((status) => status.state === "generating"));
+  for (const code of all) assert.equal((await repository.listRuns((await conversationOf(code))!.id)).length, 1, code);
+});
+
+const runsOf = async (t: Awaited<ReturnType<typeof setup>>, code = CODE) => (await t.repository.listRuns((await t.conversationOf(code))!.id)).sort((x, y) => x.createdAt.localeCompare(y.createdAt));
+
+test("reconciler: the 34 orphans (code spent, conversation made, no Run) each get exactly one Run, the same Run on every later pass", async () => {
+  const t = await setup();
+  const all = Array.from({ length: 34 }, (_, index) => `MSC8${String(index).padStart(5, "0")}`);
+  for (const code of all) t.codes.rows[code] = { status: "active", productId: PRODUCT, conversationId: null };
+  t.world.failStarts = 34;
+  await Promise.all(all.map((code) => t.pages.intake(code, answers).catch(() => undefined)));
+  for (const code of all) assert.equal((await runsOf(t, code)).length, 0);
+  assert.equal((await t.pages.status(all[0]!)).state, "generating", "stuck, but not yet lost");
+  await t.reconciler().tick();
+  for (const code of all) { const runs = await runsOf(t, code); assert.equal(runs.length, 1, code); assert.equal(runs[0]!.clientMessageId, codeIntakeKey(code)); }
+  await t.reconciler().tick();
+  t.clock.now += 200_000;
+  await t.reconciler().tick();
+  for (const code of all) assert.equal((await runsOf(t, code)).length, 1, `${code}: a Run that exists is never started again`);
+});
+
+test("reconciler: two concurrent passes, from two instances, take one action", async () => {
+  const t = await setup();
+  t.world.failStarts = 1;
+  await assert.rejects(t.pages.intake(CODE, answers));
+  const startsBefore = t.world.starts;
+  await Promise.all([t.reconciler().tick(), t.reconciler().tick(), t.reconciler().tick()]);
+  assert.equal(t.world.starts - startsBefore, 1, "one claim won; the others did not act");
+  assert.equal((await runsOf(t)).length, 1);
+  assert.equal(t.codes.rows[CODE]!.attempts, 1);
+});
+
+test("reconciler: a crash after the claim is made up for by the next pass, once the backoff has passed", async () => {
+  const t = await setup();
+  t.world.failStarts = 1;
+  await assert.rejects(t.pages.intake(CODE, answers));
+  assert.equal(await t.codes.claim(CODE, 0, new Date(t.clock.now + 10_000)), true, "claimed, then the process died before acting");
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 0, "inside the backoff nothing is done");
+  t.clock.now += 11_000;
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 1);
+  assert.equal(t.codes.rows[CODE]!.attempts, 2);
+});
+
+test("reconciler: a Run still active is left alone", async () => {
+  const t = await setup();
+  await t.pages.intake(CODE, answers);
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 1);
+  assert.equal(t.codes.rows[CODE]!.attempts ?? 0, 0, "no attempt was spent");
+});
+
+test("reconciler: a restart in the middle of a Run (interrupted) is answered again, under a key of its own attempt", async () => {
+  const t = await setup();
+  await t.pages.intake(CODE, answers);
+  await t.repository.endRun((await runsOf(t))[0]!.id, endingOf("interrupted", "restart"));
+  await t.reconciler().tick();
+  const runs = await runsOf(t);
+  assert.deepEqual(runs.map((run) => run.clientMessageId), [codeIntakeKey(CODE), codeRetryKey(CODE, 0)]);
+  assert.equal((await t.pages.status(CODE)).state, "generating");
+});
+
+test("reconciler: a failed Run is retried after the backoff, not before", async () => {
+  const t = await setup();
+  await t.pages.intake(CODE, answers);
+  await t.repository.endRun((await runsOf(t))[0]!.id, endingOf("failed", "provider 503"));
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 2);
+  await t.repository.endRun((await runsOf(t))[1]!.id, endingOf("failed", "provider 503"));
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 2, "10 s have not passed");
+  t.clock.now += 11_000;
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 3);
+});
+
+test("reconciler: a Run that completed without a page is followed up; a published page ends it as ready", async () => {
+  const t = await setup();
+  await t.pages.intake(CODE, answers);
+  await t.repository.endRun((await runsOf(t))[0]!.id, endingOf("completed"));
+  await t.reconciler().tick();
+  assert.deepEqual((await runsOf(t)).map((run) => run.clientMessageId), [codeIntakeKey(CODE), codeFollowupKey(CODE, 0)]);
+  await t.repository.endRun((await runsOf(t))[1]!.id, endingOf("completed"));
+  t.world.report = "https://gethatchapp.com/html/abc?t=sig";
+  t.clock.now += 11_000;
+  await t.reconciler().tick();
+  assert.equal(t.codes.rows[CODE]!.outcome, "ready");
+  assert.equal((await t.pages.status(CODE)).state, "ready");
+  t.clock.now += 300_000;
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, 2, "a finished conversation is never touched again");
+});
+
+test("reconciler: when the attempts are used up the conversation is failed, visibly, and left alone", async () => {
+  const t = await setup();
+  await t.pages.intake(CODE, answers);
+  for (let pass = 0; pass < 12 && !t.codes.rows[CODE]!.outcome; pass++) {
+    const last = (await runsOf(t)).at(-1)!;
+    if (last.status !== "failed") await t.repository.endRun(last.id, endingOf("failed", "provider 503"));
+    t.clock.now += 200_000;
+    await t.reconciler().tick();
+  }
+  assert.equal(t.codes.rows[CODE]!.outcome, "failed");
+  assert.equal(t.codes.rows[CODE]!.attempts, MAX_CODE_ATTEMPTS);
+  assert.equal((await t.pages.status(CODE)).state, "failed");
+  const count = (await runsOf(t)).length;
+  t.clock.now += 300_000;
+  await t.reconciler().tick();
+  assert.equal((await runsOf(t)).length, count);
+});
+
 test("intake submit with a required answer missing spends nothing and starts nothing", async () => {
   const { pages, codes, conversationOf } = await setup();
   await assert.rejects(pages.intake(CODE, { ...answers, website: "" }), (error: { code?: string }) => error.code === "invalid_brief");
@@ -139,30 +277,6 @@ test("ready: a published report gives its link", async () => {
   assert.deepEqual(await pages.status(CODE), { state: "ready", product: { id: PRODUCT, name: "出海官网获客诊断" }, creator: { name: "MSC咨询" }, website: "example.com", report_url: world.report });
 });
 
-test("failed: a failed Run, or no report after the follow-ups, is a plain failure", async () => {
-  const { pages, repository, conversationOf } = await setup();
-  await pages.intake(CODE, answers);
-  const conversation = (await conversationOf(CODE))!;
-  const [run] = await repository.listRuns(conversation.id);
-  await repository.endRun(run!.id, endingOf("failed", "model down"));
-  assert.equal((await pages.status(CODE)).state, "failed");
-
-  const capped = await setup();
-  await capped.pages.intake(CODE, answers);
-  const cappedConversation = (await capped.conversationOf(CODE))!;
-  const [first] = await capped.repository.listRuns(cappedConversation.id);
-  await capped.repository.endRun(first!.id, endingOf("completed"));
-  for (const n of [1, 2]) {
-    const { run } = await capped.repository.acceptSubmission({
-      binding: { ownerAccountId: cappedConversation.ownerAccountId, creatorId: "creator", agentId: PRODUCT, productId: PRODUCT, corpusDigest: "corpus" },
-      run: { id: `run-z${n}`, conversationId: cappedConversation.id, clientMessageId: `${DELIVERABLE_FOLLOWUP_PREFIX}${n}`, inputDigest: `d${n}`, corpusDigest: "corpus", executorId: "exec" },
-      canonicalUser: { role: "user", content: "publish it" }
-    });
-    await capped.repository.endRun(run.id, endingOf("completed"));
-  }
-  assert.equal((await capped.pages.status(CODE)).state, "failed");
-});
-
 test("scoped by code: a wrong code, or another code, sees nothing of this conversation", async () => {
   const { pages, codes } = await setup();
   codes.rows.MSC555555 = { status: "active", productId: PRODUCT, conversationId: null };
@@ -171,23 +285,6 @@ test("scoped by code: a wrong code, or another code, sees nothing of this conver
   assert.equal(other.state, "intake", "another active code is its own page, not this one's report");
   assert.equal(other.report_url, undefined);
   assert.deepEqual(await pages.status("MSC000000"), { state: "entry", reason: "not_found" });
-});
-
-test("a client that guesses codes is stopped by the limiter's 429", async () => {
-  const server = await listenRoute(async (req, res, url) => {
-    const { MemoryAttemptLimiter, rateLimitedAccessCodes } = await import("../accessCodes/rateLimit.js");
-    const real = new MemoryAccessCodes({});
-    limiter ??= new MemoryAttemptLimiter(2);
-    const gate = new AccessGate(new InMemoryProductCapabilities([[PRODUCT, ACCESS_CODE_CAPABILITY]]), (headers) => rateLimitedAccessCodes(real as never, limiter!, String(headers?.["x-real-ip"])));
-    await handleCodePageRoute(req, res, url, new CodePages({ gate, corpora: {} as never, repository: {} as never, store: {} as never, reportUrl: async () => undefined, start: async () => undefined }));
-  });
-  let limiter: import("../accessCodes/rateLimit.js").MemoryAttemptLimiter | undefined;
-  const get = (code: string) => fetch(`${server}/v1/codes/${code}`, { headers: { "x-real-ip": "203.0.113.7" } });
-  assert.equal((await get("MSC000001")).status, 200);
-  assert.equal((await get("MSC000002")).status, 200);
-  const blocked = await get("MSC000003");
-  assert.equal(blocked.status, 429);
-  assert.equal(((await blocked.json()) as { error: { message: string } }).error.message, "尝试次数过多，请稍后再试");
 });
 
 const closers: Array<() => Promise<void>> = [];

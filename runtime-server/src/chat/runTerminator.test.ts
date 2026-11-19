@@ -218,7 +218,7 @@ test("a message whose Run capacity is refused after it was stored is answered by
     terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: () => undefined, executorId: "exec-a", holdsConversation: () => false, steered: () => undefined },
     hub,
-    admission: { reserve: () => { reserved++; throw new ChatError("capacity", "The server is at capacity.", 429); } },
+    cap: async () => { reserved++; throw new ChatError("capacity", "The server is at capacity.", 429); },
     registry: new RunRegistry<object>()
   });
   const conversation = (await repository.getConversation(id))!;

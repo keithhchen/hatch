@@ -188,7 +188,7 @@ test("a Run's completion is told first, then the page hears the title once; a fa
   let calls = 0;
   const titles = new ConversationTitles({ repository, history: store, prompts: new FilePrompts(), model: async () => { if (++calls === 1) throw new Error("model down"); return "Tokyo trip, 5 days"; } });
   const chat = new ChatRuntime<object>({
-    repository, store, scopes: { resolve: async () => ({}) }, admission: { reserve: () => () => undefined }, toolTimeoutMs: 60_000, leaseMs: 60_000, sweepMs: 60_000,
+    repository, store, scopes: { resolve: async () => ({}) }, toolTimeoutMs: 60_000, leaseMs: 60_000, sweepMs: 60_000,
     compactionStrategy: () => ({ wants: () => false, tokensOf: () => 0, policy: { prune: 1e9, cacheTtlMs: 1, maxOverflowRetries: 2, timeoutMs: 1000 } }) as never,
     runner: { async run(turn) { await turn.state.start(); await turn.state.complete({ message: { role: "assistant", content: "Day 1: Asakusa." }, finishReason: "stop", visibleParts: [] }); } },
     titles

@@ -48,110 +48,25 @@ CREATE INDEX IF NOT EXISTS hatch_conversation_events_turn_idx
 CREATE INDEX IF NOT EXISTS hatch_conversation_events_asset_idx
   ON hatch_conversation_events USING GIN (payload jsonb_path_ops)
   WHERE event_type IN ('conversation.model_message', 'message.created');
-CREATE TABLE IF NOT EXISTS hatch_conversation_usage (
-  scope_key TEXT PRIMARY KEY,
-  event_count BIGINT NOT NULL,
-  total_bytes BIGINT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS hatch_runtime_store_migrations (
-  version TEXT PRIMARY KEY,
-  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-`;
-
-const POSTGRES_CONVERSATION_USAGE_MIGRATION = `
-WITH claimed_migration AS (
-  INSERT INTO hatch_runtime_store_migrations (version)
-  VALUES ('conversation-usage-v1')
-  ON CONFLICT (version) DO NOTHING
-  RETURNING version
-), historical_usage AS (
-  SELECT
-    'conversation:' || conversation_id AS scope_key,
-    COUNT(*)::bigint AS event_count,
-    COALESCE(SUM(octet_length(payload::text)), 0)::bigint AS total_bytes
-  FROM claimed_migration
-  CROSS JOIN hatch_conversation_events
-  WHERE claimed_migration.version = 'conversation-usage-v1'
-    AND conversation_id IS NOT NULL
-  GROUP BY conversation_id
-  UNION ALL
-  SELECT
-    'binding:' || substring(conversation_id FROM '^scope:([a-f0-9]{24}):') AS scope_key,
-    COUNT(*)::bigint AS event_count,
-    COALESCE(SUM(octet_length(payload::text)), 0)::bigint AS total_bytes
-  FROM claimed_migration
-  CROSS JOIN hatch_conversation_events
-  WHERE claimed_migration.version = 'conversation-usage-v1'
-    AND conversation_id ~ '^scope:[a-f0-9]{24}:'
-  GROUP BY substring(conversation_id FROM '^scope:([a-f0-9]{24}):')
-  UNION ALL
-  SELECT
-    'global' AS scope_key,
-    COUNT(*)::bigint AS event_count,
-    COALESCE(SUM(octet_length(payload::text)), 0)::bigint AS total_bytes
-  FROM claimed_migration
-  CROSS JOIN hatch_conversation_events
-  WHERE claimed_migration.version = 'conversation-usage-v1'
-  GROUP BY claimed_migration.version
-)
-INSERT INTO hatch_conversation_usage (scope_key, event_count, total_bytes)
-SELECT scope_key, event_count, total_bytes
-FROM historical_usage
-ON CONFLICT (scope_key) DO UPDATE SET
-  event_count = GREATEST(hatch_conversation_usage.event_count, EXCLUDED.event_count),
-  total_bytes = GREATEST(hatch_conversation_usage.total_bytes, EXCLUDED.total_bytes);
 `;
 
 /**
- * $6 is the executor that makes the write, when the write is fenced: `held` locks the Run's row for the rest of
+ * $5 is the executor that makes the write, when the write is fenced: `held` locks the Run's row for the rest of
  * the statement, so a stop either committed first (nothing is written) or waits for this insert to commit.
  */
 const HELD_RUN_SQL = `SELECT 1 AS ok FROM hatch_conversation_runs
-  WHERE id = $2 AND executor_id = $6::text AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+  WHERE id = $2 AND executor_id = $5::text AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
   FOR SHARE`;
 /** An unfenced write never touches the Runs table, which a bare store may not have. */
 const NO_HOLD_SQL = "SELECT 1 AS ok WHERE false";
 const insertEventSql = (held: boolean): string => `
 WITH held AS (
   ${held ? HELD_RUN_SQL : NO_HOLD_SQL}
-), requested AS (
-  SELECT scope_key, event_count, total_bytes, max_events, max_bytes
-  FROM jsonb_to_recordset($5::jsonb) AS limits(
-    scope_key TEXT,
-    event_count BIGINT,
-    total_bytes BIGINT,
-    max_events BIGINT,
-    max_bytes BIGINT
-  )
-  WHERE $6::text IS NULL OR EXISTS (SELECT 1 FROM held)
-), reserved AS (
-  INSERT INTO hatch_conversation_usage (scope_key, event_count, total_bytes)
-  SELECT scope_key, event_count, total_bytes
-  FROM requested
-  WHERE event_count <= max_events AND total_bytes <= max_bytes
-  ON CONFLICT (scope_key) DO UPDATE SET
-    event_count = hatch_conversation_usage.event_count + 1,
-    total_bytes = hatch_conversation_usage.total_bytes + EXCLUDED.total_bytes
-  WHERE hatch_conversation_usage.event_count + 1 <= (
-      SELECT max_events FROM requested WHERE requested.scope_key = hatch_conversation_usage.scope_key
-    )
-    AND hatch_conversation_usage.total_bytes + EXCLUDED.total_bytes <= (
-      SELECT max_bytes FROM requested WHERE requested.scope_key = hatch_conversation_usage.scope_key
-    )
-  RETURNING scope_key
-), quota_assertion AS (
-  SELECT 1 / CASE
-    WHEN COUNT(*) = (SELECT COUNT(*) FROM requested) THEN 1
-    ELSE 0
-  END AS admitted
-  FROM reserved
 )
 INSERT INTO hatch_conversation_events
   (conversation_id, run_id, event_type, payload)
 SELECT $1, $2, $3, $4::jsonb
-FROM quota_assertion
-WHERE admitted = 1 AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM held))
+WHERE $5::text IS NULL OR EXISTS (SELECT 1 FROM held)
 RETURNING id
 `;
 
@@ -194,12 +109,6 @@ export type PostgresStoreOptions = {
   connectionTimeoutMs?: number;
   queryTimeoutMs?: number;
   statementTimeoutMs?: number;
-  maxConversationEvents?: number;
-  maxConversationBytes?: number;
-  maxGlobalEvents?: number;
-  maxGlobalBytes?: number;
-  maxScopeEvents?: number;
-  maxScopeBytes?: number;
   environment?: NodeJS.ProcessEnv;
 };
 
@@ -208,12 +117,6 @@ export class PostgresStore extends RuntimeStore {
 
   private readonly ownsPool: boolean;
   private readonly queryTimeoutMs: number;
-  private readonly maxConversationEvents: number;
-  private readonly maxConversationBytes: number;
-  private readonly maxGlobalEvents: number;
-  private readonly maxGlobalBytes: number;
-  private readonly maxScopeEvents: number;
-  private readonly maxScopeBytes: number;
   private schemaPromise: Promise<void> | undefined;
   private readonly appendChains = new Map<string, Promise<void>>();
   private readonly pendingAppends = new Set<Promise<void>>();
@@ -228,14 +131,9 @@ export class PostgresStore extends RuntimeStore {
     super();
     if (typeof input === "string") {
       this.queryTimeoutMs = 5_000;
-      this.maxConversationEvents = 10_000;
-      this.maxConversationBytes = 64 * 1024 * 1024;
-      this.maxGlobalEvents = 1_000_000;
-      this.maxGlobalBytes = 1024 * 1024 * 1024;
-      this.maxScopeEvents = 100_000;
-      this.maxScopeBytes = 256 * 1024 * 1024;
       this.pool = createPool({
         connectionString: input,
+        max: boundedDatabaseSetting(undefined, process.env.HATCH_RUNTIME_DB_POOL_MAX, 30, "HATCH_RUNTIME_DB_POOL_MAX"),
         connectionTimeoutMillis: 5_000,
         query_timeout: 5_000,
         statement_timeout: 5_000
@@ -246,12 +144,6 @@ export class PostgresStore extends RuntimeStore {
 
     if (isQueryExecutor(input)) {
       this.queryTimeoutMs = 5_000;
-      this.maxConversationEvents = 10_000;
-      this.maxConversationBytes = 64 * 1024 * 1024;
-      this.maxGlobalEvents = 1_000_000;
-      this.maxGlobalBytes = 1024 * 1024 * 1024;
-      this.maxScopeEvents = 100_000;
-      this.maxScopeBytes = 256 * 1024 * 1024;
       this.pool = input;
       this.ownsPool = false;
       return;
@@ -263,54 +155,6 @@ export class PostgresStore extends RuntimeStore {
       environment.HATCH_RUNTIME_DATABASE_QUERY_TIMEOUT_MS,
       5_000,
       "HATCH_RUNTIME_DATABASE_QUERY_TIMEOUT_MS"
-    );
-    this.maxConversationEvents = boundedDatabaseSetting(
-      input.maxConversationEvents,
-      environment.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS,
-      10_000,
-      "HATCH_RUNTIME_MAX_CONVERSATION_EVENTS",
-      1,
-      1_000_000
-    );
-    this.maxConversationBytes = boundedDatabaseSetting(
-      input.maxConversationBytes,
-      environment.HATCH_RUNTIME_MAX_CONVERSATION_BYTES,
-      64 * 1024 * 1024,
-      "HATCH_RUNTIME_MAX_CONVERSATION_BYTES",
-      1_024,
-      1024 * 1024 * 1024
-    );
-    this.maxGlobalEvents = boundedDatabaseSetting(
-      input.maxGlobalEvents,
-      environment.HATCH_RUNTIME_MAX_GLOBAL_EVENTS,
-      1_000_000,
-      "HATCH_RUNTIME_MAX_GLOBAL_EVENTS",
-      1,
-      10_000_000
-    );
-    this.maxGlobalBytes = boundedDatabaseSetting(
-      input.maxGlobalBytes,
-      environment.HATCH_RUNTIME_MAX_GLOBAL_EVENT_BYTES,
-      1024 * 1024 * 1024,
-      "HATCH_RUNTIME_MAX_GLOBAL_EVENT_BYTES",
-      1_024,
-      1024 * 1024 * 1024
-    );
-    this.maxScopeEvents = boundedDatabaseSetting(
-      input.maxScopeEvents,
-      environment.HATCH_RUNTIME_MAX_SCOPE_EVENTS,
-      100_000,
-      "HATCH_RUNTIME_MAX_SCOPE_EVENTS",
-      1,
-      10_000_000
-    );
-    this.maxScopeBytes = boundedDatabaseSetting(
-      input.maxScopeBytes,
-      environment.HATCH_RUNTIME_MAX_SCOPE_EVENT_BYTES,
-      256 * 1024 * 1024,
-      "HATCH_RUNTIME_MAX_SCOPE_EVENT_BYTES",
-      1_024,
-      1024 * 1024 * 1024
     );
 
     if (input.pool) {
@@ -327,7 +171,7 @@ export class PostgresStore extends RuntimeStore {
     }
     this.pool = createPool({
       connectionString,
-      ...(input.maxConnections === undefined ? {} : { max: input.maxConnections }),
+      max: boundedDatabaseSetting(input.maxConnections, environment.HATCH_RUNTIME_DB_POOL_MAX, 30, "HATCH_RUNTIME_DB_POOL_MAX"),
       connectionTimeoutMillis: boundedDatabaseSetting(
         input.connectionTimeoutMs,
         environment.HATCH_RUNTIME_DATABASE_CONNECTION_TIMEOUT_MS,
@@ -357,7 +201,6 @@ export class PostgresStore extends RuntimeStore {
     if (!this.schemaPromise) {
       this.schemaPromise = (async () => {
         await this.query(POSTGRES_CONVERSATION_STORE_SCHEMA);
-        await this.query(POSTGRES_CONVERSATION_USAGE_MIGRATION);
       })();
     }
     await this.schemaPromise;
@@ -464,50 +307,15 @@ export class PostgresStore extends RuntimeStore {
   async appendOn(client: PostgresQueryExecutor, record: StoreEvent, hold?: RunHold): Promise<void> {
       const conversationId = optionalStringField(record, "conversation_id");
       const payload = JSON.stringify(record);
-      const payloadBytes = Buffer.byteLength(payload, "utf8");
-      const reservations: QuotaReservation[] = [{
-        scope_key: "global",
-        event_count: 1,
-        total_bytes: payloadBytes,
-        max_events: this.maxGlobalEvents,
-        max_bytes: this.maxGlobalBytes
-      }];
-      const bindingScopeKey = conversationId ? boundConversationScopeKey(conversationId) : undefined;
-      if (bindingScopeKey) {
-        reservations.push({
-          scope_key: bindingScopeKey,
-          event_count: 1,
-          total_bytes: payloadBytes,
-          max_events: this.maxScopeEvents,
-          max_bytes: this.maxScopeBytes
-        });
-      }
-      if (conversationId) {
-        reservations.push({
-          scope_key: `conversation:${conversationId}`,
-          event_count: 1,
-          total_bytes: payloadBytes,
-          max_events: this.maxConversationEvents,
-          max_bytes: this.maxConversationBytes
-        });
-      }
-      let result: { rows: QueryResultRow[] };
-      try {
-        result = await client.query<QueryResultRow>(insertEventSql(Boolean(hold)), [
-          conversationId,
-          optionalStringField(record, "run_id"),
-          record.type,
-          payload,
-          JSON.stringify(reservations),
-          hold?.heldBy ?? null
-        ]);
-      } catch (error) {
-        if (isQuotaAssertionFailure(error)) throw storageQuotaError(conversationId);
-        throw error;
-      }
+      const result = await client.query<QueryResultRow>(insertEventSql(Boolean(hold)), [
+        conversationId,
+        optionalStringField(record, "run_id"),
+        record.type,
+        payload,
+        hold?.heldBy ?? null
+      ]);
       if (result.rows.length === 0) {
-        if (hold) throw new RunFenced(optionalStringField(record, "run_id") ?? "unknown");
-        throw storageQuotaError(conversationId);
+        throw new RunFenced(optionalStringField(record, "run_id") ?? "unknown");
       }
   }
 
@@ -622,6 +430,14 @@ export class PostgresStore extends RuntimeStore {
     const result = await this.query<PayloadRow>(`${SELECT_PAYLOAD_SQL}WHERE conversation_id = $1 AND run_id = $2
       AND event_type IN ('tool.call', 'skill.activated', 'skill.invoked', 'skill.run') ORDER BY id ASC`, [conversationId, runId]);
     return this.projectRunActivity(conversationId, runId, result.rows.map((row) => eventFromPayload(row.payload)));
+  }
+
+  override async toolNames(conversationId: string): Promise<string[]> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<{ name: string }>(
+      "SELECT DISTINCT payload->>'name' AS name FROM hatch_conversation_events WHERE conversation_id = $1 AND event_type = 'tool.call'", [conversationId]);
+    return result.rows.map((row) => row.name);
   }
 
   async readConversationAssetReference(conversationId: string, assetId: string): Promise<Extract<PersistedContextAttachment, { kind: "asset" }> | undefined> {
@@ -898,27 +714,11 @@ export class PostgresStore extends RuntimeStore {
 export { PostgresStore as PostgresConversationStore, PostgresStore as PostgresRuntimeStore };
 
 type PayloadRow = QueryResultRow & { payload: unknown };
-type ConversationQuotaRow = QueryResultRow & { event_count: string | number; total_bytes: string | number };
-type QuotaReservation = {
-  scope_key: string;
-  event_count: number;
-  total_bytes: number;
-  max_events: number;
-  max_bytes: number;
-};
 
 function isQueryExecutor(value: unknown): value is PostgresQueryExecutor {
   return typeof value === "object"
     && value !== null
     && typeof (value as { query?: unknown }).query === "function";
-}
-
-function numericRowValue(value: string | number | undefined): number {
-  const parsed = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new Error("Postgres Runtime returned an invalid quota value");
-  }
-  return parsed;
 }
 
 function boundedDatabaseSetting(
@@ -939,23 +739,6 @@ function boundedDatabaseSetting(
 function optionalStringField(event: StoreEvent, field: "conversation_id" | "run_id"): string | null {
   const value = (event as Record<string, unknown>)[field];
   return typeof value === "string" ? value : null;
-}
-
-function boundConversationScopeKey(conversationId: string): string | undefined {
-  const match = conversationId.match(/^scope:([a-f0-9]{24}):/);
-  return match?.[1] ? `binding:${match[1]}` : undefined;
-}
-
-function isQuotaAssertionFailure(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const value = error as { code?: unknown; message?: unknown };
-  return value.code === "22012" || (typeof value.message === "string" && /division by zero/i.test(value.message));
-}
-
-function storageQuotaError(conversationId: string | null): Error {
-  return new Error(conversationId
-    ? "Conversation storage quota exceeded for this conversation or access binding; start a new conversation or remove old history."
-    : "Runtime global event storage quota exceeded.");
 }
 
 function eventFromPayload(payload: unknown): StoreEvent {

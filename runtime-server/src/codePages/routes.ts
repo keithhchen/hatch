@@ -24,7 +24,7 @@ export async function handleCodePageRoute(req: http.IncomingMessage, res: http.S
   const code = decodeURIComponent(match[1]!);
   res.setHeader("cache-control", "no-store");
   try {
-    writeJson(res, 200, match[2] ? await pages.intake(code, await readJsonObject(req), req.headers) : await pages.status(code, req.headers));
+    writeJson(res, 200, match[2] ? await pages.intake(code, await readJsonObject(req)) : await pages.status(code));
   } catch (error) {
     if (!(error instanceof ChatError)) throw error;
     writeJson(res, error.status, { error: { code: error.code, message: error.message } });

@@ -54,10 +54,7 @@ const CHAT_CODES: Record<string, { status: number; type: ErrorType; code: string
   conversation_brief_required: { status: 400, type: "invalid_request_error", code: "task_brief_required" },
   too_large: { status: 413, type: "invalid_request_error", code: "file_too_large" },
   unsupported_type: { status: 415, type: "invalid_request_error", code: "unsupported_file_type" },
-  runtime_run_capacity: { status: 503, type: "service_unavailable", code: "service_unavailable", retryAfter: 5 },
   [USAGE_CAP_EXCEEDED]: { status: 429, type: "insufficient_quota", code: USAGE_CAP_EXCEEDED },
-  authorization_busy: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 },
-  user_authorization_busy: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 }
 };
 
 function fromCode(code: string, status: number, message: string): ApiError | undefined {

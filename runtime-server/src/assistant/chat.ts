@@ -136,8 +136,7 @@ export class AssistantChat implements AssistantHost {
     const scopes: ScopeResolver<AssistantScope> = { resolve: async conversation => scopeOfConversation(conversation) };
     this.runtime = new ChatRuntime<AssistantScope>({
       repository: deps.repository, store: deps.store, scopes, runner: this.runner(),
-      admission: { reserve: () => () => undefined },
-      afterInterrupted: run => { void this.retrier.afterInterrupted(run); },
+            afterInterrupted: run => { void this.retrier.afterInterrupted(run); },
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
       compactionStrategy: deps.compactionStrategy ?? (async () => chatCompactionStrategy(await deps.models.resolve("assistant"), { budget: ASSISTANT_CONTEXT_BUDGET })),

@@ -6,7 +6,7 @@ import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
 
-const POLL_MS = 5000;
+const POLL_MS = 8000;
 const API = "/v1/web-chat/code";
 const REFUSALS = { not_found: "兑换码不存在", not_paid: "尚未支付" };
 const FEED_MS = 2400;
@@ -187,7 +187,7 @@ function Generating({ status, navigate }) {
   const steps = stepStates(visibleSteps(status.steps), status.step);
   const [tick, setTick] = useState(0);
   useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), FEED_MS); return () => clearInterval(timer); }, []);
-  const lines = feedWindow(feedPool({ activity: status.activity, steps, step: status.step }), tick);
+  const lines = feedWindow(feedPool({ steps, step: status.step }), tick);
   return <Card><Header product={status.product} creator={status.creator} website={status.website} /><div className="code-page__wait">
     <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>报告正在生成</span></div>
     {steps.length ? <ol className="code-page__steps">{steps.map(step => <li key={step.id} className={`code-page__step code-page__step--${step.state}`} aria-current={step.state === "now" ? "step" : undefined}>

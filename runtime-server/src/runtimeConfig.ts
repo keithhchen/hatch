@@ -10,9 +10,6 @@ export type RuntimeConfig = {
   host: string;
   insecureLocalMode: boolean;
   helloTimeoutMs: number;
-  maxPendingTurnAuthorizations: number;
-  maxPendingTurnAuthorizationsPerUser: number;
-  maxActiveRunsGlobal: number;
   maxSocketBufferedBytes: number;
   maxConsumerBufferedBytes: number;
   connectionHeartbeatMs: number;
@@ -41,22 +38,6 @@ export function readRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfig
   const runtimeDatabaseUrl = environment.HATCH_RUNTIME_DATABASE_URL?.trim();
   const runtimeHost = environment.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   const helloTimeoutMs = runtimeClientHelloTimeoutMs(environment.HATCH_RUNTIME_HELLO_TIMEOUT_MS);
-  const maxPendingTurnAuthorizations = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS",
-    environment.HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS,
-    16
-  );
-  const maxPendingTurnAuthorizationsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS_PER_USER,
-    4
-  );
-  const maxActiveRunsGlobal = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL",
-    environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL,
-    16,
-    10_000
-  );
   const maxSocketBufferedBytes = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES",
     environment.HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES,
@@ -145,9 +126,6 @@ export function readRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfig
     host: runtimeHost,
     insecureLocalMode,
     helloTimeoutMs,
-    maxPendingTurnAuthorizations,
-    maxPendingTurnAuthorizationsPerUser,
-    maxActiveRunsGlobal,
     maxSocketBufferedBytes,
     maxConsumerBufferedBytes,
     connectionHeartbeatMs,
@@ -228,57 +206,6 @@ function runtimeDurationMs(
     throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
   }
   return parsed;
-}
-
-export class CapacityGate {
-  private pending = 0;
-
-  constructor(private readonly capacity: number, optionName: string) {
-    if (!Number.isSafeInteger(capacity) || capacity < 1) {
-      throw new Error(`${optionName} must be a positive safe integer`);
-    }
-  }
-
-  tryAcquire(): (() => void) | undefined {
-    if (this.pending >= this.capacity) return undefined;
-    this.pending += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.pending -= 1;
-    };
-  }
-}
-
-export class KeyedCapacityGate {
-  private readonly pending = new Map<string, number>();
-
-  constructor(private readonly capacityPerKey: number, optionName: string) {
-    if (!Number.isSafeInteger(capacityPerKey) || capacityPerKey < 1) {
-      throw new Error(`${optionName} must be a positive safe integer`);
-    }
-  }
-
-  tryAcquire(key: string): (() => void) | undefined {
-    const current = this.pending.get(key) ?? 0;
-    if (current >= this.capacityPerKey) return undefined;
-    this.pending.set(key, current + 1);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const next = (this.pending.get(key) ?? 1) - 1;
-      if (next <= 0) this.pending.delete(key);
-      else this.pending.set(key, next);
-    };
-  }
-}
-
-export function combineCapacityReleases(...releases: Array<() => void>): () => void {
-  return () => {
-    for (const release of releases) release();
-  };
 }
 
 export function once(release: () => void): () => void {

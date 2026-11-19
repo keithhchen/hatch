@@ -1,6 +1,6 @@
 import type http from "node:http";
 import type { AccessCodes, Activation } from "../accessCodes/accessCodes.js";
-import { payerIp as payerIpOf } from "../accessCodes/rateLimit.js";
+import { payerIp as payerIpOf } from "./payerIp.js";
 import type { AgentCorpusResolverLike } from "../agentCorpus.js";
 import type { ProductCapabilities } from "../agentBox/capabilities.js";
 import { log } from "../observability/log.js";

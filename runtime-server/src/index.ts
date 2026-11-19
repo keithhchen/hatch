@@ -48,7 +48,7 @@ import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { ChatError, principalKey } from "./chat/principal.js";
 import { GuestAwareIdentityResolver, GuestTokens } from "./guestToken.js";
 import { GuestCarryOver, HttpLibrary, RetryingLibrary, type Library } from "./chat/library.js";
-import type { PrincipalLimits, RunAdmission } from "./chat/chatService.js";
+import type { PrincipalLimits } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
 import { SelfBinder } from "./chat/selfBinding.js";
 import type { ChatGateway } from "./chat/gateway.js";
@@ -59,6 +59,7 @@ import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js"
 import { accountPrincipal } from "./chat/principal.js";
 import { RestartRetrier } from "./chat/restartRetry.js";
 import { TASK_START_MESSAGE_CONTENT, clientMessageInputDigest } from "./protocol.js";
+import { CodeConversations } from "./codePages/reconciler.js";
 import { CodePages } from "./codePages/codePages.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
@@ -108,7 +109,7 @@ import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdo
 import { log } from "./observability/log.js";
 import { startObservability } from "./observability/start.js";
 import {
-  CapacityGate, KeyedCapacityGate, combineCapacityReleases, once, readRuntimeConfig,
+  readRuntimeConfig,
   DEFAULT_MAX_CONTACT_MESSAGES, clientToolTimeoutMs
 } from "./runtimeConfig.js";
 import {
@@ -199,10 +200,6 @@ export type RuntimeServerOptions = {
   legacyHmacSecret?: string;
   /** Deadline for an accepted socket to complete authenticated hello setup. */
   clientHelloTimeoutMs?: number;
-  /** Global cap on concurrent per-turn Registry authorization checks. */
-  maxPendingTurnAuthorizations?: number;
-  /** Per-user cap on concurrent per-turn Registry authorization checks. */
-  maxPendingTurnAuthorizationsPerUser?: number;
   /** Origins that may use a browser session cookie on a WebSocket upgrade or a state-changing request. */
   allowedOrigins?: string[];
   /** Limits checked before a customer's message becomes a Run. By default each contact may send `maxContactMessages` to a Product. */
@@ -233,9 +230,6 @@ export type RuntimeServerOptions = {
   hatchPay?: HatchPay;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
-  /** Pending and active runs admitted for one authenticated user. */
-  /** Pending and active runs admitted across the Runtime process. */
-  maxActiveRunsGlobal?: number;
   /** Ping interval used to reap connections that no longer answer. */
   connectionHeartbeatMs?: number;
   /** Maximum time a ready connection may receive no client messages. */
@@ -340,7 +334,7 @@ export async function createRuntimeServerFromEnvironment(
   // Access codes and, when fully configured, WeChat Pay.
   const hatchPay = conversationStore instanceof PostgresStore ? await openHatchPay({ pool: conversationStore.pool, environment, ...agentCorpusResolver ? { corpora: agentCorpusResolver } : {} }) : undefined;
   // The access code gate reads the codes through the limiter that counts a client's failed attempts by its address.
-  const accessGate = productCapabilities ? new AccessGate(productCapabilities, hatchPay ? (headers) => hatchPay.accessCodesFor(headers ?? {}) : undefined) : undefined;
+  const accessGate = productCapabilities ? new AccessGate(productCapabilities, hatchPay?.codes) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -363,7 +357,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(kimiHosted ? { kimiHosted } : {}),
     ...(accessGate ? { accessGate } : {}),
     ...(productCapabilities ? { productCapabilities } : {}),
-    ...(hatchPay ? { accessCodes: hatchPay.codes, accessCodesFor: hatchPay.accessCodesFor, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
+    ...(hatchPay ? { accessCodes: hatchPay.codes, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -372,10 +366,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(registryUrl && runtimeRegistryToken ? { connectionDirectory: new RegistryConnectionDirectory({ registryUrl, serviceToken: runtimeRegistryToken, timeoutMs: registryAuthorizationTimeoutMs(environment) }) } : {}),
     clientToolTimeoutMs: config.clientToolTimeoutMs,
     clientHelloTimeoutMs: config.helloTimeoutMs,
-    maxPendingTurnAuthorizations: config.maxPendingTurnAuthorizations,
-    maxPendingTurnAuthorizationsPerUser: config.maxPendingTurnAuthorizationsPerUser,
     allowedOrigins: config.allowedOrigins,
-    maxActiveRunsGlobal: config.maxActiveRunsGlobal,
     maxSocketBufferedBytes: config.maxSocketBufferedBytes,
     maxConsumerBufferedBytes: config.maxConsumerBufferedBytes,
     connectionHeartbeatMs: config.connectionHeartbeatMs,
@@ -414,18 +405,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(helloTimeoutMs) || helloTimeoutMs < 1) {
     throw new Error("clientHelloTimeoutMs must be a positive safe integer");
   }
-  const turnAuthorizationGate = new CapacityGate(
-    options.maxPendingTurnAuthorizations ?? 16,
-    "maxPendingTurnAuthorizations"
-  );
-  const turnAuthorizationPerUserGate = new KeyedCapacityGate(
-    options.maxPendingTurnAuthorizationsPerUser ?? 4,
-    "maxPendingTurnAuthorizationsPerUser"
-  );
-  const activeRunGate = new CapacityGate(
-    options.maxActiveRunsGlobal ?? 16,
-    "maxActiveRunsGlobal"
-  );
   const connectionHeartbeatMs = options.connectionHeartbeatMs ?? 30_000;
   if (!Number.isSafeInteger(connectionHeartbeatMs) || connectionHeartbeatMs < 1) {
     throw new Error("connectionHeartbeatMs must be a positive safe integer");
@@ -495,14 +474,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (options.siteResearch) for (const definition of options.siteResearch.definitions()) toolRegistry.set(definition.name, definition);
   const parts: PartsReader = chatAssets ?? new TextPartsReader();
 
-  const admission: RunAdmission = {
-    reserve(principal) {
-      const releaseGlobal = activeRunGate.tryAcquire();
-      if (!releaseGlobal) throw new ChatError("runtime_run_capacity", "Hatch is already running the maximum number of tasks. Try again shortly.", 503);
-      // No per-account cap: one account may run as many tasks at once as the Runtime has room for.
-      return once(releaseGlobal);
-    }
-  };
   const scopes: ScopeResolver<SessionBinding> = {
     // A Run this process did not start (taken over after a restart) is rebuilt from its conversation.
     async resolve(conversation, signal) {
@@ -574,7 +545,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     store: conversationStore,
     runner,
     scopes,
-    admission,
     limits: options.principalLimits ?? new SentMessageLimits(conversationRepository, options.maxContactMessages ?? DEFAULT_MAX_CONTACT_MESSAGES),
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     ...(options.compactionStrategy
@@ -596,8 +566,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       model: options.titleModel ?? roleTitleModel(models),
       skip: async conversationId => Boolean(await artifact?.reports.get(conversationId))
     }),
-    afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); },
-    afterReply: (run) => { void deliverableFollowups?.afterReply(run); },
+    afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); codeConversations?.nudge(); },
+    afterReply: (run) => { void deliverableFollowups?.afterReply(run); codeConversations?.nudge(); },
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
@@ -605,7 +575,11 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const restartRetrier = new RestartRetrier({
     pollMs: options.restartRetryPollMs,
     repository: conversationRepository,
-    skip: async (conversationId) => Boolean(await artifact?.reports.get(conversationId)),
+    skip: async (conversationId) => {
+      if (await artifact?.reports.get(conversationId)) return true;
+      const conversation = await conversationRepository.getConversation(conversationId);
+      return Boolean(conversation && await options.accessGate?.required(conversation.productId));
+    },
     start: async (run, key, runId) => {
       const conversation = await conversationRepository.getConversation(run.conversationId);
       if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);
@@ -620,6 +594,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const deliverableFollowups = options.productCapabilities && agentBox ? new DeliverableFollowups({
     capabilities: options.productCapabilities, repository: conversationRepository,
     prompts: conversationStore instanceof PostgresStore ? new PostgresPrompts(conversationStore.pool) : new FilePrompts(),
+    skip: async conversation => Boolean(await options.accessGate?.required(conversation.productId)),
     hasPage: async conversation => Boolean(await agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt))),
     start: async (conversation, key, content) => {
       const scope = await scopes.resolve(conversation, new AbortController().signal);
@@ -630,18 +605,40 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       });
     }
   }) : undefined;
-  // The page of an access code: its intake starts the Run of the Brief, its status reads that Run and the report.
+  // The page of an access code: its intake starts the Run of the Brief, its status reads where the code's conversation stands.
+  const codeReportUrl = (conversation: ConversationRecord) => agentBox?.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt));
+  const startCodeRun = async (conversation: ConversationRecord, key: string) => {
+    const scope = await scopes.resolve(conversation, new AbortController().signal);
+    return chat.service.submit({
+      principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+      clientMessageId: key, message: async () => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }),
+      digest: clientMessageInputDigest({ content: "", task_start: true }), runId: `run_${randomUUID().replaceAll("-", "")}`,
+      corpusDigest: scope.corpusDigest, requiresLocalTools: false
+    });
+  };
   const codePages = options.accessGate && agentBox && agentCorpusResolver ? new CodePages({
     gate: options.accessGate, corpora: agentCorpusResolver, repository: conversationRepository, store: conversationStore,
     ...Number(process.env.HATCH_PAY_PRICE_FEN) > 0 ? { priceFen: Number(process.env.HATCH_PAY_PRICE_FEN) } : {},
-    reportUrl: conversation => agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt)),
-    start: async (conversation, key) => {
+    reportUrl: async conversation => codeReportUrl(conversation), start: startCodeRun
+  }) : undefined;
+  // Every spent code's conversation ends in a published report or a visible failure (see CodeConversations); it owns what RestartRetrier and DeliverableFollowups do for other Products.
+  const codeConversationPrompts = conversationStore instanceof PostgresStore ? new PostgresPrompts(conversationStore.pool) : new FilePrompts();
+  const codeConversations = options.accessCodes && options.accessGate && agentBox ? new CodeConversations({
+    codes: options.accessCodes, repository: conversationRepository, reportUrl: async conversation => codeReportUrl(conversation), start: startCodeRun,
+    retry: async (conversation, _run, key) => {
       const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.retry({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        key, runId: `run_${randomUUID().replaceAll("-", "")}`, corpusDigest: scope.corpusDigest, requiresLocalTools: false
+      });
+    },
+    followup: async (conversation, key) => {
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      const content = await codeConversationPrompts.get("deliverable-followup");
       return chat.service.submit({
         principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
-        clientMessageId: key, message: async () => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }),
-        digest: clientMessageInputDigest({ content: "", task_start: true }), runId: `run_${randomUUID().replaceAll("-", "")}`,
-        corpusDigest: scope.corpusDigest, requiresLocalTools: false
+        clientMessageId: key, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
+        runId: `run_${randomUUID().replaceAll("-", "")}`, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
       });
     }
   }) : undefined;
@@ -661,9 +658,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     reports: artifact.reports, lifecycle: artifact.lifecycle,
     start: (record, runId) => startArtifactRun(record, runId, ARTIFACT_RETRY_MESSAGE, `artifact-retry-${runId}`)
   }) : undefined;
-  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); restartRetrier.start(); }).catch(() => undefined);
+  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); restartRetrier.start(); codeConversations?.start(); }).catch(() => undefined);
   const edge: ChatEdge = {
-    chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
+    chat, parts, chatAssets,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
     creatorToolControlPlane: options.creatorToolControlPlane,
     ...(options.accessGate ? { accessGate: options.accessGate } : {}),
@@ -819,6 +816,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     // Runs are handed off, not failed: another instance continues them.
     artifactRetrier?.stop();
     restartRetrier.stop();
+    codeConversations?.stop();
     await chat.stop();
     await conversationStore.close();
     await conversationRepository.close();

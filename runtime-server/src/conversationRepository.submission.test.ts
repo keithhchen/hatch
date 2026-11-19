@@ -93,39 +93,6 @@ for (const backend of ["memory", "file"] as const) {
   });
 }
 
-test("local quota failure rolls back all acceptance state and usage; retry after failure is accepted once", async (t) => {
-  const previous = process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS;
-  t.after(() => { if (previous === undefined) delete process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS; else process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS = previous; });
-  process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS = "1";
-  const authority = new LocalRuntimeAuthority();
-  const repository = new InMemoryConversationRepository(authority);
-  const store = new RuntimeStore(authority);
-  await repository.createConversation(conversation);
-  await assert.rejects(repository.acceptSubmission(input), /quota exceeded/);
-  assert.deepEqual(await repository.listRuns(id), []);
-  assert.deepEqual(await store.readEvents(), []);
-  process.env.HATCH_RUNTIME_MAX_CONVERSATION_EVENTS = "2";
-  assert.equal((await repository.acceptSubmission(input)).created, true);
-  assert.equal((await repository.acceptSubmission(input)).created, false);
-});
-
-for (const scope of ["GLOBAL", "SCOPE", "CONVERSATION"] as const) {
-  test(`local acceptance honors the shared ${scope} byte quota setting without partial state`, async (t) => {
-    const setting = `HATCH_RUNTIME_MAX_${scope}_${scope === "CONVERSATION" ? "BYTES" : "EVENT_BYTES"}`;
-    const previous = process.env[setting];
-    t.after(() => { if (previous === undefined) delete process.env[setting]; else process.env[setting] = previous; });
-    process.env[setting] = "1024";
-    const authority = new LocalRuntimeAuthority();
-    const repository = new InMemoryConversationRepository(authority);
-    const store = new RuntimeStore(authority);
-    await repository.createConversation(conversation);
-    await assert.rejects(repository.acceptSubmission({ ...input, canonicalUser: { role: "user", content: "x".repeat(2048) } }), /quota exceeded/);
-    assert.deepEqual(await repository.listRuns(id), []);
-    assert.deepEqual(await store.readEvents(), []);
-    assert.equal((await repository.acceptSubmission(input)).created, true);
-  });
-}
-
 async function child(code: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const process = spawn(globalThis.process.execPath, ["--input-type=module", "-e", code], { stdio: ["ignore", "pipe", "pipe"] });
@@ -207,8 +174,8 @@ async function withPostgres(body: (pool: Pool, options: { connectionString: stri
   }
 }
 
-test("real PG: shared quota race admits one conversation; binding, archives and orphan runs remain fail-closed", { skip: !databaseUrl }, async () => withPostgres(async (pool) => {
-  const store = new PostgresStore({ pool, maxScopeEvents: 2 });
+test("real PG: binding, archives and orphan runs remain fail-closed", { skip: !databaseUrl }, async () => withPostgres(async (pool) => {
+  const store = new PostgresStore(pool);
   const repository = new PostgresConversationRepository(pool);
   repository.bindSubmissionStore(store);
   await repository.createConversation(conversation);
@@ -221,23 +188,9 @@ test("real PG: shared quota race admits one conversation; binding, archives and 
   await assert.rejects(repository.acceptSubmission(input), { code: "submission_not_accepted" });
   assert.equal(await store.readSubmissionReceipt(id, "run"), undefined);
   assert.deepEqual(await store.readEvents(), []);
-  const otherId = `${id}-other`;
-  await repository.createConversation({ ...conversation, id: otherId, publicId: "other" });
-  const attempts = [id, otherId].map((conversationId, n) => ({ ...input,
-    run: { ...input.run, conversationId, id: `new-${n}`, clientMessageId: `new-${n}` } }));
-  const results = await Promise.allSettled(attempts.map((attempt) => repository.acceptSubmission(attempt)));
-  assert.equal(results.filter((row) => row.status === "fulfilled").length, 1);
-  const rejected = results.find((row) => row.status === "rejected");
-  assert.ok(rejected?.status === "rejected");
-  assert.match(String(rejected.reason), /quota exceeded/);
-  const loser = attempts[results.findIndex((row) => row.status === "rejected")]!;
-  assert.equal(await repository.getRunByClientMessageId(loser.run.conversationId, loser.run.clientMessageId), undefined);
-  assert.equal(await store.readSubmissionReceipt(loser.run.conversationId, loser.run.id), undefined);
-  assert.equal((await store.readEvents()).length, 2);
-  assert.ok((await pool.query("SELECT event_count FROM hatch_conversation_usage")).rows.every((row) => Number(row.event_count) === 2));
 }));
 
-test("real PG: each failed transaction rolls back run, canonical user, journal and all three quota scopes", { skip: !databaseUrl }, async () => withPostgres(async (pool) => {
+test("real PG: each failed transaction rolls back run, canonical user and journal", { skip: !databaseUrl }, async () => withPostgres(async (pool) => {
   const store = new PostgresStore(pool);
   const repository = new PostgresConversationRepository(pool);
   repository.bindSubmissionStore(store);
@@ -246,8 +199,7 @@ test("real PG: each failed transaction rolls back run, canonical user, journal a
   const baseline = async () => ({
     runs: (await pool.query("SELECT * FROM hatch_conversation_runs")).rows,
     events: (await pool.query("SELECT * FROM hatch_conversation_events")).rows,
-    journal: (await pool.query("SELECT * FROM hatch_conversation_journal ORDER BY cursor")).rows,
-    usage: (await pool.query("SELECT * FROM hatch_conversation_usage ORDER BY scope_key")).rows
+    journal: (await pool.query("SELECT * FROM hatch_conversation_journal ORDER BY cursor")).rows
   });
   const before = await baseline();
   for (const [table, condition] of [
@@ -264,21 +216,14 @@ test("real PG: each failed transaction rolls back run, canonical user, journal a
     assert.deepEqual(await baseline(), before);
     await pool.query(`DROP TRIGGER fail_submission ON ${table}`);
   }
-  const limited = new PostgresStore({ pool, maxConversationEvents: 1 });
-  repository.bindSubmissionStore(limited);
-  await assert.rejects(repository.acceptSubmission(input), /quota exceeded/);
-  assert.deepEqual(await baseline(), before, "failure on queued event rolls back the canonical event's reservation too");
   repository.bindSubmissionStore(store);
   assert.equal((await repository.acceptSubmission(input)).created, true);
-  const usage = (await pool.query("SELECT * FROM hatch_conversation_usage ORDER BY scope_key")).rows;
-  assert.equal(usage.length, 3);
-  assert.ok(usage.every((row) => Number(row.event_count) === 2));
   const after = await baseline();
   assert.equal((await repository.acceptSubmission(input)).created, false);
   assert.deepEqual(await baseline(), after);
 }));
 
-test("real PG: concurrent same ID, lost COMMIT acknowledgement and fresh pool receipt do not replay or reserve twice", { skip: !databaseUrl }, async () => withPostgres(async (pool, options) => {
+test("real PG: concurrent same ID, lost COMMIT acknowledgement and fresh pool receipt do not replay", { skip: !databaseUrl }, async () => withPostgres(async (pool, options) => {
   let loseCommit = true;
   const transactionStatements: string[] = [];
   const executor = {
@@ -325,6 +270,5 @@ test("real PG: concurrent same ID, lost COMMIT acknowledgement and fresh pool re
     assert.equal(new Set(accepts.map((row) => row.run.id)).size, 1);
     assert.equal((await reopened.listRuns(id)).length, 2);
     assert.equal((await reopenedStore.readConversation(id)).length, 2);
-    assert.ok((await pool.query("SELECT event_count FROM hatch_conversation_usage")).rows.every((row) => Number(row.event_count) === 4));
   } finally { await reopenedPool.end(); }
 }));

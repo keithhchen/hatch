@@ -33,8 +33,7 @@ async function cluster() {
   const store = new RuntimeStore(authority);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "restart" });
   const instance = (runner: TurnRunner<object>) => new ChatRuntime<object>({
-    repository, store, runner, scopes: { resolve: async () => ({}) }, admission: { reserve: () => () => undefined },
-    toolTimeoutMs: 60_000, leaseMs: 60_000, sweepMs: 60_000, toolPollMs: 15,
+    repository, store, runner, scopes: { resolve: async () => ({}) },     toolTimeoutMs: 60_000, leaseMs: 60_000, sweepMs: 60_000, toolPollMs: 15,
     // The compaction strategy is irrelevant here: nothing is large.
     compactionStrategy: () => ({ wants: () => false, tokensOf: () => 0, policy: { prune: 1e9, cacheTtlMs: 1, maxOverflowRetries: 2, timeoutMs: 1000 } }) as never
   });
