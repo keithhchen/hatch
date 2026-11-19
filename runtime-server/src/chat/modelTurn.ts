@@ -75,6 +75,8 @@ export type TurnProfile = {
   turnReminder?: (now: Date) => string;
   /** This Run's tool budget, when it differs from a chat reply's. */
   toolCallLimit?: { max: number; uncounted: string[] };
+  /** Load-test replay: the recording this turn plays in place of a model call (see loadTestReplay/). */
+  replay?: RunContext["replay"];
 };
 
 /**
@@ -329,6 +331,7 @@ async function runModelTurnInternal(
       ...(profile?.liveState ? { liveState: profile.liveState } : {}),
       ...(profile?.turnReminder ? { turnReminder: profile.turnReminder } : {}),
       ...(profile?.toolCallLimit ? { toolCallLimit: profile.toolCallLimit } : {}),
+      ...(profile?.replay ? { replay: profile.replay } : {}),
       ...(profile?.ownPrompt ? { ownPrompt: true } : {}),
       ...(profile?.mayStaySilent ? { mayStaySilent: true } : {}),
       briefSnapshot,

@@ -68,6 +68,23 @@ export class AgentBoxMode {
     return { extraTools: [...BOX_TOOLS], tools: owner.guest ? this.guestRunner() : this.runner({ productId: owner.productId, buyer: owner.userId }, owner.email) };
   }
 
+  /** After a publish has succeeded and without waiting for it: the report email never delays or fails the tool. */
+  private announce(published: { page_id: string; url: string }, email: ReportEmailContext | undefined): { page_id: string; url: string } {
+    const { reportEmail } = this.deps;
+    if (reportEmail && email?.recipient) void reportEmail.notify({ ...email, recipient: email.recipient, pageId: published.page_id, reportUrl: published.url });
+    return published;
+  }
+
+  /**
+   * A report that is already bytes, published as `publish_html` would: saved as the buyer's file, a page row, a signed link, the report email.
+   * For the load-test replay only, whose recorded report has no box to be saved from.
+   */
+  async publishBytes(owner: { productId: string; userId: string }, email: ReportEmailContext | undefined, name: string, html: Buffer, title: string): Promise<{ page_id: string; url: string }> {
+    const scope = { kind: "buyer" as const, productId: owner.productId, userId: owner.userId };
+    const saved = await this.deps.files.save(scope, name, html);
+    return this.announce(await this.deps.pages.publish(scope, saved.id, title), email);
+  }
+
   private owns = (raw: unknown) => typeof raw === "string" && (raw === this.deps.workDir || raw.startsWith(`${this.deps.workDir}/`));
 
   private guestRunner(): BoxToolRunner {
@@ -75,7 +92,8 @@ export class AgentBoxMode {
   }
 
   private runner(owner: BoxOwner, email?: ReportEmailContext): BoxToolRunner {
-    const { boxes, workDir, pdf, files, pages, reportEmail } = this.deps;
+    const { boxes, workDir, pdf, files, pages } = this.deps;
+    const announce = (published: { page_id: string; url: string }, to: ReportEmailContext | undefined) => this.announce(published, to);
     const scope = { kind: "buyer" as const, productId: owner.productId, userId: owner.buyer };
     let workspace: Promise<Workspace> | undefined;
     // The box is opened on the first call that needs it, once per turn.
@@ -99,12 +117,7 @@ export class AgentBoxMode {
             }
             case "publish_html": {
               if (typeof args.file_id !== "string" || typeof args.title !== "string") throw new BoxToolError("file_id and title are strings.");
-              const published = await pages.publish(scope, args.file_id, args.title);
-              // After the publish has succeeded and without waiting for it: the email never delays or fails the tool.
-              if (reportEmail && email?.recipient) {
-                void reportEmail.notify({ ...email, recipient: email.recipient, pageId: published.page_id, reportUrl: published.url });
-              }
-              return published;
+              return await announce(await pages.publish(scope, args.file_id, args.title), email);
             }
             default: throw new Error(`No box tool: ${name}`);
           }

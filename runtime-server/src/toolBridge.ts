@@ -41,7 +41,7 @@ export class ToolBridge {
         const authorization = authorizeToolCall({ name: tool.model?.name ?? tool.name, description: "", supportedClients: tool.supportedClients }, this.clientOf());
         if (!authorization.allowed) throw Object.assign(new Error(authorization.error.message), { code: authorization.error.code });
       }
-      return this.serverTools.execute(request.name, parsed, request.signal);
+      return this.serverTools.execute(request.name, parsed, request.signal, request.toolCallId);
     }
 
     requireClientToolEnabled(request.clientTools, request.name as ClientToolName);

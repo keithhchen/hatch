@@ -1,3 +1,4 @@
+import { ModelProfileError } from "./errors/modelProfile.js";
 import { UpstreamError } from "./errors/upstream.js";
 import {
   Agent,
@@ -163,8 +164,10 @@ export class PiAgentRuntime implements AgentRuntime {
     ctx.abortSignal?.throwIfAborted();
     const profile = await this.options.models.resolve(this.options.role ?? "chat", { productId: ctx.productId });
     ctx.abortSignal?.throwIfAborted();
-    const model = createPiModel({ profile, env: this.options.env });
-    const stallGuarded = withStallGuard(createPiStreamFn({ profile, env: this.options.env }), this.options.stall ?? profile.stall);
+    // `ctx.replay` is set only for a Product with the load_test_replay capability, and only the `replay` profile reads it. Replayed tools beside a real model would be a mixed result nobody asked for.
+    if (ctx.replay && profile.family !== "replay") throw new ModelProfileError(`Product ${ctx.productId} has the load_test_replay capability, so its model must be the replay profile (it is ${profile.name})`, { productId: ctx.productId, profile: profile.name });
+    const model = createPiModel({ profile, env: this.options.env, replay: ctx.replay });
+    const stallGuarded = withStallGuard(createPiStreamFn({ profile, env: this.options.env, replay: ctx.replay }), this.options.stall ?? profile.stall);
     // A joining message cuts a streaming model call. A delivery draft is audited whole, so it is never cut.
     const steer = new SteerInterrupt();
     const streamFn = ctx.deliveryWorkflow ? stallGuarded : steer.wrap(stallGuarded);

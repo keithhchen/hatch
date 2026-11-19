@@ -18,6 +18,8 @@ export interface AdapterOptions {
   maxRetryDelayMs?: number;
   maxTokens?: number;
   thinkingLevel?: ThinkingLevel;
+  /** The recording a `replay` profile plays; only a Product with the `load_test_replay` capability is given one. Other families ignore it. */
+  replay?: StreamFn;
 }
 
 export interface AgentAdapterOptions extends AdapterOptions {
@@ -37,6 +39,7 @@ export type ResolvedModelOptions = Endpoint & {
   maxRetryDelayMs?: number;
   maxTokens?: number;
   thinkingLevel: ThinkingLevel;
+  replay?: StreamFn;
 };
 
 /**

@@ -3,6 +3,7 @@ import type { RuntimeCreatorTool } from "./creatorTools.js";
 import type { ToolOutput } from "./assets/toolOutput.js";
 import type { BoxToolRunner } from "./agentBox/tools.js";
 import type { SiteToolRunner } from "./siteTools/tools.js";
+import type { ReplayTools } from "./loadTestReplay/tools.js";
 import { assertBoundedJsonValue, readBoundedJsonObject, readBoundedResponseText } from "./boundedResponse.js";
 
 type McpServerConfig = {
@@ -21,6 +22,7 @@ export class ServerToolExecutor {
   private artifact?: HostToolRunner;
   private box?: BoxToolRunner;
   private site?: SiteToolRunner;
+  private replay?: ReplayTools;
   private observer?: (name: string, args: Record<string, unknown>) => void;
 
   constructor(private readonly timeoutMs = 120000) {}
@@ -72,10 +74,16 @@ export class ServerToolExecutor {
     return result;
   }
 
+  /** Load-test replay (see loadTestReplay/): the Agent's computer, site research, search and attachments answer with a recording. Set only for a Product with the load_test_replay capability. */
+  setReplay(replay: ReplayTools | undefined): void {
+    this.replay = replay;
+  }
+
   async execute(
     name: string,
     args: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    toolCallId?: string
   ): Promise<Record<string, unknown>> {
     const tool = requireTool(name);
     if (tool.locality !== "server") {
@@ -85,6 +93,12 @@ export class ServerToolExecutor {
     const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
     this.observer?.(name, parsedArgs);
     const requestSignal = boundedSignal(signal, this.timeoutMs);
+
+    if (this.replay?.handles(name)) {
+      const result = await this.replay.run(name, parsedArgs, signal, toolCallId);
+      assertBoundedJsonValue(result);
+      return result;
+    }
 
     // /report/ is the report's own files, mounted beside /attachments/: the same read and ls reach either.
     if (this.artifact && (name === "attachments.read" || name === "attachments.ls") && typeof parsedArgs.path === "string" && parsedArgs.path.startsWith("/report/")) {

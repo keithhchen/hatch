@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RUNTIME_LLM_PROFILE_NAMES, llmProfile } from "../llmProfiles.js";
-import { GeminiAdapter, KimiAdapter, OpenAICompatibleAdapter, adapterFor } from "./index.js";
+import { GeminiAdapter, KimiAdapter, OpenAICompatibleAdapter, ReplayAdapter, adapterFor } from "./index.js";
 
 const toolCallHistory = {
   model: "m",
@@ -14,7 +14,7 @@ const toolCallHistory = {
 };
 
 test("every profile names a family that resolves to an adapter", () => {
-  const expected = { kimi: KimiAdapter, "openai-compatible": OpenAICompatibleAdapter, gemini: GeminiAdapter } as const;
+  const expected = { kimi: KimiAdapter, "openai-compatible": OpenAICompatibleAdapter, gemini: GeminiAdapter, replay: ReplayAdapter } as const;
   for (const name of RUNTIME_LLM_PROFILE_NAMES) {
     const profile = llmProfile(name);
     const adapter = adapterFor(profile);

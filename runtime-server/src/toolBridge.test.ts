@@ -84,7 +84,7 @@ test("ToolBridge routes server tools without sending them to the client broker",
   assert.deepEqual(serverCalls, [["api.request", {
     endpoint: "policy.lookup",
     payload: { region: "us" }
-  }, controller.signal]]);
+  }, controller.signal, "call_http"]]);
 });
 
 test("ToolBridge rejects invalid schemas and unavailable local capabilities before dispatch", async () => {
