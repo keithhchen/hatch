@@ -1,4 +1,5 @@
 import type http from "node:http";
+import { isIP } from "node:net";
 import type { AccessCodes, Activation } from "../accessCodes/accessCodes.js";
 import { log } from "../observability/log.js";
 import { readBoundedBytes } from "../http/httpSupport.js";
@@ -126,7 +127,8 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     const ask = this.ask(new URL(`http://x/?${new URLSearchParams({ product: String(body.product ?? ""), email: String(body.email ?? ""), back: String(body.back ?? "") })}`));
     if (!ask) return this.json(res, 400, { error: "链接无效" });
     const openid = typeof body.openid === "string" && body.openid ? body.openid : undefined;
-    const payerIp = String(req.headers["x-forwarded-for"] ?? "").split(",")[0]?.trim();
+    // X-Real-IP is set by the merchant's proxy and passed through unchanged; X-Forwarded-For is rewritten on the way, its first hop the fallback.
+    const payerIp = [req.headers["x-real-ip"], String(req.headers["x-forwarded-for"] ?? "").split(",")[0]].map(v => String(v ?? "").trim()).find(v => isIP(v));
     if (!openid && !payerIp) return this.json(res, 400, { error: "无法获取网络地址" });
 
     const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, payChannel: openid ? "jsapi" : "h5" });

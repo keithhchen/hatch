@@ -136,6 +136,13 @@ run("order creation: only from the merchant's page; H5 sends the first forwarded
     assert.ok(Math.abs(Date.parse(sent.time_expire) - (Date.now() + 15 * 60_000)) < 10_000);
 
     assert.equal((await h.order({})).status, 400, "no forwarded address, no H5 order");
+
+    const lastIp = () => JSON.parse(h.wechat.requests.filter(r => r.url === "/v3/pay/transactions/h5").at(-1)!.body).scene_info.payer_client_ip;
+    assert.equal((await h.order({}, { ...ORIGIN, "x-real-ip": "2001:db8::7", "x-forwarded-for": "203.0.113.9" })).status, 200);
+    assert.equal(lastIp(), "2001:db8::7", "X-Real-IP wins over X-Forwarded-For");
+    assert.equal((await h.order({}, { ...ORIGIN, "x-real-ip": "not-an-ip", "x-forwarded-for": "198.51.100.4" })).status, 200);
+    assert.equal(lastIp(), "198.51.100.4", "an invalid X-Real-IP falls back");
+    assert.equal((await h.order({}, { ...ORIGIN, "x-real-ip": "bogus" })).status, 400, "an invalid address is no address");
   } finally { await h.close(); }
 });
 
