@@ -28,14 +28,13 @@ const CODE = "MSC123456";
 const answers = { name: "A", phone: "13800000000", email: "a@b.co", website: "example.com" };
 const PROGRESS = { steps: [
   { id: "fetch", label: "抓取网站", tools: ["fetch_url"] }, { id: "speed", label: "测速", tools: ["page_speed"] },
-  { id: "write", label: "撰写报告", tools: ["write"] }, { id: "publish", label: "发布", tools: ["publish_html"] }
-] };
+  { id: "write", label: "撰写报告", tools: ["write"] }] };
 
 async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "redeem" | "lookup"> } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-code-pages-"));
   await mkdir(path.join(root, "runtime"), { recursive: true });
   await writeFile(path.join(root, "runtime", "progress.json"), JSON.stringify(PROGRESS));
-  const resolved = { root, digest: "corpus", corpus: { creator: { id: "creator" }, product: { id: PRODUCT, name: "外贸官网获客诊断", brief_spec: AUDIT_SPEC } } };
+  const resolved = { root, digest: "corpus", corpus: { creator: { id: "creator", name: "MSC咨询" }, product: { id: PRODUCT, name: "外贸官网获客诊断", brief_spec: AUDIT_SPEC } } };
   const corpora = { resolveByProduct: async () => resolved } as unknown as AgentCorpusResolverLike;
   const repository = new InMemoryConversationRepository(new LocalRuntimeAuthority());
   const hub = new RunEventHub();
@@ -114,8 +113,9 @@ test("generating: the steps come from the Product's own map and the tools the Ru
   const { pages, world } = await setup();
   await pages.intake(CODE, answers);
   let status = await pages.status(CODE);
-  assert.deepEqual(status.steps?.map((step) => step.label), ["抓取网站", "测速", "撰写报告", "发布"]);
+  assert.deepEqual(status.steps?.map((step) => step.label), ["抓取网站", "测速", "撰写报告"]);
   assert.equal(status.step, -1, "nothing done yet: no invented progress");
+  assert.equal(status.email, "a@b.co");
   world.tools = ["fetch_url", "bash"];
   assert.equal((await pages.status(CODE)).step, 0);
   world.tools = ["fetch_url", "page_speed", "write"];
@@ -128,7 +128,7 @@ test("ready: a published report gives its link", async () => {
   const { pages, world } = await setup();
   await pages.intake(CODE, answers);
   world.report = "https://gethatchapp.com/html/abc?t=sig";
-  assert.deepEqual(await pages.status(CODE), { state: "ready", product: { id: PRODUCT, name: "外贸官网获客诊断" }, report_url: world.report });
+  assert.deepEqual(await pages.status(CODE), { state: "ready", product: { id: PRODUCT, name: "外贸官网获客诊断" }, creator: { name: "MSC咨询" }, website: "example.com", report_url: world.report });
 });
 
 test("failed: a failed Run, or no report after the follow-ups, is a plain failure", async () => {

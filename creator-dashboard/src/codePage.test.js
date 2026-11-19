@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect } from "../server.mjs";
-import { BUYER_FIELDS, PendingIntake, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
+import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 
@@ -58,6 +58,81 @@ test("back from paying, /c/?code= goes to that code's page: any case, trimmed; a
   assert.equal(accessCodeRedirect("/c/", "../../etc"), null);
   assert.equal(accessCodeRedirect("/c/MSC123456", "MSC123456"), null);
   assert.equal(accessCodeRedirect("/chat/product/x", "MSC123456"), null);
+});
+
+test("the pay link also carries the website and the name", () => {
+  const url = new URL(accessCodePayUrl({ productId: PRODUCT, email: "a@b.co", origin: "https://gethatchapp.com", site: " https://x.com ", name: " 王 " }));
+  assert.equal(url.searchParams.get("site"), "https://x.com");
+  assert.equal(url.searchParams.get("name"), "王");
+  assert.equal(url.searchParams.get("product"), PRODUCT);
+});
+
+test("the website is shown as a domain", () => {
+  assert.equal(siteDomain("https://www.Example.com/path?q=1"), "example.com");
+  assert.equal(siteDomain("example.com/a"), "example.com");
+  assert.equal(siteDomain("  "), undefined);
+});
+
+test("the publish step is never shown", () => {
+  const steps = [{ id: "fetch", label: "抓取网站" }, { id: "write", label: "撰写报告" }, { id: "publish", label: "发布" }];
+  assert.deepEqual(visibleSteps(steps).map(step => step.id), ["fetch", "write"]);
+  assert.deepEqual(visibleSteps([{ id: "x", label: "发布" }]), []);
+});
+
+test("the feed shows what the Run really called first, and opens scoring dimensions only as steps advance", () => {
+  const steps = [{}, {}, {}];
+  assert.equal(feedPool({ activity: ["正在打开官网页面"], steps, step: -1 })[0], "正在打开官网页面");
+  const count = step => feedPool({ steps, step }).filter(line => line.startsWith("正在评估")).length;
+  assert.equal(count(-1), 0);
+  assert.ok(count(0) > 0 && count(0) < count(2));
+  assert.equal(count(2), 9);
+  assert.deepEqual(feedWindow(["a", "b", "c", "d"], 3, 3), ["d", "a", "b"]);
+  assert.deepEqual(feedWindow([], 5), []);
+});
+
+// A fake clock: scheduled ticks run when the test says so.
+function clock() {
+  const queue = [];
+  return { schedule: fn => { queue.push(fn); return queue.length; }, cancel: () => {}, pending: () => queue.length, run: async () => { await queue.shift()?.(); } };
+}
+
+test("the poller keeps reading while generating, switches by itself when ready, and stops there", async () => {
+  const time = clock();
+  const answers = [{ state: "generating", step: 0 }, { state: "generating", step: 1 }, { state: "ready" }];
+  const seen = [];
+  const poller = createStatusPoller({ read: async () => answers.shift(), onStatus: status => seen.push(status.state + (status.step ?? "")), onError: () => {}, schedule: time.schedule, cancel: time.cancel });
+  await poller.start();
+  assert.equal(time.pending(), 1);
+  await time.run();
+  await time.run();
+  assert.deepEqual(seen, ["generating0", "generating1", "ready"]);
+  assert.equal(time.pending(), 0, "nothing is scheduled after ready");
+});
+
+test("a status accepted from outside (the intake's answer) starts the polling that the first read had ended", async () => {
+  const time = clock();
+  const seen = [];
+  const poller = createStatusPoller({ read: async () => ({ state: "ready" }), onStatus: status => seen.push(status.state), onError: () => {}, schedule: time.schedule, cancel: time.cancel });
+  poller.accept({ state: "intake" });
+  assert.equal(time.pending(), 0);
+  poller.accept({ state: "generating" });
+  assert.equal(time.pending(), 1);
+  await time.run();
+  assert.deepEqual(seen, ["intake", "generating", "ready"]);
+  assert.equal(time.pending(), 0);
+});
+
+test("a failed read is reported and tried again; a stopped poller does nothing more", async () => {
+  const time = clock();
+  const errors = [];
+  let calls = 0;
+  const poller = createStatusPoller({ read: async () => { calls++; if (calls === 1) throw new Error("net"); return { state: "generating" }; }, onStatus: () => {}, onError: error => errors.push(error.message), schedule: time.schedule, cancel: time.cancel });
+  await poller.start();
+  assert.deepEqual(errors, ["net"]);
+  assert.equal(time.pending(), 1);
+  poller.stop();
+  await time.run();
+  assert.equal(time.pending(), 0);
 });
 
 test("the price is fen shown as yuan with two decimals", () => {
