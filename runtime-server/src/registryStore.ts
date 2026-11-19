@@ -1335,7 +1335,7 @@ export class RegistryStoreTs {
     if (this.pool) {
       await this.pool.query(
         `INSERT INTO creators (id, display_name) VALUES ($1,$2)
-         ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name`,
+         ON CONFLICT (id) DO UPDATE SET display_name=CASE WHEN EXCLUDED.display_name='Creator' THEN creators.display_name ELSE EXCLUDED.display_name END`,
         [corpus.creator_id, corpus.creator_name],
       );
       await this.pool.query(

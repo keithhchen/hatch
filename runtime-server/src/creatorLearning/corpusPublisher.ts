@@ -65,6 +65,15 @@ export class CorpusPublisher {
     return this.publishDefinition({ ...input, corpus, bytes, executionId: null, outputRef });
   }
 
+  /** The name an operator set for this Creator, if any; otherwise the default. */
+  private async publicCreatorName(creatorId: string): Promise<string | undefined> {
+    const pool = this.registry.databasePool();
+    if (!pool) return undefined;
+    const { rows } = await pool.query("SELECT display_name FROM creators WHERE id=$1", [creatorId]);
+    const name = String(rows[0]?.display_name ?? "").trim();
+    return name && name !== "Creator" ? name : undefined;
+  }
+
   private async publishDefinition(input: {
     creatorId: string; productId: string; productName: string; productPromise: string;
     briefSpec?: unknown; force?: boolean; corpus: CorpusOutput; bytes: Buffer;
@@ -95,6 +104,7 @@ export class CorpusPublisher {
     const bundle = await makeRuntimeBundle({
       objectStore: this.objectStore,
       creatorId: input.creatorId,
+      creatorName: await this.publicCreatorName(input.creatorId),
       productId: input.productId,
       productName: input.productName,
       productPromise: input.productPromise,
