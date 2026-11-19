@@ -33,6 +33,7 @@ test("every profile names a family that resolves to an adapter", () => {
       ["kimi-k3.1-pro-highspeed", "kimi"],
       ["deepseek-v4-pro", "openai-compatible"],
       ["deepseek-flash", "openai-compatible"],
+      ["deepseek-flash-thinking", "openai-compatible"],
       ["gemini-4-argon", "gemini"],
       ["gemini-4-carbon", "gemini"],
       ["gemini-4-hydrogen", "gemini"]
@@ -110,4 +111,56 @@ test("a Gemini call named <prefix>:<declared tool> is the declared tool; other n
   const names: string[] = [];
   for await (const event of out) names.push(...(event.message?.content ?? []).map((b) => b.name));
   assert.deepEqual(names, ["creator_grep", "nope:unknown", "creator_read"]);
+});
+
+test("deepseek-flash-thinking sends thinking enabled with reasoning_effort; deepseek-flash stays disabled", () => {
+  const adapter = new OpenAICompatibleAdapter();
+  const on = adapter.normalizePayload(llmProfile("deepseek-flash-thinking"), { model: "deepseek-flash", messages: [] }) as Record<string, unknown>;
+  assert.deepEqual(on.thinking, { type: "enabled" });
+  assert.equal(on.reasoning_effort, "low");
+  const off = adapter.normalizePayload(llmProfile("deepseek-flash"), { model: "deepseek-flash", messages: [] }) as Record<string, unknown>;
+  assert.deepEqual(off.thinking, { type: "disabled" });
+  assert.equal("reasoning_effort" in off, false);
+});
+
+const sse = (...chunks: unknown[]) => new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } });
+const delta = (d: Record<string, unknown>, finish: string | null = null) => ({ id: "c", object: "chat.completion.chunk", model: "deepseek-flash", choices: [{ index: 0, delta: d, finish_reason: finish }] });
+
+test("deepseek-flash-thinking: reasoning_content streams as thinking and is sent back on every assistant message, earlier turns included", async () => {
+  const profile = llmProfile("deepseek-flash-thinking");
+  const adapter = adapterFor(profile);
+  const bodies: Array<Record<string, any>> = [];
+  const replies = [
+    sse(
+      delta({ role: "assistant", reasoning_content: "I should " }),
+      delta({ reasoning_content: "read the page." }),
+      delta({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "read", arguments: "{\"u\":1}" } }] }),
+      delta({}, "tool_calls")
+    )
+  ];
+  const fetchFn = (async (_url: unknown, init: RequestInit) => { bodies.push(JSON.parse(String(init.body))); return replies.shift() ?? sse(delta({ role: "assistant", content: "done" }), delta({}, "stop")); }) as typeof fetch;
+  const resolved = adapter.resolve(profile, { apiKey: "k", fetch: fetchFn });
+  const model = adapter.model(profile, adapter.endpoint(profile, {}));
+  const stream = adapter.streamFn(profile, resolved);
+  const tools = [{ name: "read", description: "r", parameters: { type: "object", properties: { u: { type: "number" } } } }];
+  const user = (text: string) => ({ role: "user", content: text, timestamp: 1 });
+
+  const first = await stream(model as never, { messages: [user("audit")], tools } as never, {} as never);
+  const events: string[] = [];
+  for await (const e of first as AsyncIterable<{ type: string }>) events.push(e.type);
+  const message = await (first as { result(): Promise<any> }).result();
+  assert.ok(events.includes("thinking_delta") && events.includes("thinking_end"));
+  assert.equal(message.content[0].type, "thinking");
+  assert.equal(message.content[0].thinking, "I should read the page.");
+  assert.deepEqual(bodies[0]!.thinking, { type: "enabled" });
+  assert.equal(bodies[0]!.reasoning_effort, "low");
+
+  const done = { role: "assistant", content: [{ type: "thinking", thinking: "wrap up", thinkingSignature: "reasoning_content" }, { type: "text", text: "ok" }], api: "openai-completions", provider: "deepseek", model: "deepseek-flash", usage: message.usage, stopReason: "stop", timestamp: 3 };
+  const toolResult = { role: "toolResult", toolCallId: "call_1", toolName: "read", content: [{ type: "text", text: "page" }], isError: false, timestamp: 2 };
+  const second = await stream(model as never, { messages: [user("audit"), message, toolResult, done, user("again")], tools } as never, {} as never);
+  for await (const _ of second as AsyncIterable<unknown>) { /* drain */ }
+  const sent = bodies[1]!.messages.filter((m: any) => m.role === "assistant");
+  assert.equal(sent[0].reasoning_content, "I should read the page.");
+  assert.equal(sent[0].tool_calls[0].id, "call_1");
+  assert.equal(sent[1].reasoning_content, "wrap up");
 });
