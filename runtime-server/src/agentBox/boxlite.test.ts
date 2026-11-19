@@ -71,6 +71,28 @@ test("four refusals in a row are BoxUnavailable", async () => {
   assert.equal(sdk.runs, 5);
 });
 
+const exit0Unavailable = { exitCode: 0, errorMessage: unavailable503.errorMessage };
+
+test("an exit-0 result with a 503 error and no output never ran: retried, then the success", async () => {
+  const sdk = scripted([{ exitCode: 0 }, exit0Unavailable, { exitCode: 0, output: "ok" }]);
+  const result = await (await boxOf(sdk)).exec("echo ok", { cwd: "/", timeoutSeconds: 5 });
+  assert.equal(result.stdout, "ok");
+  assert.equal(sdk.runs, 3);
+});
+
+test("four exit-0 transport failures in a row are BoxUnavailable", async () => {
+  const sdk = scripted([{ exitCode: 0 }, exit0Unavailable]);
+  await assert.rejects((await boxOf(sdk)).exec("true", { cwd: "/", timeoutSeconds: 5 }), BoxUnavailable);
+  assert.equal(sdk.runs, 5);
+});
+
+test("an exit-0 result with real output and an error message is not run again", async () => {
+  const sdk = scripted([{ exitCode: 0 }, { ...exit0Unavailable, output: "done" }]);
+  const result = await (await boxOf(sdk)).exec("true", { cwd: "/", timeoutSeconds: 5 });
+  assert.equal(result.stdout, "done");
+  assert.equal(sdk.runs, 2);
+});
+
 test("a command that printed output before the transport failure is not run again", async () => {
   const sdk = scripted([{ exitCode: 0 }, { ...unavailable503, output: "half" }]);
   const box = await boxOf(sdk);
