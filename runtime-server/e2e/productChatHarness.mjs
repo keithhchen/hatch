@@ -131,11 +131,17 @@ export async function startStack({ heartbeatMs = 10_000 } = {}) {
   const dashboard = http.createServer(async (request, response) => {
     // /v1/web-chat/conversations... is the Runtime's /v1/conversations... with the session's token.
     const target = `${runtimeUrl}${request.url.replace("/v1/web-chat/conversations", "/v1/conversations")}`;
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const upstream = await fetch(target, { method: request.method, headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
-    response.writeHead(upstream.status, { "content-type": "application/json" });
-    response.end(Buffer.from(await upstream.arrayBuffer()));
+    try {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const upstream = await fetch(target, { method: request.method, headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
+      response.writeHead(upstream.status, { "content-type": "application/json" });
+      response.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch {
+      // The Runtime went away (the stack is closing) while a page's read was in flight: that read fails, the process does not.
+      if (!response.headersSent) response.writeHead(502);
+      response.end();
+    }
   });
   dashboard.on("upgrade", (request, socket, head) => {
     chatWss.handleUpgrade(request, socket, head, browser => {
