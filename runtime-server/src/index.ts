@@ -15,6 +15,7 @@ import { PostgresStore } from "./postgresStore.js";
 import {
   InMemoryConversationRepository,
   PostgresConversationRepository,
+  type ConversationRecord,
   type ConversationRepository
 } from "./conversationRepository.js";
 import { ToolBridge } from "./toolBridge.js";
@@ -34,7 +35,9 @@ import {
   renderSkillsSection,
   visibleSkillsForSession
 } from "./skills.js";
-import { type BriefSpec } from "./brief.js";
+import { briefAnswer, briefEmail, type BriefSpec } from "./brief.js";
+import { readCorpusEmailTemplate } from "./agentBox/reportEmail.js";
+import type { ReportEmailContext } from "./agentBox/tools.js";
 import { createOutputGuardFromEnvironment, PassThroughOutputGuard, type OutputGuard } from "./outputGuard.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
@@ -202,7 +205,7 @@ export type RuntimeServerOptions = {
   /** Report mode: products that offer it, and conversations that are reports. */
   artifact?: ArtifactMode;
   /** The Agent's own computer and the pages it publishes, for the Products that have it. */
-  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles };
+  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
@@ -229,6 +232,21 @@ export type RuntimeServerOptions = {
   /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
   responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "features" | "holdMs" | "keepAliveMs">;
 };
+
+/** Where a conversation's report is mailed, from its Brief's email answer, and what the mail says; undefined when the Brief has none. */
+async function reportEmailContext(conversation: ConversationRecord, binding: SessionBinding, origin = "https://gethatchapp.com"): Promise<ReportEmailContext | undefined> {
+  const recipient = briefEmail(conversation.briefSnapshot);
+  if (!recipient) return undefined;
+  const expert = binding.agentCorpus?.creator.name;
+  return {
+    recipient,
+    chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}`,
+    productName: binding.agentCorpus?.product.name ?? "Hatch",
+    ...expert && expert !== "Expert" ? { expertName: expert } : {},
+    ...briefAnswer(conversation.briefSnapshot, "website") ? { website: briefAnswer(conversation.briefSnapshot, "website")! } : {},
+    ...(template => template ? { template } : {})(await readCorpusEmailTemplate(binding.agentCorpusRoot))
+  };
+}
 
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
@@ -474,7 +492,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         const report = await artifact?.turnFor(turn.conversation, turn.run);
         if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation, report ? "flat" : "messages"));
         if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
-        const box = report ? undefined : await agentBox?.mode.turnFor({ productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX) });
+        const box = report ? undefined : await agentBox?.mode.turnFor({
+          productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX),
+          email: await reportEmailContext(turn.conversation, binding, agentBox.origin)
+        });
         serverTools.setBox(box?.tools);
         const site = report ? undefined : await options.siteResearch?.turnFor(binding.productId);
         serverTools.setSite(site?.tools);

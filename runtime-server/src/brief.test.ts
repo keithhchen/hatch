@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  briefEmail,
   briefSnapshotPromptBlock,
   createBriefSnapshot,
   draftBriefSpecForProduct,
@@ -49,4 +50,16 @@ test("Product Brief draft is deterministic, text-only, and derived from Product 
   assert.equal(draft.fields[0]?.required, true);
   assert.match(draft.fields[0]?.label ?? "", /Decision Coach/);
   assert.match(draft.fields[1]?.label ?? "", /messy evidence/);
+});
+
+test("an email field is validated where the Brief is submitted and read back by briefEmail", () => {
+  const withEmail = { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }, { id: "email", label: "邮箱", required: false }] };
+  const invalid = (value: string) => () => createBriefSnapshot(withEmail, [{ field_id: "goal", value: "x" }, { field_id: "email", value }]);
+  for (const bad of ["not-an-email", "a@b", "a b@c.com", "a@b.com, c@d.com", "<a@b.com>"]) {
+    assert.throws(invalid(bad), (error: unknown) => (error as { code?: string }).code === "brief_answer_invalid", bad);
+  }
+  assert.equal(briefEmail(createBriefSnapshot(withEmail, [{ field_id: "goal", value: "x" }, { field_id: "email", value: " Buyer@Example.com " }])), "Buyer@Example.com");
+  assert.equal(briefEmail(createBriefSnapshot(withEmail, [{ field_id: "goal", value: "x" }])), undefined, "blank is allowed");
+  assert.equal(briefEmail(createBriefSnapshot(spec, [{ field_id: "goal", value: "x" }])), undefined, "a Product without the field");
+  assert.equal(briefEmail(undefined), undefined);
 });

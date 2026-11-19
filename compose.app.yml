@@ -151,6 +151,10 @@ services:
       HATCH_RUNTIME_CHAT_SERVICE_TOKEN: ${HATCH_RUNTIME_CHAT_SERVICE_TOKEN:?set HATCH_RUNTIME_CHAT_SERVICE_TOKEN in /opt/hatch/.env}
       # The Agent's own computer (BoxLite Cloud) for Products with the agent_box capability; off without a key.
       BOXLITE_API_KEY: ${BOXLITE_API_KEY:-}
+      # The report email (Resend): sent when a report page is published to a Brief's email address. Off without a key.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      HATCH_REPORT_EMAIL_FROM: ${HATCH_REPORT_EMAIL_FROM:-}
+      HATCH_REPORT_EMAIL_REPLY_TO: ${HATCH_REPORT_EMAIL_REPLY_TO:-}
       # Site research tools (site_research capability), run by the Runtime itself: each tool is off without its key. Never given to a box.
       PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}

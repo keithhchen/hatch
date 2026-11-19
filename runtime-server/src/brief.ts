@@ -6,6 +6,11 @@ export const MAX_BRIEF_FIELD_LABEL_CHARS = 500;
 export const MAX_BRIEF_ANSWER_CHARS = 32_000;
 export const MAX_BRIEF_ANSWER_TOTAL_CHARS = 128_000;
 
+/** The optional Brief field a Product uses to ask where the report is mailed. */
+export const BRIEF_EMAIL_FIELD_ID = "email";
+const EMAIL_ADDRESS = /^[^\s@<>"',;()\\]+@[^\s@<>"',;()\\]+\.[^\s@<>"',;()\\.]+$/;
+export const isEmailAddress = (value: string): boolean => value.length <= 254 && EMAIL_ADDRESS.test(value);
+
 const FIELD_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 
 export type BriefFieldSpec = {
@@ -147,6 +152,9 @@ export function createBriefSnapshot(
     if (value.length > MAX_BRIEF_ANSWER_CHARS || /[\u0000]/.test(value)) {
       throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is too long or invalid`);
     }
+    if (fieldId === BRIEF_EMAIL_FIELD_ID && value && !isEmailAddress(value)) {
+      throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is not a valid email address`);
+    }
     totalCharacters += value.length;
     answers.set(fieldId, value);
   }
@@ -241,6 +249,17 @@ function normalizeSnapshotTimestamp(value: string): string {
     throw new BriefValidationError("brief_answer_invalid", "BriefSnapshot submitted_at is invalid");
   }
   return timestamp;
+}
+
+/** A conversation's Brief answer to a field, or undefined when the Product has no such field or it was left blank. */
+export function briefAnswer(snapshot: BriefSnapshot | undefined, fieldId: string): string | undefined {
+  return snapshot?.fields.find((field) => field.id === fieldId)?.value?.trim() || undefined;
+}
+
+/** Where this conversation's report is mailed: the Brief's email answer, when valid. */
+export function briefEmail(snapshot: BriefSnapshot | undefined): string | undefined {
+  const value = briefAnswer(snapshot, BRIEF_EMAIL_FIELD_ID);
+  return value && isEmailAddress(value) ? value : undefined;
 }
 
 export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {
