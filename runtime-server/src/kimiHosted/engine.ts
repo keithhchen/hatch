@@ -107,7 +107,8 @@ export class KimiHostedEngine<Scope extends { productId: string; userId: string 
       if (started) {
         const now = await api.getSession(record.sessionId);
         if (now.status === "terminated") throw new KimiHostedError("kimi_session_terminated", "The Kimi session was terminated before it delivered the report.");
-        if (now.status === "idle" && now.stopReason !== "requires_action") return { stopReason: now.stopReason };
+        // The platform's session object carries no stop reason (only the idle event does): idle after running is the end of the turn.
+        if (now.status === "idle" && now.stopReason !== "requires_action") return { stopReason: now.stopReason ?? "end_turn" };
       }
       try {
         for await (const { cursor: next, event } of api.stream(record.sessionId, cursor, turn.signal)) {

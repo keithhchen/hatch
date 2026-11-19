@@ -105,8 +105,9 @@ export class HttpKimiHostedApi implements KimiHostedApi {
     const found: KimiArtifact[] = [];
     let token: string | undefined;
     do {
-      const page = await (await this.call("GET", `/artifacts?session_id=${encodeURIComponent(sessionId)}&page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`)).json() as { items?: Array<{ id: string; name: string; created_at?: string }>; next_page_token?: string };
-      for (const item of page.items ?? []) found.push({ id: item.id, name: item.name, ...item.created_at ? { createdAt: item.created_at } : {} });
+      const page = await (await this.call("GET", `/artifacts?session_id=${encodeURIComponent(sessionId)}&page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`)).json() as { items?: Array<{ id: string; name: string; delivered_at?: string; created_at?: string }>; next_page_token?: string };
+      // The platform stamps an artifact with delivered_at (observed on the real API); created_at is accepted too.
+      for (const item of page.items ?? []) { const at = item.delivered_at ?? item.created_at; found.push({ id: item.id, name: item.name, ...at ? { createdAt: at } : {} }); }
       token = page.next_page_token || undefined;
     } while (token);
     return found;
