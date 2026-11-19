@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { ArrowUpRight, Check } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { WebChatEgg } from "./webChatGate.jsx";
-import { CodeRoute, accessCodePayUrl, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
+import { CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, typedCode } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -86,7 +86,7 @@ function Generating({ status }) {
 }
 
 /** The page of one code. What shows is whatever the server says the code stands at, read again every few seconds while the report is being made. */
-export default function CodePage({ code, request, navigate }) {
+function CodePageBody({ code, request, navigate }) {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const live = useRef(true);
@@ -123,4 +123,11 @@ export default function CodePage({ code, request, navigate }) {
     </div></Card>;
     default: return <Card><p className="code-page__failed" role="alert">生成遇到问题，我们会尽快处理</p></Card>;
   }
+}
+
+/** In WeChat's own browser only the way out is shown, whatever the address. */
+export default function CodePage(props) {
+  return inWeChat(window.navigator.userAgent)
+    ? <main className="code-page__guide"><ArrowUpRight className="code-page__arrow" size={72} strokeWidth={2.5} aria-hidden /><p>请点击右上角 ··· 选择『在浏览器打开』</p></main>
+    : <CodePageBody {...props} />;
 }

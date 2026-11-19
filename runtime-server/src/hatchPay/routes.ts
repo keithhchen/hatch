@@ -39,6 +39,7 @@ const withCode = (back: string, code: string) => { const url = new URL(back); ur
 
 const PAGE_HEAD = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hatch</title>
 <style>body{font:16px/1.6 system-ui,sans-serif;margin:0;padding:64px 24px;text-align:center}.price{font-size:44px;margin:0 0 32px}.btn{display:inline-block;font:inherit;padding:12px 40px;border:0;border-radius:8px;background:#111;color:#fff;text-decoration:none}.btn:disabled{opacity:.5}.alt{display:block;margin-top:20px;color:#555}.code{font:700 32px ui-monospace,monospace;letter-spacing:4px}#err{color:#b00020;margin-top:16px}</style></head><body>`;
+const GUIDE = `<svg width="72" height="72" viewBox="0 0 72 72" style="position:fixed;top:12px;right:16px" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 58C20 36 38 22 58 14M40 12l18 2-4 18"/></svg><p style="margin-top:120px;font-size:20px">请点击右上角 ··· 选择『在浏览器打开』</p>`;
 const page = (body: string, script = "") => `${PAGE_HEAD}${body}${script ? `<script>${script}</script>` : ""}</body></html>`;
 const jsLiteral = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
@@ -52,8 +53,12 @@ export class HatchPay {
       return void res.end("支付暂未开放");
     }
     const route = url.pathname.replace(/^\/hatch-pay\/?/, "/");
+    // The buyer flow is H5 pay in a normal browser, never WeChat's in-app one: every buyer page there is the guide out of it, and no order is made. The notification is WeChat's own call.
+    if (route !== "/notify" && /MicroMessenger/i.test(req.headers["user-agent"] ?? "")) {
+      return req.method === "POST" ? this.json(res, 403, { error: "请在浏览器打开" }) : this.html(res, 200, page(GUIDE));
+    }
     try {
-      if (req.method === "GET" && route === "/") return await this.payPage(req, res, url);
+      if (req.method === "GET" && route === "/")return await this.payPage(req, res, url);
       if (req.method === "GET" && route === "/oauth") return await this.oauth(res, url);
       if (req.method === "POST" && route === "/order") return await this.order(req, res);
       if (req.method === "GET" && route === "/return") return await this.return(res, url);
@@ -92,7 +97,7 @@ export class HatchPay {
     if (!ask) return this.html(res, 400, page("<p>链接无效</p>"));
     if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.html(res, 403, page("<p>不可购买</p>"));
     if (/MicroMessenger/i.test(req.headers["user-agent"] ?? "")) {
-      // Inside WeChat the payer is known by openid, which only an OAuth round trip reveals.
+      // Not reached while handle() sends WeChat's browser to the guide; kept for a later JSAPI flow. Inside WeChat the payer is known by openid, which only an OAuth round trip reveals.
       return this.redirect(res, this.deps.openids.authorizeUrl(`${this.deps.publicBase}/oauth?${new URLSearchParams(ask)}`));
     }
     this.html(res, 200, this.payHtml(ask));

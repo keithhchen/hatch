@@ -31,6 +31,9 @@ export function typedCode(value) {
 /** Each step as the page shows it: done, the one in progress, or still to come. `step` is the last one the Run reached (-1: none). */
 export const stepStates = (steps, step) => (steps ?? []).map((entry, index) => ({ ...entry, state: index < step ? "done" : index === step ? "now" : "next" }));
 
+/** WeChat's in-app browser cannot pay by H5: the buyer is sent out of it to the phone's own browser. */
+export const inWeChat = userAgent => /MicroMessenger/i.test(userAgent ?? "");
+
 /** The answers of the intake: its fields' values by id. */
 export const intakeAnswers = (fields, values) => Object.fromEntries(fields.map(field => [field.id, String(values[field.id] ?? "").trim()]));
 export const missingField = (fields, values) => fields.find(field => field.required && !String(values[field.id] ?? "").trim());

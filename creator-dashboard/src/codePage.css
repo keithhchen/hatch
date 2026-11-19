@@ -1,5 +1,7 @@
 .code-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--web-paper); }
 .code-page__card { animation: none; }
+.code-page__guide { min-height: 100dvh; padding: 120px 24px 0; text-align: center; font-size: 20px; color: var(--chat-ink); background: var(--web-paper); }
+.code-page__arrow { position: fixed; top: 12px; right: 16px; color: var(--chat-ink); }
 .code-page__pay { display: flex; justify-content: center; margin-top: 12px; text-decoration: none; }
 .code-page__pay.is-disabled { opacity: .45; pointer-events: none; }
 .code-page__rule { margin: 28px 0; border: 0; border-top: 1px solid var(--chat-border); }

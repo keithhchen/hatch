@@ -153,17 +153,10 @@ run("order creation: only from the merchant's page; H5 sends the first forwarded
   } finally { await h.close(); }
 });
 
-run("pay page: WeChat gets OAuth, a browser gets the price; the OAuth return carries the openid into a JSAPI order", async db => {
+run("pay page: a browser gets the price; the OAuth return (kept for a later JSAPI flow) carries the openid into a JSAPI order", async db => {
   const h = await harness(db);
   try {
     const query = `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK })}`;
-    const inWeChat = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 MicroMessenger/8.0" });
-    assert.equal(inWeChat.status, 302);
-    const authorize = new URL(inWeChat.headers.get("location")!);
-    assert.equal(authorize.host, "open.weixin.qq.com");
-    assert.equal(authorize.searchParams.get("scope"), "snsapi_base");
-    assert.equal(new URL(authorize.searchParams.get("redirect_uri")!).pathname, "/hatch-pay/oauth");
-
     const browser = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 Safari" });
     assert.equal(browser.status, 200);
     const html = await browser.text();
@@ -186,6 +179,31 @@ run("pay page: WeChat gets OAuth, a browser gets the price; the OAuth return car
   } finally { await h.close(); }
 });
 
+run("WeChat's browser gets only the guide out of it: no OAuth redirect, no order, no WeChat call; a phone browser still gets the H5 flow", async db => {
+  const h = await harness(db);
+  try {
+    const query = `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK })}`;
+    const wechatUa = { "user-agent": "Mozilla/5.0 (iPhone) MicroMessenger/8.0" };
+    for (const path of [`/${query}`, `/oauth${query}&code=CODE`, `/return?o=hp${"0".repeat(24)}`]) {
+      const res = await h.get(path, wechatUa);
+      assert.equal(res.status, 200, path);
+      assert.equal(res.headers.get("location"), null, "no OAuth redirect");
+      const html = await res.text();
+      assert.match(html, /在浏览器打开/);
+      assert.doesNotMatch(html, /openid|<button/);
+    }
+    assert.equal((await h.order({ openid: "oFake" }, { ...ORIGIN, ...wechatUa, "x-real-ip": "203.0.113.9" })).status, 403);
+    assert.equal(h.wechat.requests.length, 0, "WeChat was never asked");
+    assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 0, "no order was made");
+
+    const safari = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1" });
+    assert.equal(safari.status, 200);
+    assert.match(await safari.text(), /¥9\.9/);
+    const order = await h.order({}, { ...ORIGIN, "user-agent": "Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile", "x-real-ip": "203.0.113.9" });
+    assert.equal(((await order.json()) as { mode: string }).mode, "h5");
+  } finally { await h.close(); }
+});
+
 run("a Product without the access_code capability cannot be bought: page, OAuth return and order all refuse", async db => {
   const h = await harness(db);
   try {
@@ -194,8 +212,6 @@ run("a Product without the access_code capability cannot be bought: page, OAuth 
     const page = await h.get(`/${query}`);
     assert.equal(page.status, 403);
     assert.match(await page.text(), /不可购买/);
-    const inWeChat = await h.get(`/${query}`, { "user-agent": "MicroMessenger" });
-    assert.equal(inWeChat.status, 403, "no OAuth round trip either");
     assert.equal((await h.get(`/oauth${query}&code=CODE`)).status, 403);
     assert.equal((await h.order({ product: other }, { ...ORIGIN, "x-real-ip": "203.0.113.9" })).status, 403);
     assert.equal(h.wechat.requests.length, 0, "WeChat was never asked");
