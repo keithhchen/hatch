@@ -126,3 +126,25 @@ export const PendingIntake = Object.freeze({
     } catch { return undefined; }
   }
 });
+
+/** The landing's three screens, in order; the address hash names the one shown, so the browser's Back moves between them. */
+export const LANDING_STEPS = Object.freeze(["hook", "form", "pay"]);
+export const stepFromHash = hash => LANDING_STEPS.find(step => `#${step}` === hash) ?? "hook";
+export const stepHash = step => (step === "hook" ? "" : `#${step}`);
+
+/** The screen to show for a wanted one: the pay step only exists once the answers are valid (a reload on #pay has none, so it is the form). */
+export const reachableStep = (wanted, values) => (wanted === "pay" && invalidField(values) ? "form" : wanted);
+
+/** What "next" does: the hook goes to the form; the form goes to pay once valid, else says what is wrong. */
+export function advance(step, values) {
+  if (step === "hook") return { step: "form" };
+  const error = invalidField(values);
+  return error ? { step: "form", error } : { step: "pay" };
+}
+
+/** The hook's words: the Product's own landing.json, or the Product's name and description when it has none. Nothing is made up. */
+export const hookCopy = landing => ({
+  agentName: landing?.agent_name ?? landing?.name,
+  hook: landing?.hook ?? landing?.description ?? landing?.name,
+  cta: landing?.cta ?? "开始诊断"
+});
