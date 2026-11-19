@@ -88,6 +88,7 @@ import { PostgresProductCapabilities, type ProductCapabilities } from "./agentBo
 import { DeliverableFollowups } from "./chat/deliverableFollowup.js";
 import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
+import { briefContactOf, type ContactOf, type ReportLeads } from "./agentBox/reportLeads.js";
 import type { BuyerFiles } from "./agentBox/files.js";
 import { openHatchPay } from "./hatchPay/open.js";
 import type { HatchPay } from "./hatchPay/routes.js";
@@ -213,7 +214,7 @@ export type RuntimeServerOptions = {
   /** Report mode: products that offer it, and conversations that are reports. */
   artifact?: ArtifactMode;
   /** The Agent's own computer and the pages it publishes, for the Products that have it. */
-  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string };
+  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string; reportLeads?: (contactOf: ContactOf) => ReportLeads };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
   /** Products with the `access_code` capability take a Run only for a conversation that redeemed the Brief's code. */
@@ -430,6 +431,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       : options.conversationRepository instanceof PostgresConversationRepository
         ? new PostgresStore({ pool: options.conversationRepository.pool }) : createConversationStore());
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
+  // A report's price-tier clicks: the buyer is read from the Brief of the conversation the page's access code opened.
+  const reportLeads = options.agentBox?.reportLeads?.(briefContactOf(options.accessCodes ?? { lookup: async () => null }, conversationRepository));
   const models = options.models ?? (conversationStore instanceof PostgresStore ? new PostgresModelRoleResolver(conversationStore.pool) : new InMemoryModelRoleResolver());
   const createRuntime = options.createRuntime ?? (() => createAgentRuntime(models));
   if (conversationStore instanceof PostgresStore && conversationRepository instanceof PostgresConversationRepository) {
@@ -697,6 +700,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       allowedOrigins,
       artifact,
       htmlPages: agentBox?.pages,
+      reportLeads,
       hatchPay: options.hatchPay,
       codePages,
       buyerFiles: agentBox?.files,

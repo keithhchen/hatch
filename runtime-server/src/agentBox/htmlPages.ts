@@ -3,6 +3,7 @@ import type http from "node:http";
 import { decodeText } from "../assets/sniff.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { BoxToolError } from "./ports.js";
+import { handleLead, type ReportLeads } from "./reportLeads.js";
 import type { BuyerFiles, BuyerScope } from "./files.js";
 
 /** A saved HTML file published at a link: the page is the file, so publishing the same file again gives the same page. */
@@ -154,15 +155,16 @@ export class HtmlPages {
   }
 }
 
-const ROUTE = /^\/html\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const ROUTE = /^\/html\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\/lead)?$/;
 
 /**
  * GET /html/<id>?t=<signature>. The page is the Agent's writing, so it runs sandboxed: no same-origin, so its scripts
  * cannot read Hatch's cookies or call Hatch as the viewer. Returns false for a path that is not a page.
  */
-export async function handleHtmlRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, pages: HtmlPages | undefined): Promise<boolean> {
+export async function handleHtmlRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, pages: HtmlPages | undefined, leads?: ReportLeads): Promise<boolean> {
   const match = ROUTE.exec(url.pathname);
   if (!match) return false;
+  if (match[2]) { await handleLead(request, response, match[1]!, url.searchParams.get("t"), leads); return true; }
   const html = request.method === "GET" && pages ? await pages.open(match[1]!, url.searchParams.get("t")) : undefined;
   const headers = { "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
   if (!html) {
