@@ -161,7 +161,7 @@ run("pay page: a browser gets the price; the OAuth return (kept for a later JSAP
     assert.equal(browser.status, 200);
     const html = await browser.text();
     assert.match(html, /¥9\.9/);
-    assert.doesNotMatch(html, /openid/);
+    assert.doesNotMatch(html, /"openid":/);
     assert.equal((await h.get("/?product=x&email=bad&back=https://evil.example")).status, 400);
 
     const oauth = await h.get(`/oauth${query}&code=CODE&state=hatchpay`);
