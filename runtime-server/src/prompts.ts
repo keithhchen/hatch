@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
 
 /** The platform's own model-facing instructions, by name. The files in prompts/ are only each one's first row. */
-export const PROMPT_FILES = { "conversation-title": "conversation-title/TITLE.md" } as const;
+export const PROMPT_FILES = {
+  "conversation-title": "conversation-title/TITLE.md",
+  /** The report email every Product without its own template sends: the HTML and its subject line, with {{placeholders}}. */
+  "report-email-default": "report-email/REPORT.html",
+  "report-email-default-subject": "report-email/SUBJECT.txt"
+} as const;
 export type PromptName = keyof typeof PROMPT_FILES;
 
 export interface Prompts {
