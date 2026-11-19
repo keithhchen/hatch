@@ -117,7 +117,7 @@ test("deepseek-flash-thinking sends thinking enabled with reasoning_effort; deep
   const adapter = new OpenAICompatibleAdapter();
   const on = adapter.normalizePayload(llmProfile("deepseek-flash-thinking"), { model: "deepseek-flash", messages: [] }) as Record<string, unknown>;
   assert.deepEqual(on.thinking, { type: "enabled" });
-  assert.equal(on.reasoning_effort, "low");
+  assert.equal(on.reasoning_effort, "high");
   const off = adapter.normalizePayload(llmProfile("deepseek-flash"), { model: "deepseek-flash", messages: [] }) as Record<string, unknown>;
   assert.deepEqual(off.thinking, { type: "disabled" });
   assert.equal("reasoning_effort" in off, false);
@@ -153,7 +153,7 @@ test("deepseek-flash-thinking: reasoning_content streams as thinking and is sent
   assert.equal(message.content[0].type, "thinking");
   assert.equal(message.content[0].thinking, "I should read the page.");
   assert.deepEqual(bodies[0]!.thinking, { type: "enabled" });
-  assert.equal(bodies[0]!.reasoning_effort, "low");
+  assert.equal(bodies[0]!.reasoning_effort, "high");
 
   const done = { role: "assistant", content: [{ type: "thinking", thinking: "wrap up", thinkingSignature: "reasoning_content" }, { type: "text", text: "ok" }], api: "openai-completions", provider: "deepseek", model: "deepseek-flash", usage: message.usage, stopReason: "stop", timestamp: 3 };
   const toolResult = { role: "toolResult", toolCallId: "call_1", toolName: "read", content: [{ type: "text", text: "page" }], isError: false, timestamp: 2 };

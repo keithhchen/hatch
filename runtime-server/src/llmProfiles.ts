@@ -98,7 +98,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
   },
   // deepseek-flash with thinking on, for long agentic Runs (20-40 tool calls in one turn). Without thinking the model writes
   // "next I will..." as a text-only message and the turn ends early. Thinking mode (api-docs.deepseek.com/guides/thinking_mode):
-  // `thinking: {type: "enabled"}` plus top-level `reasoning_effort` (low | high | max, default high). The stream's `reasoning_content`
+  // `thinking: {type: "enabled"}` plus top-level `reasoning_effort` (low | high | max, default high); this profile uses high. The stream's `reasoning_content`
   // is rendered as thinking, and with tools every assistant message's `reasoning_content` must be sent back (pi-ai does).
   "deepseek-flash-thinking": {
     name: "deepseek-flash-thinking",
@@ -114,7 +114,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "low",
     thinkingType: "enabled",
-    reasoningEffort: "low",
+    reasoningEffort: "high",
     replaysEarlierReasoning: true
   },
   "gemini-api": {
