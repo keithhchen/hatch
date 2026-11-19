@@ -17,15 +17,16 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
   paid_at TIMESTAMPTZ,
   used_at TIMESTAMPTZ,
   used_by_conversation_id TEXT
-);`;
+);
+ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS name TEXT;`;
 
 // MSC and six characters, free or bought. No 0, 1, I, L or O: a code is read and typed by hand.
 const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const newCode = () => `MSC${Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("")}`;
 const normalize = (code: string) => code.trim().toUpperCase();
 
-type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; used_by_conversation_id: string | null };
-const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, status: row.status, source: row.source });
+type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; name: string | null; used_by_conversation_id: string | null };
+const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, name: row.name, status: row.status, source: row.source });
 
 export class PostgresAccessCodes implements AccessCodes {
   /** `priceFen` is what a bought code costs: stored on the order, and the only amount that activates it. Without it codes can be redeemed, not sold. */
@@ -33,15 +34,15 @@ export class PostgresAccessCodes implements AccessCodes {
 
   async initialize(): Promise<void> { await this.db.query(ACCESS_CODES_SCHEMA); }
 
-  async createPending(input: { productId: string; email: string; payChannel?: PayChannel }) {
+  async createPending(input: { productId: string; email: string; name?: string; payChannel?: PayChannel }) {
     if (this.priceFen === undefined) throw new Error("Access codes are not for sale: no price is configured.");
     // A code that collides with another is drawn again; the primary key is the arbiter.
     for (let attempt = 0; attempt < 10; attempt++) {
       const code = newCode(), outTradeNo = `hp${randomBytes(12).toString("hex")}`;
       const inserted = await this.db.query(
-        `INSERT INTO hatch_access_codes (code, product_id, status, source, out_trade_no, amount_fen, email, pay_channel) VALUES ($1, $2, 'pending', 'paid', $3, $4, $5, $6)
+        `INSERT INTO hatch_access_codes (code, product_id, status, source, out_trade_no, amount_fen, email, pay_channel, name) VALUES ($1, $2, 'pending', 'paid', $3, $4, $5, $6, $7)
          ON CONFLICT DO NOTHING RETURNING code`,
-        [code, input.productId, outTradeNo, this.priceFen, input.email, input.payChannel ?? null]);
+        [code, input.productId, outTradeNo, this.priceFen, input.email, input.payChannel ?? null, input.name ?? null]);
       if (inserted.rows.length) return { code, outTradeNo };
     }
     throw new Error("Could not draw a free access code.");

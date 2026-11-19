@@ -264,6 +264,7 @@ export async function reportEmailContext(conversation: ConversationRecord, bindi
     ...code ? { code, codeUrl: `${origin}/c/${encodeURIComponent(code)}` } : {},
     productName: binding.agentCorpus?.product.name ?? "Hatch",
     ...expert && expert !== "Expert" ? { expertName: expert } : {},
+    ...briefAnswer(conversation.briefSnapshot, "name") ? { name: briefAnswer(conversation.briefSnapshot, "name")! } : {},
     ...briefAnswer(conversation.briefSnapshot, "website") ? { website: briefAnswer(conversation.briefSnapshot, "website")! } : {},
     ...(template => template ? { template } : {})(await readCorpusEmailTemplate(binding.agentCorpusRoot))
   };

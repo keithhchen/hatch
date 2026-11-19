@@ -6,7 +6,7 @@ export type PayChannel = "jsapi" | "h5";
 export type AccessCodeView = { code: string; productId: string; status: AccessCodeStatus; source: AccessCodeSource; usedByConversationId: string | null };
 
 /** The order behind a bought code, as the payment flow needs it. */
-export type AccessCodeOrder = { code: string; productId: string; email: string | null; status: AccessCodeStatus; source: AccessCodeSource };
+export type AccessCodeOrder = { code: string; productId: string; email: string | null; name: string | null; status: AccessCodeStatus; source: AccessCodeSource };
 
 export type Activation = AccessCodeOrder & {
   /** True only for the call that moved the code from pending to active: that caller sends the email. */
@@ -17,7 +17,7 @@ export type RedeemResult = { ok: true } | { ok: false; reason: "not_found" | "no
 
 export interface AccessCodes {
   /** A pending code for a payment about to be started. */
-  createPending(input: { productId: string; email: string; payChannel?: PayChannel }): Promise<{ code: string; outTradeNo: string }>;
+  createPending(input: { productId: string; email: string; name?: string; payChannel?: PayChannel }): Promise<{ code: string; outTradeNo: string }>;
   /**
    * pending -> active, once. A repeat (or a concurrent twin) is a no-op that reports `activated: false`. A payment of another amount
    * than the order's activates nothing. Undefined when no order has this number.

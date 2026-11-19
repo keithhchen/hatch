@@ -165,8 +165,8 @@ export class HatchPay {
     const info = await this.productInfo(ask.product), e = escapeHtml;
     const row = (label: string, value?: string) => value ? `<div><dt>${label}</dt><dd>${e(value)}</dd></div>` : "";
     const head = `${info.name ? `<h1>${e(info.name)}</h1>` : ""}${info.expert ? `<p class="by">${e(info.expert)}</p>` : ""}${info.description ? `<p class="desc">${e(info.description)}</p>` : ""}`;
-    return page(`${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="96" alt="Hatch"><div class="card">${head}<dl>${row("网站", order.site)}${row("姓名", order.name)}${row("访问码发送至", ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>支付</button><div id="err"></div></div></main>`, `
-const ask=${jsLiteral({ ...ask, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err');
+    return page(`${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="96" alt="Hatch"><div class="card">${head}<dl>${row("网站", order.site)}${row("姓名", order.name)}${row("兑换码发送至", ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>支付</button><div id="err"></div></div></main>`, `
+const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err');
 const fail=m=>{err.textContent=m;btn.disabled=false;btn.classList.remove('busy')};
 const go=async()=>{btn.disabled=true;btn.classList.add('busy');err.textContent='';
  try{const r=await fetch(${jsLiteral(`${this.deps.publicBase}/order`)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ask)});
@@ -195,11 +195,12 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
     const ask = this.ask(new URL(`http://x/?${new URLSearchParams({ product: String(body.product ?? ""), email: String(body.email ?? ""), back: String(body.back ?? "") })}`));
     if (!ask) return this.json(res, 400, { error: "链接无效" });
     if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.json(res, 403, { error: "不可购买" });
+    const name = buyerName(typeof body.name === "string" ? body.name : null);
     const openid = typeof body.openid === "string" && body.openid ? body.openid : undefined;
     const payerIp = payerIpOf(req.headers);
     if (!openid && !payerIp) return this.json(res, 400, { error: "无法获取网络地址" });
 
-    const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, payChannel: openid ? "jsapi" : "h5" });
+    const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, ...name ? { name } : {}, payChannel: openid ? "jsapi" : "h5" });
     const returnUrl = `${this.deps.publicBase}/return?${new URLSearchParams({ o: outTradeNo, back: ask.back })}`;
     const order = {
       outTradeNo, description: "Hatch 兑换码", amountFen: this.deps.priceFen,
@@ -271,7 +272,7 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
     else if (activation.status === "pending") log.error("hatch_pay_amount_mismatch", { outTradeNo: state.outTradeNo, transactionId: state.transactionId, amountFen: state.amountFen });
     else if (activation.activated && activation.email) {
       try {
-        await this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email });
+        await this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email, ...activation.name ? { name: activation.name } : {} });
       } catch (error) { log.error("hatch_pay_email_failed", { outTradeNo: state.outTradeNo, code: activation.code, error }); }
     }
     return activation;

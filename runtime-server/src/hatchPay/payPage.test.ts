@@ -107,3 +107,34 @@ test("auto-start: a fresh load creates one order and redirects; back navigation 
     assert.ok(!failed.classes.has("busy"));
   } finally { s.close(); }
 });
+
+test("the order stores the buyer's name with the pending code; an invalid name is dropped; the paid order's mail gets it", async () => {
+  const created: Array<Record<string, unknown>> = [], mailed: Array<Record<string, unknown>> = [];
+  const pay = new HatchPay({
+    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
+    wechat: {
+      ready: () => true, createH5Order: async () => ({ h5Url: "https://wx.example/pay?a=1" }),
+      queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState: "SUCCESS", transactionId: "42", amountFen: 1 })
+    },
+    codes: {
+      createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: `hp${"a".repeat(24)}` }; },
+      order: async () => ({ productId: PRODUCT, email: "a@b.co" }),
+      activatePaid: async () => ({ code: "MSC222222", productId: PRODUCT, email: "a@b.co", name: "王小明", status: "active", source: "paid", activated: true })
+    },
+    openids: {}, mailer: { send: async (input: Record<string, unknown>) => { mailed.push(input); } }
+  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
+  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
+  const order = (name: unknown) => fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, name }) });
+  try {
+    assert.equal((await order(" 王小明 ")).status, 200);
+    assert.equal(created[0]!.name, "王小明");
+    assert.equal((await order("x".repeat(41))).status, 200);
+    assert.equal("name" in created[1]!, false, "an over-long name is not stored");
+    assert.equal((await order(undefined)).status, 200);
+    assert.equal("name" in created[2]!, false);
+    await fetch(`${base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK })}`, { redirect: "manual" });
+    assert.deepEqual(mailed, [{ code: "MSC222222", productId: PRODUCT, to: "a@b.co", name: "王小明" }]);
+  } finally { server.closeAllConnections(); server.close(); }
+});

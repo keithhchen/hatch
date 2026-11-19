@@ -63,3 +63,12 @@ test("no template anywhere is an error, never an invented email", async () => {
 test("the renderer: {{var}} escaped, {{#var}} blocks kept only when the value is not empty", () => {
   assert.equal(renderTemplate("{{a}}|{{#b}}[{{b}}]{{/b}}|{{c}}", { a: "<x>", b: " " }), "&lt;x&gt;||");
 });
+
+test("the code email gets the buyer's name as {{name}}; the block vanishes when it is unknown", async () => {
+  const prompts = { ...DEFAULTS, [DEFAULT_TEMPLATE_PROMPT]: "<p>{{#name}}{{name}}，{{/name}}你的码 {{code}}</p>" };
+  const { sent, mailer } = setup({ productName: "P" }, prompts);
+  await mailer.send({ code: "MSC7K2P9X", productId: "p", to: "a@b.co", name: "王<小明>" });
+  await mailer.send({ code: "MSC222222", productId: "p", to: "a@b.co" });
+  assert.equal(sent[0]!.html, "<p>王&lt;小明&gt;，你的码 MSC7K2P9X</p>");
+  assert.equal(sent[1]!.html, "<p>你的码 MSC222222</p>");
+});
