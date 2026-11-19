@@ -28,7 +28,8 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 128 },
         "label": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "type": { "enum": ["text", "line", "email", "tel", "access_code"] }
       }
     },
     "briefAnswer": {
@@ -48,6 +49,7 @@
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 128 },
         "label": { "type": "string", "minLength": 1, "maxLength": 500 },
         "required": { "type": "boolean" },
+        "type": { "enum": ["text", "line", "email", "tel", "access_code"] },
         "value": { "type": ["string", "null"], "maxLength": 32000 }
       }
     },

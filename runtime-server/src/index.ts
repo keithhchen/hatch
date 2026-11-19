@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import { stat } from "node:fs/promises";
 import path from "node:path";
@@ -35,7 +36,7 @@ import {
   renderSkillsSection,
   visibleSkillsForSession
 } from "./skills.js";
-import { briefAnswer, briefEmail, type BriefSpec } from "./brief.js";
+import { briefAccessCode, briefAnswer, briefEmail, type BriefSpec } from "./brief.js";
 import { readCorpusEmailTemplate } from "./agentBox/reportEmail.js";
 import type { ReportEmailContext } from "./agentBox/tools.js";
 import { createOutputGuardFromEnvironment, PassThroughOutputGuard, type OutputGuard } from "./outputGuard.js";
@@ -81,6 +82,10 @@ import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { openAgentBoxMode } from "./agentBox/open.js";
+import { AccessCodeIdentityResolver } from "./accessCodeIdentity.js";
+import { AccessGate, type AccessCodes } from "./accessGate.js";
+import { PostgresProductCapabilities, type ProductCapabilities } from "./agentBox/capabilities.js";
+import { DeliverableFollowups } from "./chat/deliverableFollowup.js";
 import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
 import type { BuyerFiles } from "./agentBox/files.js";
@@ -208,6 +213,10 @@ export type RuntimeServerOptions = {
   agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
+  /** Products with the `access_code` capability take a Run only for a conversation that redeemed the Brief's code. */
+  accessGate?: AccessGate;
+  /** Which Products have which capabilities; with it, `deliverable_html` Products are followed up until they publish an HTML report. */
+  productCapabilities?: ProductCapabilities;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -234,13 +243,15 @@ export type RuntimeServerOptions = {
 };
 
 /** Where a conversation's report is mailed, from its Brief's email answer, and what the mail says; undefined when the Brief has none. */
-async function reportEmailContext(conversation: ConversationRecord, binding: SessionBinding, origin = "https://gethatchapp.com"): Promise<ReportEmailContext | undefined> {
+export async function reportEmailContext(conversation: ConversationRecord, binding: SessionBinding, origin = "https://gethatchapp.com"): Promise<ReportEmailContext | undefined> {
   const recipient = briefEmail(conversation.briefSnapshot);
   if (!recipient) return undefined;
   const expert = binding.agentCorpus?.creator.name;
+  // The code opens the conversation again from anywhere, so the mail's chat link carries it.
+  const code = briefAccessCode(conversation.briefSnapshot);
   return {
     recipient,
-    chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}`,
+    chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}${code ? `?code=${encodeURIComponent(code)}` : ""}`,
     productName: binding.agentCorpus?.product.name ?? "Hatch",
     ...expert && expert !== "Expert" ? { expertName: expert } : {},
     ...briefAnswer(conversation.briefSnapshot, "website") ? { website: briefAnswer(conversation.briefSnapshot, "website")! } : {},
@@ -291,6 +302,11 @@ export async function createRuntimeServerFromEnvironment(
   const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
   // Site research, for the Products that have it switched on: off without any of its keys.
   const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
+  // Access codes: the Postgres AccessCodes adapter (feat/wxpay-access-codes, on hatch_access_codes) is plugged in here. Until it is, a Product with the capability refuses every Run.
+  const accessCodes: AccessCodes | undefined = undefined;
+  const productCapabilities = conversationStore instanceof PostgresStore ? new PostgresProductCapabilities(conversationStore.pool) : undefined;
+  await productCapabilities?.initialize();
+  const accessGate = productCapabilities ? new AccessGate(productCapabilities, accessCodes) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -319,6 +335,8 @@ export async function createRuntimeServerFromEnvironment(
     ...(artifact ? { artifact } : {}),
     ...(agentBox ? { agentBox } : {}),
     ...(siteResearch ? { siteResearch } : {}),
+    ...(accessGate ? { accessGate } : {}),
+    ...(productCapabilities ? { productCapabilities } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -351,9 +369,13 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const accountIdentities = options.authIdentityResolver
     ?? (entitlementResolver instanceof RegistryEntitlementResolver ? entitlementResolver : undefined);
   // A guest is told apart by its signed token; every other token is an account's, and the Registry decides.
-  const authIdentityResolver = accountIdentities && options.guestTokens
+  const guestAware = accountIdentities && options.guestTokens
     ? new GuestAwareIdentityResolver(options.guestTokens, accountIdentities)
     : accountIdentities;
+  // A used access code opens its conversation to whoever holds it, through the same identity the rest of the Runtime asks.
+  const authIdentityResolver = guestAware && options.accessGate
+    ? new AccessCodeIdentityResolver(guestAware, options.accessGate.codes, id => conversationRepository.getConversation(id))
+    : guestAware;
   const agentCorpusResolver = unconfigured ? unconfiguredAgentCorpusResolver : options.agentCorpusResolver;
   const legacyHmacSecret = options.legacyHmacSecret?.trim() || undefined;
   if (options.enableLegacyHmacAuth === true && !legacyHmacSecret) {
@@ -493,7 +515,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation, report ? "flat" : "messages"));
         if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
         const box = report ? undefined : await agentBox?.mode.turnFor({
-          productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX),
+          productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX) && !await options.accessGate?.required(binding.productId),
           email: await reportEmailContext(turn.conversation, binding, agentBox.origin)
         });
         serverTools.setBox(box?.tools);
@@ -542,6 +564,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       skip: async conversationId => Boolean(await artifact?.reports.get(conversationId))
     }),
     afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); },
+    afterReply: (run) => { void deliverableFollowups?.afterReply(run); },
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
@@ -560,6 +583,20 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       });
     }
   });
+  // A Product that must end with an HTML report asks, in the conversation, for it when a Run ends without one.
+  const deliverableFollowups = options.productCapabilities && agentBox ? new DeliverableFollowups({
+    capabilities: options.productCapabilities, repository: conversationRepository,
+    prompts: conversationStore instanceof PostgresStore ? new PostgresPrompts(conversationStore.pool) : new FilePrompts(),
+    hasPage: conversation => agentBox.pages.hasPublishedSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt)),
+    start: async (conversation, key, content) => {
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.submit({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        clientMessageId: key, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
+        runId: `run_${randomUUID().replaceAll("-", "")}`, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
+      });
+    }
+  }) : undefined;
   const startArtifactRun = async (record: ReportRecord, runId: string, content: string, clientMessageId: string) => {
     const conversation = await conversationRepository.getConversation(record.conversationId);
     if (!conversation) throw new Error(`Conversation ${record.conversationId} was not found`);
@@ -581,6 +618,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
     creatorToolControlPlane: options.creatorToolControlPlane,
+    ...(options.accessGate ? { accessGate: options.accessGate } : {}),
     consumerBufferedBytes: options.maxConsumerBufferedBytes ?? MAX_CONSUMER_BUFFERED_BYTES
   };
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);

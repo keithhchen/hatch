@@ -89,6 +89,8 @@ export async function requireBoundConversation(
 ) {
   if (!publicId) throw new ConversationHttpError(400, "conversation_id_required", "A conversation ID is required.");
   // By the owner and the id the client knows: a conversation that moved to an account when its visitor signed in keeps its id.
+  // An access code opens its own conversation and no other.
+  if (binding.only && binding.only.conversationId !== publicId) throw new ConversationHttpError(404, "conversation_not_found", `Conversation ${publicId} was not found.`);
   const owner = conversationBinding(binding);
   const conversation = await repository.findOwnedConversation({ ownerAccountId: owner.ownerAccountId, creatorId: owner.creatorId }, publicId);
   if (!conversation) throw new ConversationHttpError(404, "conversation_not_found", `Conversation ${publicId} was not found.`);

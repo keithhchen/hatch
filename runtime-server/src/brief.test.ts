@@ -63,3 +63,21 @@ test("an email field is validated where the Brief is submitted and read back by 
   assert.equal(briefEmail(createBriefSnapshot(spec, [{ field_id: "goal", value: "x" }])), undefined, "a Product without the field");
   assert.equal(briefEmail(undefined), undefined);
 });
+
+test("typed Brief fields: a spec without types keeps its digest, a typed email is validated, and types are closed", () => {
+  const plain = { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] } as const;
+  assert.deepEqual(normalizeBriefSpec({ ...plain, fields: [{ ...plain.fields[0], type: "text" }] }), normalizeBriefSpec(plain));
+  const typed = { contract_version: "1", fields: [{ id: "contact", label: "邮箱", required: true, type: "email" }, { id: "phone", label: "电话", required: true, type: "tel" }] } as const;
+  assert.throws(() => createBriefSnapshot(typed, [{ field_id: "contact", value: "nope" }, { field_id: "phone", value: "1" }]), /not a valid email/);
+  assert.equal(createBriefSnapshot(typed, [{ field_id: "contact", value: "a@b.co" }, { field_id: "phone", value: "1" }]).fields[1]?.type, "tel");
+  assert.throws(() => normalizeBriefSpec({ ...plain, fields: [{ ...plain.fields[0], type: "password" }] }), /unknown type/);
+});
+
+test("the report email of a code-gated conversation links back to the chat with the code", async () => {
+  const { reportEmailContext } = await import("./index.js");
+  const spec = { contract_version: "1", fields: [{ id: "email", label: "邮箱", required: true, type: "email" }, { id: "code", label: "兑换码", required: true, type: "access_code" }] } as const;
+  const snapshot = createBriefSnapshot(spec, [{ field_id: "email", value: "a@b.co" }, { field_id: "code", value: "AB-12" }]);
+  const context = await reportEmailContext({ publicId: "conv_1", briefSnapshot: snapshot } as never, { productId: "p1" } as never, "https://x.test");
+  assert.equal(context?.recipient, "a@b.co");
+  assert.equal(context?.chatUrl, "https://x.test/chat/product/p1/conversation/conv_1?code=AB-12");
+});

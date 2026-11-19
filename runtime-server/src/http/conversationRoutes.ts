@@ -4,6 +4,7 @@ import type { AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCor
 import { RuntimeAssetStore } from "../assetStore.js";
 import { MAX_BYTES as MAX_ASSET_BYTES } from "../assets/pipeline.js";
 import { createBriefSnapshot } from "../brief.js";
+import { ChatError } from "../chat/principal.js";
 import { ChatConversationReadModel } from "../chat/conversationReadModel.js";
 import { publicJournalPayload } from "../chat/messageLedger.js";
 import { publicRun } from "../chat/publicRun.js";
@@ -101,6 +102,12 @@ export async function handleConversationHttpRequest(
     return edge;
   };
 
+  // A Product with an access code opens a conversation only to the code it was used for: every read, write and stream passes here.
+  const requested = /^\/v1\/conversations\/([^/]+)/.exec(url.pathname)?.[1];
+  if (requested && edge?.accessGate && !await edge.accessGate.opens(binding, decodeURIComponent(requested))) {
+    throw new ConversationHttpError(403, "access_code_required", "需要兑换码");
+  }
+
   if (url.pathname === "/v1/conversations") {
     if (req.method === "GET") {
       const status = parseConversationStatus(url.searchParams.get("status"));
@@ -110,8 +117,11 @@ export async function handleConversationHttpRequest(
         ...(url.searchParams.get("cursor") ? { cursor: url.searchParams.get("cursor")! } : {}),
         ...(limit ? { limit } : {})
       });
+      // An access code lists its one conversation.
+      const visible = binding.only ? page.conversations.filter((conversation) => conversation.publicId === binding.only!.conversationId)
+        : await edge?.accessGate?.required(binding.productId) ? [] : page.conversations;
       writeResponse(200, {
-        conversations: (deps.artifact ? await deps.artifact.withoutReports(page.conversations) : page.conversations).map(publicConversation),
+        conversations: (deps.artifact ? await deps.artifact.withoutReports(visible) : visible).map(publicConversation),
         ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
         sent_message_count: await repository.countSentMessages(repoBinding)
       });
@@ -125,10 +135,27 @@ export async function handleConversationHttpRequest(
       const briefSnapshot = binding.briefSpec
         ? createBriefSnapshot(binding.briefSpec, body.brief_answers)
         : undefined;
-      const publicId = `conv_${randomUUID().replaceAll("-", "")}`;
+      const gate = edge?.accessGate;
+      // A code already used opens the conversation it was used for, with its history and report.
+      const usedFor = await gate?.usedBy(binding.productId, briefSnapshot);
+      const earlier = usedFor ? await repository.getConversation(usedFor) : undefined;
+      if (earlier) {
+        writeResponse(200, { conversation: publicConversation(earlier), created: false });
+        return;
+      }
+      if (binding.only) throw new ConversationHttpError(403, "access_code_scoped", "This access code only opens its own conversation.");
+      // A code is spent before the conversation exists, so a refused code leaves nothing behind. The conversation's id follows from
+      // its request key: the same request, sent again, is the same conversation and the same (already spent) code.
+      const publicId = gate && clientRequestId
+        ? `conv_${createHash("sha256").update([binding.userId, binding.productId, clientRequestId].join("\u0000")).digest("hex").slice(0, 32)}`
+        : `conv_${randomUUID().replaceAll("-", "")}`;
+      const id = durableConversationId(binding, publicId);
+      await gate?.admit(binding.productId, id, briefSnapshot).catch((error) => {
+        throw error instanceof ChatError ? new ConversationHttpError(error.status, error.code, error.message) : error;
+      });
       const created = await repository.createConversation({
         ...repoBinding,
-        id: durableConversationId(binding, publicId),
+        id,
         publicId,
         ...(title ? { title } : {}),
         ...(clientRequestId ? { clientRequestId } : {}),

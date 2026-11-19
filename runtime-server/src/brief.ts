@@ -13,10 +13,19 @@ export const isEmailAddress = (value: string): boolean => value.length <= 254 &&
 
 const FIELD_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 
+/**
+ * How a field is asked: `text` (the default) is free multi-line text, `line` one line, `email` and `tel` are what they say, and
+ * `access_code` is the code a Product requires before its first Run (see accessGate.ts).
+ */
+export const BRIEF_FIELD_TYPES = ["text", "line", "email", "tel", "access_code"] as const;
+export type BriefFieldType = (typeof BRIEF_FIELD_TYPES)[number];
+
 export type BriefFieldSpec = {
   id: string;
   label: string;
   required: boolean;
+  /** Absent means `text`, so a spec written before types existed keeps its digest. */
+  type?: BriefFieldType;
 };
 
 export type BriefSpec = {
@@ -101,8 +110,11 @@ export function normalizeBriefSpec(value: unknown): BriefSpec {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} is invalid`);
     }
     const field = entry as Record<string, unknown>;
-    if (Object.keys(field).some((key) => !["id", "label", "required"].includes(key))) {
+    if (Object.keys(field).some((key) => !["id", "label", "required", "type"].includes(key))) {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} contains an unknown property`);
+    }
+    if (field.type !== undefined && !BRIEF_FIELD_TYPES.includes(field.type as BriefFieldType)) {
+      throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} has an unknown type`);
     }
     const id = typeof field.id === "string" ? field.id.trim() : "";
     const label = typeof field.label === "string" ? field.label.trim() : "";
@@ -116,7 +128,7 @@ export function normalizeBriefSpec(value: unknown): BriefSpec {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} must declare required`);
     }
     seen.add(id);
-    return { id, label, required: field.required };
+    return { id, label, required: field.required, ...field.type && field.type !== "text" ? { type: field.type as BriefFieldType } : {} };
   });
   return { contract_version: BRIEF_SPEC_CONTRACT_VERSION, fields };
 }
@@ -152,7 +164,8 @@ export function createBriefSnapshot(
     if (value.length > MAX_BRIEF_ANSWER_CHARS || /[\u0000]/.test(value)) {
       throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is too long or invalid`);
     }
-    if (fieldId === BRIEF_EMAIL_FIELD_ID && value && !isEmailAddress(value)) {
+    const asked = spec.fields.find((field) => field.id === fieldId)!;
+    if ((fieldId === BRIEF_EMAIL_FIELD_ID || asked.type === "email") && value && !isEmailAddress(value)) {
       throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is not a valid email address`);
     }
     totalCharacters += value.length;
@@ -206,7 +219,7 @@ export function normalizeBriefSnapshot(value: unknown): BriefSnapshot {
       throw new BriefValidationError("brief_answer_invalid", `Stored BriefSnapshot field ${index + 1} is invalid`);
     }
     const field = entry as Record<string, unknown>;
-    if (Object.keys(field).some((key) => !["id", "label", "required", "value"].includes(key))) {
+    if (Object.keys(field).some((key) => !["id", "label", "required", "type", "value"].includes(key))) {
       throw new BriefValidationError("brief_answer_invalid", `Stored BriefSnapshot field ${index + 1} contains an unknown property`);
     }
     if (field.value !== null && typeof field.value !== "string") {
@@ -216,12 +229,13 @@ export function normalizeBriefSnapshot(value: unknown): BriefSnapshot {
       id: field.id,
       label: field.label,
       required: field.required,
+      ...field.type !== undefined ? { type: field.type } : {},
       value: field.value
     };
   });
   const spec = normalizeBriefSpec({
     contract_version: BRIEF_SPEC_CONTRACT_VERSION,
-    fields: fields.map(({ id: fieldId, label, required }) => ({ id: fieldId, label, required }))
+    fields: fields.map(({ id: fieldId, label, required, type }) => ({ id: fieldId, label, required, ...type !== undefined ? { type } : {} }))
   });
   const rebuilt = createBriefSnapshot(
     spec,
@@ -260,6 +274,12 @@ export function briefAnswer(snapshot: BriefSnapshot | undefined, fieldId: string
 export function briefEmail(snapshot: BriefSnapshot | undefined): string | undefined {
   const value = briefAnswer(snapshot, BRIEF_EMAIL_FIELD_ID);
   return value && isEmailAddress(value) ? value : undefined;
+}
+
+/** The access code the Brief was answered with: its `access_code` field. */
+export function briefAccessCode(snapshot: BriefSnapshot | undefined): string | undefined {
+  const field = snapshot?.fields.find((entry) => entry.type === "access_code");
+  return field ? briefAnswer(snapshot, field.id) : undefined;
 }
 
 export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {

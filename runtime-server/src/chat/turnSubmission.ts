@@ -21,6 +21,7 @@ import type { ChatServiceApi } from "./serviceApi.js";
 import { controlledTurnAuthorizationError, resolveTurnAgentBinding, revalidateTurnAuthorization, type SessionBinding } from "./sessionBinding.js";
 import { prepareSocketMessage } from "./socketAttachments.js";
 import { productRequiresLocalTools } from "./toolSurface.js";
+import type { AccessGate } from "../accessGate.js";
 
 /** What both transports need to turn an authenticated user message into a Run or a steer. */
 export type ChatEdge = {
@@ -37,6 +38,8 @@ export type ChatEdge = {
   authIdentityResolver?: AuthIdentityResolver;
   agentCorpusResolver?: AgentCorpusResolver;
   creatorToolControlPlane?: CreatorToolControlPlane;
+  /** Products with an access code are admitted by it before any Run. */
+  accessGate?: AccessGate;
 };
 
 export type ChatSession = {
@@ -104,6 +107,7 @@ export async function submitUserMessage(
   if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
     throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
   }
+  await edge.accessGate?.admit(binding.productId, session.conversation.id, session.conversation.briefSnapshot);
   const prepared = request.taskStart ? undefined
     : request.prepared ?? await prepareSocketMessage(edge, request.message, session.conversation, request.clientMessageId);
   const canonicalMessage = prepared?.message ?? (async (): Promise<ConversationMessage> => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }));
@@ -137,6 +141,7 @@ export async function retryRun(
   signal?: AbortSignal
 ): Promise<Retried> {
   const binding = await authorizedBinding(edge, session, signal);
+  await edge.accessGate?.admit(binding.productId, session.conversation.id, session.conversation.briefSnapshot);
   signal?.throwIfAborted();
   return edge.chat.service.retry({
     principal: userPrincipal(binding.userId),

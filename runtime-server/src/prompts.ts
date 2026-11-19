@@ -7,7 +7,9 @@ export const PROMPT_FILES = {
   "conversation-title": "conversation-title/TITLE.md",
   /** The report email every Product without its own template sends: the HTML and its subject line, with {{placeholders}}. */
   "report-email-default": "report-email/REPORT.html",
-  "report-email-default-subject": "report-email/SUBJECT.txt"
+  "report-email-default-subject": "report-email/SUBJECT.txt",
+  /** What a Product with the `deliverable_html` capability says, as the user, when a Run ended and no HTML report is published yet. */
+  "deliverable-followup": "deliverable/FOLLOWUP.md"
 } as const;
 export type PromptName = keyof typeof PROMPT_FILES;
 

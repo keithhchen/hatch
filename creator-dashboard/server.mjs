@@ -22,6 +22,9 @@ import {
 import { PortalStateStore, stateError } from "./portalState.mjs";
 import { createLibrary } from "./library.mjs";
 import { createGuestTokens } from "./guest.mjs";
+
+/** What an access code may be made of: the Runtime reads it from `hatch_code.<code>~<token>`. */
+const ACCESS_CODE = /^[A-Za-z0-9_-]{4,64}$/;
 import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
@@ -216,8 +219,25 @@ export async function createDashboardApp(options = {}) {
   const guestTokens = guestTokenSecret ? createGuestTokens(guestTokenSecret) : undefined;
   const guestCookie = (request, token, maxAge = 365 * 24 * 3600) =>
     `hatch_guest=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
-  // Chat identity: a web session wins; otherwise the browser's guest token, minted on first need (a bad cookie counts as none).
+  // An access code the page holds travels beside the visitor's own token, for the Runtime to open that code's conversation. The page
+  // sends it in a header; the cookie carries it to the WebSocket, which cannot send one. An empty header forgets it.
+  const accessCodeCookie = (request, code) =>
+    `hatch_code=${encodeURIComponent(code)}; Path=/; SameSite=Lax; Max-Age=${code ? 30 * 24 * 3600 : 0}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
   const chatAuthentication = async (request, authenticate = (req) => authenticateRequest(req, registryUrl, fetchImpl, portalState)) => {
+    const authentication = await chatIdentity(request, authenticate);
+    if (authentication.error) return authentication;
+    const header = request.headers["x-hatch-access-code"];
+    const held = requestCookies(request).hatch_code ?? "";
+    const code = header === undefined ? held : (ACCESS_CODE.test(String(header)) ? String(header) : "");
+    const setCookie = code === held ? undefined : accessCodeCookie(request, code);
+    return {
+      ...authentication,
+      ...(code ? { token: `hatch_code.${code}~${authentication.token}` } : {}),
+      ...(setCookie ? { setCookie: [authentication.setCookie, setCookie].flat().filter(Boolean) } : {})
+    };
+  };
+  // Chat identity: a web session wins; otherwise the browser's guest token, minted on first need (a bad cookie counts as none).
+  const chatIdentity = async (request, authenticate) => {
     const authentication = await authenticate(request);
     if (!authentication.error || authentication.error.status !== 401 || bearerTokenFromAuthorization(request)) return authentication;
     if (!guestTokens) return { error: { status: 503, body: { error: { code: "guest_unavailable", message: "Guest chat is unavailable." } } } };
@@ -1374,7 +1394,7 @@ export async function createDashboardApp(options = {}) {
       const authentication = await chatAuthentication(request);
       if (authentication.error) throw Object.assign(new Error("Sign in to continue."), { status: authentication.error.status });
       // A guest that arrives without a cookie keeps the one minted for it here.
-      if (authentication.setCookie) chatWss.once("headers", headers => headers.push(`Set-Cookie: ${authentication.setCookie}`));
+      if (authentication.setCookie) chatWss.once("headers", headers => headers.push(...[authentication.setCookie].flat().map(cookie => `Set-Cookie: ${cookie}`)));
       chatWss.handleUpgrade(request, socket, head, browser => {
         new WebChatRuntimeBridge({ browser, runtimeUrl, token: authentication.token, requestId: requestIdFrom(request.headers["x-request-id"]) }).connect();
       });

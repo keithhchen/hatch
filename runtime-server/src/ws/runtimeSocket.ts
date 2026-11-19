@@ -195,7 +195,11 @@ export async function handleRuntimeSocket(
             await repositoryReady;
             // By the owner and the id the client knows: a conversation that moved to an account when its visitor signed in keeps its id.
             const owner = conversationBinding(nextBinding);
-            const conversation = nextBinding.explicit
+            // A Product with an access code opens only the conversation the session's code was used for.
+            const allowed = !(nextBinding.only && nextBinding.only.conversationId !== message.conversation_id)
+              && await edge.accessGate?.opens(nextBinding, message.conversation_id) !== false;
+            const conversation = !allowed ? undefined
+              : nextBinding.explicit
               ? await conversationRepository.findOwnedConversation({ ownerAccountId: owner.ownerAccountId, creatorId: owner.creatorId }, message.conversation_id)
               : await conversationRepository.getConversation(message.conversation_id);
             if (!conversation) {
