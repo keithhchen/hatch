@@ -140,6 +140,12 @@
         import upstream runtime 8400
     }
 
+    # Stylesheet and script of audit reports, at a versioned path that never changes (/report-assets/v1/report.css). The Runtime owns them.
+    @report_assets path /report-assets/*
+    handle @report_assets {
+        import upstream runtime 8400
+    }
+
     # Files the Agent saved (/file/<uuid>): a signed download link, no session. The Runtime owns them.
     @saved_files path /file/*
     handle @saved_files {
