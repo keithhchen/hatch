@@ -281,7 +281,13 @@ export function briefAccessCode(snapshot: BriefSnapshot | undefined): string | u
   return field ? briefAnswer(snapshot, field.id) : undefined;
 }
 
+/** The snapshot as a model may see it: an access code is a credential and stays in our database, so its field is left out. */
+export function redactedForModel(snapshot: BriefSnapshot): BriefSnapshot {
+  return { ...snapshot, fields: snapshot.fields.filter((field) => field.type !== "access_code") };
+}
+
 export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {
+  const shown = redactedForModel(snapshot);
   return [
     "# Task Brief",
     "This immutable BriefSnapshot is the Expert-defined input for this Task.",
@@ -290,6 +296,6 @@ export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {
     `Snapshot: ${snapshot.id}`,
     `BriefSpec digest: ${snapshot.spec_digest}`,
     "",
-    JSON.stringify({ fields: snapshot.fields }, null, 2)
+    JSON.stringify({ fields: shown.fields }, null, 2)
   ].join("\n");
 }

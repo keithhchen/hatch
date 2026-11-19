@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  briefAccessCode,
   briefEmail,
+  redactedForModel,
   briefSnapshotPromptBlock,
   createBriefSnapshot,
   draftBriefSpecForProduct,
@@ -90,4 +92,17 @@ test("the report email is for Products with the access code capability only", as
   assert.equal((await gatedReportEmailContext(gate(true), conversation, { productId: "p1" } as never))?.recipient, "a@b.co");
   assert.equal(await gatedReportEmailContext(gate(false), conversation, { productId: "p1" } as never), undefined);
   assert.equal(await gatedReportEmailContext(undefined, conversation, { productId: "p1" } as never), undefined);
+});
+
+test("the access code never reaches the model: not in the Brief text, not in the snapshot it is shown, still in ours", async () => {
+  const { titleInput } = await import("./chat/conversationTitles.js");
+  const spec = { contract_version: "1", fields: [{ id: "website", label: "网址", required: true, type: "line" }, { id: "code", label: "兑换码", required: true, type: "access_code" }] } as const;
+  const snapshot = createBriefSnapshot(spec, [{ field_id: "website", value: "example.com" }, { field_id: "code", value: "MSC234567" }]);
+  const block = briefSnapshotPromptBlock(snapshot);
+  assert.ok(block.includes("example.com"));
+  assert.ok(!block.includes("MSC234567") && !block.includes("兑换码") && !block.includes('"code"'));
+  assert.ok(!redactedForModel(snapshot).fields.some((field) => field.value === "MSC234567"));
+  const title = titleInput({ briefSnapshot: snapshot }, []) ?? "";
+  assert.ok(title.includes("example.com") && !title.includes("MSC234567"));
+  assert.equal(briefAccessCode(snapshot), "MSC234567", "our own copy keeps it");
 });

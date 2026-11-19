@@ -2,9 +2,20 @@ import type http from "node:http";
 import { isIP } from "node:net";
 import type { AccessCodes } from "./accessCodes.js";
 
-/** The caller's address: X-Real-IP (set by the merchant's proxy, passed through unchanged), else the first X-Forwarded-For hop. */
-export function clientIp(headers: http.IncomingHttpHeaders): string | undefined {
-  return [headers["x-real-ip"], String(headers["x-forwarded-for"] ?? "").split(",")[0]].map(v => String(v ?? "").trim()).find(v => isIP(v));
+const firstValidIp = (...values: unknown[]) => values.map(v => String(v ?? "").trim()).find(v => isIP(v));
+const firstHop = (headers: http.IncomingHttpHeaders) => String(headers["x-forwarded-for"] ?? "").split(",")[0];
+
+/** The payer behind a request that came through the merchant's proxy (anyteach.cn), which sets X-Real-IP: that, else the first X-Forwarded-For hop. */
+export function payerIp(headers: http.IncomingHttpHeaders): string | undefined {
+  return firstValidIp(headers["x-real-ip"], firstHop(headers));
+}
+
+/**
+ * Who a limit counts, for requests straight from the browser through Cloudflare: CF-Connecting-IP, else the first X-Forwarded-For hop.
+ * Never X-Real-IP: on this path the client writes it.
+ */
+export function limiterKey(headers: http.IncomingHttpHeaders): string | undefined {
+  return firstValidIp(headers["cf-connecting-ip"], firstHop(headers));
 }
 
 /** Counts failures per key; a key at its limit is blocked until old failures age out. */
@@ -18,10 +29,10 @@ export class TooManyAttempts extends Error {
   constructor() { super("尝试次数过多，请稍后再试"); }
 }
 
-/** In memory, for one Runtime instance: at most `limit` failures per `windowMs`. */
+/** In memory, for one Runtime instance: at most `limit` failures per `windowMs` (a venue's Wi-Fi puts many people behind one address). */
 export class MemoryAttemptLimiter implements AttemptLimiter {
   private readonly failures = new Map<string, number[]>();
-  constructor(private readonly limit = 10, private readonly windowMs = 10 * 60_000, private readonly now: () => number = Date.now) {}
+  constructor(private readonly limit = 30, private readonly windowMs = 10 * 60_000, private readonly now: () => number = Date.now) {}
 
   private recent(key: string): number[] {
     const cutoff = this.now() - this.windowMs;

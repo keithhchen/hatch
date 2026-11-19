@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createVerify } from "node:crypto";
 import test from "node:test";
 import { NotificationRejected, WeChatPayError, WeChatPayV3, decryptResource, requestMessage, rfc3339Beijing } from "./wechatPay.js";
-import { fakeWeChat, signedNotification, testKeys } from "./wechatPay.testkit.js";
+import { fakeWeChat, freshKeyPair, signedNotification, testKeys } from "./wechatPay.testkit.js";
 
 const order = { outTradeNo: "hp0123456789abcdef01234567", description: "Hatch 访问码", amountFen: 990, expiresAt: new Date("2026-11-19T04:15:00Z") };
 
@@ -32,6 +32,9 @@ test("requests are signed over METHOD, URL, timestamp, nonce and body, each endi
     assert.equal(sent.time_expire, "2026-11-19T12:15:00+08:00");
     assert.equal(sent.notify_url, keys.config.notifyUrl);
     assert.equal(logs[0]!.requestId, "req-1");
+    // WeChat rejects Node's default Accept-Language (406 PARAM_ERROR).
+    assert.equal(request.headers["accept-language"], "zh-CN");
+    assert.match(String(request.headers["user-agent"]), /hatch/);
   } finally { await wechat.close(); }
 });
 
@@ -91,26 +94,26 @@ test("an order WeChat does not know is NOTFOUND, not an error", async () => {
   } finally { await wechat.close(); }
 });
 
-test("a notification verifies with the WeChat Pay public key and decrypts", () => {
+test("a notification verifies with the WeChat Pay public key and decrypts", async () => {
   const keys = testKeys(), pay = new WeChatPayV3(keys.config, { log: () => undefined });
   const { body, headers } = signedNotification({ platformPrivatePem: keys.platformPrivatePem, transaction: { trade_state: "SUCCESS", out_trade_no: "hpx", transaction_id: "42000", mchid: "1639838957", amount: { total: 990 }, attach: "https://gethatchapp.com/p/1" } });
-  assert.deepEqual(pay.readNotification(headers, body), { tradeState: "SUCCESS", outTradeNo: "hpx", transactionId: "42000", amountFen: 990, mchid: "1639838957", attach: "https://gethatchapp.com/p/1" });
+  assert.deepEqual(await pay.readNotification(headers, body), { tradeState: "SUCCESS", outTradeNo: "hpx", transactionId: "42000", amountFen: 990, mchid: "1639838957", attach: "https://gethatchapp.com/p/1" });
 });
 
-test("a notification is rejected for a probe signature, wrong serial, bad signature, tampered body and stale timestamp", () => {
+test("a notification is rejected for a probe signature, wrong serial, bad signature, tampered body and stale timestamp", async () => {
   const keys = testKeys(), pay = new WeChatPayV3(keys.config, { log: () => undefined });
   const good = signedNotification({ platformPrivatePem: keys.platformPrivatePem, transaction: { trade_state: "SUCCESS", out_trade_no: "hpx" } });
   const rejects = (headers: Record<string, string | undefined>, body: string, reason: RegExp) =>
-    assert.throws(() => pay.readNotification(headers, body), (error: unknown) => error instanceof NotificationRejected && reason.test(error.message));
+    assert.rejects(pay.readNotification(headers, body), (error: unknown) => error instanceof NotificationRejected && reason.test(error.message));
 
-  rejects({ ...good.headers, "wechatpay-signature": "WECHATPAY/SIGNTEST/" + good.headers["wechatpay-signature"] }, good.body, /probe/);
-  rejects({ ...good.headers, "wechatpay-serial": "PUB_KEY_ID_OTHER" }, good.body, /serial/);
-  rejects(good.headers, good.body.replace("evt", "evx"), /bad signature/);
-  const otherKey = signedNotification({ platformPrivatePem: testKeys().platformPrivatePem, transaction: {} });
-  rejects(otherKey.headers, otherKey.body, /bad signature/);
+  await rejects({ ...good.headers, "wechatpay-signature": "WECHATPAY/SIGNTEST/" + good.headers["wechatpay-signature"] }, good.body, /probe/);
+  await rejects({ ...good.headers, "wechatpay-serial": "PUB_KEY_ID_OTHER" }, good.body, /serial/);
+  await rejects(good.headers, good.body.replace("evt", "evx"), /bad signature/);
+  const otherKey = signedNotification({ platformPrivatePem: freshKeyPair().privateKey, transaction: {} });
+  await rejects(otherKey.headers, otherKey.body, /bad signature/);
   const stale = signedNotification({ platformPrivatePem: keys.platformPrivatePem, timestamp: Math.floor(Date.now() / 1000) - 3600, transaction: {} });
-  rejects(stale.headers, stale.body, /stale/);
-  rejects({}, good.body, /missing/);
+  await rejects(stale.headers, stale.body, /stale/);
+  await rejects({}, good.body, /missing/);
 });
 
 test("AES-256-GCM resource: round trip, and a wrong key or tampered ciphertext fails", () => {

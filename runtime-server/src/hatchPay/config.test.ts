@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hatchPayConfigFromEnvironment } from "./config.js";
-import { ResendSender, accessCodeEmail } from "./email.js";
+import { ResendSender } from "./email.js";
 import { fakeWeChat } from "./wechatPay.testkit.js";
 
 const env = {
@@ -26,11 +26,21 @@ test("any setting missing or wrong: disabled, naming it, never a default", () =>
   assert.match((hatchPayConfigFromEnvironment({ ...env, WECHATPAY_APIV3_KEY: "short" }) as { disabled: string }).disabled, /32 bytes/);
 });
 
+test("without a public key and id the config is for platform certificates; one without the other is refused", () => {
+  const certificates = hatchPayConfigFromEnvironment({ ...env, WECHATPAY_PUBLIC_KEY_ID: "", WECHATPAY_PUBLIC_KEY_B64: "" });
+  assert.ok("config" in certificates);
+  assert.equal(certificates.config.wechat.publicKeyId, undefined);
+  const publicKey = hatchPayConfigFromEnvironment({ ...env, WECHATPAY_PUBLIC_KEY_ID: "PUB_KEY_ID_1", WECHATPAY_PUBLIC_KEY_B64: Buffer.from("PUBLIC").toString("base64") });
+  assert.ok("config" in publicKey);
+  assert.equal(publicKey.config.wechat.publicKeyPem, "PUBLIC");
+  assert.match((hatchPayConfigFromEnvironment({ ...env, WECHATPAY_PUBLIC_KEY_ID: "PUB_KEY_ID_1", WECHATPAY_PUBLIC_KEY_B64: "" }) as { disabled: string }).disabled, /both set or both empty/);
+});
+
 test("Resend: bearer key, idempotency key, and the access code with its link", async () => {
   const server = await fakeWeChat(() => ({ body: { id: "mail-1" } }));
   try {
     const sender = new ResendSender("re_x", { endpoint: `${server.url}/emails` });
-    const message = accessCodeEmail({ from: "Hatch <noreply@send.gethatchapp.com>", to: "a@b.co", code: "ABCD2345", link: "https://gethatchapp.com/p/1?code=ABCD2345" });
+    const message = { from: "Hatch <noreply@gethatchapp.com>", to: "a@b.co", subject: "s", html: "<p>ABCD2345</p>", text: "https://gethatchapp.com/c/ABCD2345", idempotencyKey: "access-code-ABCD2345" };
     assert.deepEqual(await sender.send(message), { id: "mail-1" });
     const request = server.requests[0]!;
     assert.equal(request.headers.authorization, "Bearer re_x");
@@ -38,8 +48,8 @@ test("Resend: bearer key, idempotency key, and the access code with its link", a
     const sent = JSON.parse(request.body);
     assert.deepEqual(sent.to, ["a@b.co"]);
     assert.match(sent.html, /ABCD2345/);
-    assert.match(sent.text, /gethatchapp\.com\/p\/1\?code=ABCD2345/);
+    assert.match(sent.text, /gethatchapp\.com\/c\/ABCD2345/);
   } finally { await server.close(); }
   const failing = await fakeWeChat(() => ({ status: 422, body: { message: "bad from" } }));
-  try { await assert.rejects(new ResendSender("k", { endpoint: `${failing.url}/emails` }).send(accessCodeEmail({ from: "x", to: "a@b.co", code: "C" })), /422/); } finally { await failing.close(); }
+  try { await assert.rejects(new ResendSender("k", { endpoint: `${failing.url}/emails` }).send({ from: "x", to: "a@b.co", subject: "s", html: "h", text: "t", idempotencyKey: "k" }), /422/); } finally { await failing.close(); }
 });
