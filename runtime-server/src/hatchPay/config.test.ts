@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hatchPayConfigFromEnvironment } from "./config.js";
+import { TransientEmailError } from "../agentBox/reportEmail.js";
 import { ResendSender } from "./email.js";
 import { fakeWeChat } from "./wechatPay.testkit.js";
 
@@ -51,5 +52,11 @@ test("Resend: bearer key, idempotency key, and the access code with its link", a
     assert.match(sent.text, /gethatchapp\.com\/c\/ABCD2345/);
   } finally { await server.close(); }
   const failing = await fakeWeChat(() => ({ status: 422, body: { message: "bad from" } }));
-  try { await assert.rejects(new ResendSender("k", { endpoint: `${failing.url}/emails` }).send({ from: "x", to: "a@b.co", subject: "s", html: "h", text: "t", idempotencyKey: "k" }), /422/); } finally { await failing.close(); }
+  const mail = { from: "x", to: "a@b.co", subject: "s", html: "h", text: "t", idempotencyKey: "k" };
+  try { await assert.rejects(new ResendSender("k", { endpoint: `${failing.url}/emails` }).send(mail), (e: Error) => /422/.test(e.message) && !(e instanceof TransientEmailError)); } finally { await failing.close(); }
+  for (const status of [429, 503]) {
+    const transient = await fakeWeChat(() => ({ status, body: { message: "later" } }));
+    try { await assert.rejects(new ResendSender("k", { endpoint: `${transient.url}/emails` }).send(mail), TransientEmailError); } finally { await transient.close(); }
+  }
+  await assert.rejects(new ResendSender("k", { fetch: async () => { throw new TypeError("fetch failed"); } }).send(mail), TransientEmailError);
 });

@@ -15,6 +15,23 @@ export interface EmailSender {
 
 export class TransientEmailError extends Error {}
 
+/** No status (the request never got an answer), 429 and 5xx are worth another try; anything else (bad address, bad key) is not. */
+export const isTransientStatus = (status: number | null) => status === null || status === 429 || status >= 500;
+
+export const DEFAULT_RETRY_DELAYS_MS = [1_000, 5_000, 20_000];
+
+/** Runs `attempt`, and runs it again after each delay while it throws TransientEmailError; any other error, or the last one, is thrown. */
+export async function retryTransient<T>(attempt: () => Promise<T>, delaysMs: number[], onRetry: (attemptNumber: number, error: TransientEmailError) => void): Promise<T> {
+  for (let n = 0; ; n++) {
+    try { return await attempt(); } catch (error) {
+      const delay = delaysMs[n];
+      if (!(error instanceof TransientEmailError) || delay === undefined) throw error;
+      onRetry(n + 1, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 /** Resend, by its SDK. Network failures, 429 and 5xx are transient; anything else (bad address, bad key) is not. */
 export class ResendSender implements EmailSender {
   private readonly client: Resend;
@@ -27,7 +44,7 @@ export class ResendSender implements EmailSender {
     } catch (error) { throw new TransientEmailError(error instanceof Error ? error.message : "send failed"); }
     if (result.error) {
       const status = result.error.statusCode;
-      if (status === null || status === 429 || status >= 500) throw new TransientEmailError(result.error.message);
+      if (isTransientStatus(status)) throw new TransientEmailError(result.error.message);
       throw new Error(`${result.error.name}: ${result.error.message}`);
     }
     return { id: result.data!.id };
@@ -115,7 +132,7 @@ export class ReportEmails {
   private readonly retryDelaysMs: number[];
   private readonly log: ReportEmailLog;
   constructor(private readonly options: ReportEmailOptions) {
-    this.retryDelaysMs = options.retryDelaysMs ?? [1_000, 5_000, 20_000];
+    this.retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
     this.log = options.log ?? stdoutLog;
   }
 
@@ -140,18 +157,10 @@ export class ReportEmails {
         from: this.options.from, to: job.recipient, ...this.options.replyTo ? { replyTo: this.options.replyTo } : {},
         subject: renderTemplate(subject, values, true).replace(/\s+/g, " ").trim(), html: rendered, text: htmlToText(rendered), idempotencyKey: job.pageId
       };
-      for (let attempt = 0; ; attempt++) {
-        try {
-          const { id } = await sender.send(message);
-          await pages.markEmailed(job.pageId, id);
-          return this.log("report_email_sent", { page_id: job.pageId, to, message_id: id, attempts: attempt + 1 });
-        } catch (error) {
-          const delay = this.retryDelaysMs[attempt];
-          if (!(error instanceof TransientEmailError) || delay === undefined) throw error;
-          this.log("report_email_retry", { page_id: job.pageId, to, attempt: attempt + 1 });
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
+      let attempts = 1;
+      const { id } = await retryTransient(() => sender.send(message), this.retryDelaysMs, attempt => { attempts = attempt + 1; this.log("report_email_retry", { page_id: job.pageId, to, attempt }); });
+      await pages.markEmailed(job.pageId, id);
+      return this.log("report_email_sent", { page_id: job.pageId, to, message_id: id, attempts });
     } catch (error) {
       // Not sent: give the claim back, so publishing the page again tries again.
       await pages.releaseEmail(job.pageId).catch(() => undefined);

@@ -271,9 +271,9 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
     if (!activation) log.error("hatch_pay_unknown_paid_order", { outTradeNo: state.outTradeNo, transactionId: state.transactionId });
     else if (activation.status === "pending") log.error("hatch_pay_amount_mismatch", { outTradeNo: state.outTradeNo, transactionId: state.transactionId, amountFen: state.amountFen });
     else if (activation.activated && activation.email) {
-      try {
-        await this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email, ...activation.name ? { name: activation.name } : {} });
-      } catch (error) { log.error("hatch_pay_email_failed", { outTradeNo: state.outTradeNo, code: activation.code, error }); }
+      // In the background: the retries take up to 26s, and neither the WeChat callback nor the return page waits for them.
+      this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email, ...activation.name ? { name: activation.name } : {} })
+        .catch(error => log.error("hatch_pay_email_failed", { outTradeNo: state.outTradeNo, code: activation.code, error }));
     }
     return activation;
   }

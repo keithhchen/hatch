@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { AccessCodeMailer, DEFAULT_SUBJECT_PROMPT, DEFAULT_TEMPLATE_PROMPT } from "./codeMail.js";
 import type { EmailMessage } from "./email.js";
-import { renderTemplate } from "../agentBox/reportEmail.js";
+import { renderTemplate, TransientEmailError } from "../agentBox/reportEmail.js";
 
 const DEFAULTS: Record<string, string> = {
   [DEFAULT_TEMPLATE_PROMPT]: '<p>默认 {{product_name}}{{#expert_name}} / {{expert_name}}{{/expert_name}} ¥{{amount}}</p><a href="{{code_url}}">{{code}}</a>',
@@ -71,4 +71,43 @@ test("the code email gets the buyer's name as {{name}}; the block vanishes when 
   await mailer.send({ code: "MSC222222", productId: "p", to: "a@b.co" });
   assert.equal(sent[0]!.html, "<p>王&lt;小明&gt;，你的码 MSC7K2P9X</p>");
   assert.equal(sent[1]!.html, "<p>你的码 MSC222222</p>");
+});
+
+/** A sender that fails with each of `failures` in turn, then accepts; every call is recorded. */
+const flaky = (...failures: Error[]) => {
+  const calls: EmailMessage[] = [];
+  const queue = [...failures];
+  const mailer = new AccessCodeMailer({
+    sender: { send: async m => { calls.push(m); const failure = queue.shift(); if (failure) throw failure; return { id: "m" }; } },
+    from: "Hatch <noreply@gethatchapp.com>", priceFen: 990, retryDelaysMs: [1, 1, 1],
+    prompts: { get: async name => DEFAULTS[name]! }, products: { describe: async () => ({ productName: "P" }) }
+  });
+  return { calls, mailer };
+};
+
+test("a 429 then success sends once more, under the same idempotency key, and logs the failed attempt", async () => {
+  const errors = mock.method(console, "error", () => undefined);
+  try {
+    const { calls, mailer } = flaky(new TransientEmailError("429"));
+    await mailer.send({ code: "MSC666666", productId: "p", to: "a@b.co" });
+    assert.equal(calls.length, 2, "one failed try, one accepted");
+    assert.deepEqual(calls.map(c => c.idempotencyKey), ["access-code-MSC666666", "access-code-MSC666666"]);
+    assert.equal(errors.mock.calls.filter(c => String(c.arguments[0]).includes("hatch_pay_email_retry")).length, 1);
+  } finally { errors.mock.restore(); }
+});
+
+test("a permanent error (400) is not retried", async () => {
+  const { calls, mailer } = flaky(new Error("Resend 400: bad address"));
+  await assert.rejects(mailer.send({ code: "MSC777777", productId: "p", to: "a@b.co" }), /400/);
+  assert.equal(calls.length, 1);
+});
+
+test("transient failures past the three retries give up", async () => {
+  const errors = mock.method(console, "error", () => undefined);
+  try {
+    const { calls, mailer } = flaky(...[1, 2, 3, 4].map(n => new TransientEmailError(`503 #${n}`)));
+    await assert.rejects(mailer.send({ code: "MSC888888", productId: "p", to: "a@b.co" }), /503 #4/);
+    assert.equal(calls.length, 4, "the first try and the retries after 1s, 5s and 20s");
+    assert.equal(errors.mock.calls.filter(c => String(c.arguments[0]).includes("hatch_pay_email_retry")).length, 3);
+  } finally { errors.mock.restore(); }
 });
