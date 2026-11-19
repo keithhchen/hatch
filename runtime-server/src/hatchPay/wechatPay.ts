@@ -1,29 +1,32 @@
-import { log as appLog } from "../observability/log.js";
 import { createDecipheriv, createPrivateKey, createPublicKey, randomBytes, createSign, createVerify, type KeyObject } from "node:crypto";
+import { log as appLog } from "../observability/log.js";
 
 /** What the pay flow needs from WeChat Pay (API v3). The adapter below talks to the real API; tests give it a fake WeChat server's URL. */
 export interface WeChatPay {
+  /** False until the keys that verify WeChat's signatures are loaded: the pay routes answer 503 meanwhile. */
+  ready(): boolean;
   createH5Order(order: OrderInput & { payerIp: string }): Promise<{ h5Url: string }>;
   createJsapiOrder(order: OrderInput & { openid: string }): Promise<{ prepayId: string }>;
   queryOrder(outTradeNo: string): Promise<OrderState>;
   /** The parameters of `WeixinJSBridge.invoke('getBrandWCPayRequest', …)`, signed for this prepay id. */
   jsapiInvokeParams(prepayId: string): JsapiInvokeParams;
   /** Throws NotificationRejected unless the request really is WeChat's; returns the paid transaction. */
-  readNotification(headers: Record<string, string | undefined>, body: string): OrderState;
+  readNotification(headers: Record<string, string | undefined>, body: string): Promise<OrderState>;
 }
 
 export type OrderInput = { outTradeNo: string; description: string; amountFen: number; expiresAt: Date; /** Comes back in the query and the notification (WeChat allows 128 characters). */ attach?: string };
 export type OrderState = { tradeState: string; outTradeNo: string; transactionId?: string; amountFen?: number; mchid?: string; attach?: string };
 export type JsapiInvokeParams = { appId: string; timeStamp: string; nonceStr: string; package: string; signType: "RSA"; paySign: string };
 
+/** WeChat signs with either a WeChat Pay public key (id + key given) or platform certificates fetched with the APIv3 key (neither given). */
 export type WeChatPayConfig = {
   mchid: string;
   appid: string;
   serial: string;
   privateKeyPem: string;
   apiV3Key: string;
-  publicKeyId: string;
-  publicKeyPem: string;
+  publicKeyId?: string;
+  publicKeyPem?: string;
   notifyUrl: string;
 };
 
@@ -36,7 +39,8 @@ export class NotificationRejected extends Error {}
 
 type Log = (entry: Record<string, unknown>) => void;
 const DEFAULT_HOSTS = ["https://api.mch.weixin.qq.com", "https://api2.mch.weixin.qq.com"];
-const NOTIFICATION_MAX_AGE_S = 5 * 60;
+const SIGNATURE_MAX_AGE_S = 5 * 60;
+const CERTIFICATES_PATH = "/v3/certificates";
 
 /** The documented signature message: each line ends with a newline, the body line too (empty for GET). */
 export const requestMessage = (method: string, pathAndQuery: string, timestamp: string, nonce: string, body: string) => `${method}\n${pathAndQuery}\n${timestamp}\n${nonce}\n${body}\n`;
@@ -48,22 +52,89 @@ export function rfc3339Beijing(date: Date): string {
   return `${shifted}+08:00`;
 }
 
+/** The key that verifies a signature, by the serial in `Wechatpay-Serial`. */
+export interface VerifierKeys {
+  ready(): boolean;
+  keyFor(serial: string): Promise<KeyObject | undefined>;
+}
+
+class PublicKeyVerifier implements VerifierKeys {
+  constructor(private readonly id: string, private readonly key: KeyObject) {}
+  ready() { return true; }
+  async keyFor(serial: string) { return serial === this.id ? this.key : undefined; }
+}
+
+/**
+ * Platform certificates, cached by serial. An unknown serial refetches once (at most once per cooldown); the whole set is refreshed
+ * every 12 hours by the owner of this object.
+ */
+export class PlatformCertificates implements VerifierKeys {
+  private readonly certificates = new Map<string, KeyObject>();
+  private lastAttempt = Number.NEGATIVE_INFINITY;
+  constructor(private readonly fetchAll: () => Promise<Array<{ serial: string; pem: string }>>, private readonly cooldownMs = 30_000, private readonly now: () => number = Date.now) {}
+
+  ready() { return this.certificates.size > 0; }
+
+  async load(): Promise<void> {
+    this.lastAttempt = this.now();
+    const fetched = await this.fetchAll();
+    if (!fetched.length) throw new Error("WeChat Pay returned no platform certificates.");
+    this.certificates.clear();
+    for (const { serial, pem } of fetched) this.certificates.set(serial, createPublicKey(pem));
+  }
+
+  async keyFor(serial: string): Promise<KeyObject | undefined> {
+    const known = this.certificates.get(serial);
+    if (known || this.now() - this.lastAttempt < this.cooldownMs) return known;
+    await this.load().catch(error => appLog.warn("wechatpay_certificates_refetch_failed", { error }));
+    return this.certificates.get(serial);
+  }
+}
+
 export class WeChatPayV3 implements WeChatPay {
   private readonly privateKey: KeyObject;
-  private readonly publicKey: KeyObject;
+  private readonly verifier: VerifierKeys;
+  private readonly certificates?: PlatformCertificates;
 
   /** `hosts`: the primary first, then the backup, tried in turn only when a request fails before WeChat answers. */
   constructor(
     private readonly config: WeChatPayConfig,
-    private readonly options: { hosts?: string[]; log?: Log; fetch?: typeof fetch; now?: () => Date; timeoutMs?: number } = {}
+    private readonly options: { hosts?: string[]; log?: Log; fetch?: typeof fetch; now?: () => Date; timeoutMs?: number; certificateCooldownMs?: number } = {}
   ) {
     if (Buffer.byteLength(config.apiV3Key) !== 32) throw new Error("WECHATPAY_APIV3_KEY must be 32 bytes.");
+    if (!config.publicKeyId !== !config.publicKeyPem) throw new Error("WeChat Pay public key id and key go together.");
     this.privateKey = createPrivateKey(config.privateKeyPem);
-    this.publicKey = createPublicKey(config.publicKeyPem);
+    if (config.publicKeyId && config.publicKeyPem) this.verifier = new PublicKeyVerifier(config.publicKeyId, createPublicKey(config.publicKeyPem));
+    else this.verifier = this.certificates = new PlatformCertificates(() => this.fetchCertificates(), options.certificateCooldownMs, () => this.now.getTime());
   }
 
   private get log(): Log { return this.options.log ?? (entry => appLog.info("wechatpay_request", entry)); }
   private get now() { return this.options.now?.() ?? new Date(); }
+
+  ready() { return this.verifier.ready(); }
+
+  /**
+   * Certificate mode: fetch until it works (a transient failure at startup must not stop the Runtime), then every 12 hours.
+   * Timers never keep the process alive. A no-op with a public key.
+   */
+  start(options: { retryMs?: number; refreshMs?: number } = {}): void {
+    const certificates = this.certificates;
+    if (!certificates) return;
+    const retryMs = options.retryMs ?? 10_000;
+    const attempt = () => certificates.load().then(
+      () => appLog.info("wechatpay_certificates_loaded", {}),
+      error => { appLog.warn("wechatpay_certificates_failed", { error }); setTimeout(attempt, retryMs).unref(); }
+    );
+    void attempt();
+    setInterval(() => void certificates.load().catch(error => appLog.warn("wechatpay_certificates_refresh_failed", { error })), options.refreshMs ?? 12 * 3600_000).unref();
+  }
+
+  /** GET /v3/certificates. Its response cannot be verified (the certificates are what it delivers); the APIv3 key decrypting them is the check. */
+  async fetchCertificates(): Promise<Array<{ serial: string; pem: string }>> {
+    const body = await this.call("GET", CERTIFICATES_PATH, undefined, { verify: false });
+    const entries = (body.data ?? []) as Array<{ serial_no: string; encrypt_certificate: { ciphertext: string; nonce: string; associated_data?: string } }>;
+    return entries.map(entry => ({ serial: entry.serial_no, pem: decryptResource(this.config.apiV3Key, entry.encrypt_certificate) }));
+  }
 
   createH5Order(order: OrderInput & { payerIp: string }) {
     return this.createOrder("h5", order, { scene_info: { payer_client_ip: order.payerIp, h5_info: { type: "Wap" } } })
@@ -99,16 +170,21 @@ export class WeChatPayV3 implements WeChatPay {
     return { appId: this.config.appid, timeStamp, nonceStr, package: pkg, signType: "RSA", paySign };
   }
 
-  readNotification(headers: Record<string, string | undefined>, body: string): OrderState {
+  /** WeChat's signature over `timestamp\nnonce\nbody\n`, by the key of the serial it names. Used for callbacks and responses alike. */
+  private async verify(headers: Record<string, string | undefined>, body: string): Promise<void> {
     const signature = headers["wechatpay-signature"], serial = headers["wechatpay-serial"];
     const timestamp = headers["wechatpay-timestamp"], nonce = headers["wechatpay-nonce"];
     if (!signature || !serial || !timestamp || !nonce) throw new NotificationRejected("missing signature headers");
     // WeChat's own probe: signed with a throwaway key so that a verifier that accepts it is broken.
     if (signature.startsWith("WECHATPAY/SIGNTEST/")) throw new NotificationRejected("signature probe");
-    if (serial !== this.config.publicKeyId) throw new NotificationRejected(`unknown serial ${serial}`);
-    if (Math.abs(this.now.getTime() / 1000 - Number(timestamp)) > NOTIFICATION_MAX_AGE_S) throw new NotificationRejected("stale timestamp");
-    const valid = createVerify("RSA-SHA256").update(`${timestamp}\n${nonce}\n${body}\n`).verify(this.publicKey, signature, "base64");
-    if (!valid) throw new NotificationRejected("bad signature");
+    const key = await this.verifier.keyFor(serial);
+    if (!key) throw new NotificationRejected(`unknown serial ${serial}`);
+    if (Math.abs(this.now.getTime() / 1000 - Number(timestamp)) > SIGNATURE_MAX_AGE_S) throw new NotificationRejected("stale timestamp");
+    if (!createVerify("RSA-SHA256").update(`${timestamp}\n${nonce}\n${body}\n`).verify(key, signature, "base64")) throw new NotificationRejected("bad signature");
+  }
+
+  async readNotification(headers: Record<string, string | undefined>, body: string): Promise<OrderState> {
+    await this.verify(headers, body);
     let envelope: { event_type?: string; resource?: { algorithm?: string; ciphertext: string; nonce: string; associated_data?: string } };
     try { envelope = JSON.parse(body); } catch { throw new NotificationRejected("body is not JSON"); }
     if (!envelope.resource || envelope.resource.algorithm !== "AEAD_AES_256_GCM") throw new NotificationRejected("no AEAD_AES_256_GCM resource");
@@ -118,7 +194,7 @@ export class WeChatPayV3 implements WeChatPay {
   }
 
   /** One signed request. Transport failures move to the next host; any answer from WeChat, error or not, is final. */
-  private async call(method: "GET" | "POST", pathAndQuery: string, payload?: unknown): Promise<Record<string, unknown>> {
+  private async call(method: "GET" | "POST", pathAndQuery: string, payload?: unknown, options: { verify?: boolean } = {}): Promise<Record<string, unknown>> {
     const body = payload === undefined ? "" : JSON.stringify(payload);
     const doFetch = this.options.fetch ?? fetch;
     let lastFailure: unknown;
@@ -130,7 +206,8 @@ export class WeChatPayV3 implements WeChatPay {
       try {
         response = await doFetch(`${host}${pathAndQuery}`, {
           method, ...body ? { body } : {}, signal: AbortSignal.timeout(this.options.timeoutMs ?? 10_000),
-          headers: { authorization, accept: "application/json", "content-type": "application/json", "user-agent": "hatch-runtime/wechatpay" }
+          // Node's default Accept-Language is one WeChat rejects (406 PARAM_ERROR).
+          headers: { authorization, accept: "application/json", "content-type": "application/json", "accept-language": "zh-CN", "user-agent": "hatch-runtime/wechatpay" }
         });
       } catch (error) {
         this.log({ host, method, path: pathAndQuery.split("?")[0], transportError: error instanceof Error ? error.message : String(error) });
@@ -142,7 +219,17 @@ export class WeChatPayV3 implements WeChatPay {
       const text = await response.text();
       let parsed: Record<string, unknown> = {};
       try { parsed = text ? JSON.parse(text) : {}; } catch { /* kept empty: reported below */ }
-      if (response.status >= 200 && response.status < 300) return parsed;
+      if (response.status >= 200 && response.status < 300) {
+        if (options.verify !== false) {
+          const headers: Record<string, string | undefined> = {};
+          for (const name of ["wechatpay-signature", "wechatpay-serial", "wechatpay-timestamp", "wechatpay-nonce"]) headers[name] = response.headers.get(name) ?? undefined;
+          try { await this.verify(headers, text); } catch (error) {
+            if (error instanceof NotificationRejected) throw new Error(`WeChat Pay response rejected (${error.message}), request-id ${requestId}`);
+            throw error;
+          }
+        }
+        return parsed;
+      }
       throw new WeChatPayError(response.status, String(parsed.code ?? "UNKNOWN"), String(parsed.message ?? text.slice(0, 200)), requestId);
     }
     throw new Error(`WeChat Pay unreachable: ${lastFailure instanceof Error ? lastFailure.message : String(lastFailure)}`);

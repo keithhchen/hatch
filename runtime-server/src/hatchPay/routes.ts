@@ -46,6 +46,11 @@ export class HatchPay {
   constructor(private readonly deps: HatchPayDeps) {}
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    // Until WeChat's verification keys are loaded nothing it says can be checked: not open yet, and a notification is left for its retry.
+    if (!this.deps.wechat.ready()) {
+      res.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "retry-after": "10" });
+      return void res.end("支付暂未开放");
+    }
     const route = url.pathname.replace(/^\/hatch-pay\/?/, "/");
     try {
       if (req.method === "GET" && route === "/") return await this.payPage(req, res, url);
@@ -186,7 +191,7 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     const headers: Record<string, string | undefined> = {};
     for (const name of ["wechatpay-signature", "wechatpay-serial", "wechatpay-timestamp", "wechatpay-nonce"]) headers[name] = [req.headers[name]].flat()[0];
     let state: OrderState;
-    try { state = this.deps.wechat.readNotification(headers, body); } catch (error) {
+    try { state = await this.deps.wechat.readNotification(headers, body); } catch (error) {
       if (!(error instanceof NotificationRejected)) throw error;
       log.warn("hatch_pay_notification_rejected", { reason: error.message });
       return this.json(res, 401, { code: "FAIL", message: "invalid notification" });

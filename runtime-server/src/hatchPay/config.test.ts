@@ -26,6 +26,16 @@ test("any setting missing or wrong: disabled, naming it, never a default", () =>
   assert.match((hatchPayConfigFromEnvironment({ ...env, WECHATPAY_APIV3_KEY: "short" }) as { disabled: string }).disabled, /32 bytes/);
 });
 
+test("without a public key and id the config is for platform certificates; one without the other is refused", () => {
+  const certificates = hatchPayConfigFromEnvironment({ ...env, WECHATPAY_PUBLIC_KEY_ID: "", WECHATPAY_PUBLIC_KEY_B64: "" });
+  assert.ok("config" in certificates);
+  assert.equal(certificates.config.wechat.publicKeyId, undefined);
+  const publicKey = hatchPayConfigFromEnvironment({ ...env, WECHATPAY_PUBLIC_KEY_ID: "PUB_KEY_ID_1", WECHATPAY_PUBLIC_KEY_B64: Buffer.from("PUBLIC").toString("base64") });
+  assert.ok("config" in publicKey);
+  assert.equal(publicKey.config.wechat.publicKeyPem, "PUBLIC");
+  assert.match((hatchPayConfigFromEnvironment({ ...env, WECHATPAY_PUBLIC_KEY_ID: "PUB_KEY_ID_1", WECHATPAY_PUBLIC_KEY_B64: "" }) as { disabled: string }).disabled, /both set or both empty/);
+});
+
 test("Resend: bearer key, idempotency key, and the access code with its link", async () => {
   const server = await fakeWeChat(() => ({ body: { id: "mail-1" } }));
   try {

@@ -36,7 +36,8 @@ export async function openHatchPay(options: { pool: PostgresQueryExecutor; envir
     log.warn("hatch_pay_disabled", { reason: `WeChat Pay keys do not load: ${error instanceof Error ? error.message : String(error)}` });
     return { codes, accessCodesFor };
   }
-  log.info("hatch_pay_enabled", { publicBase: config.publicBase, priceFen: config.priceFen });
+  wechat.start();
+  log.info("hatch_pay_enabled", { publicBase: config.publicBase, priceFen: config.priceFen, verification: config.wechat.publicKeyId ? "public_key" : "platform_certificates" });
   return {
     codes, accessCodesFor,
     pay: new HatchPay({
