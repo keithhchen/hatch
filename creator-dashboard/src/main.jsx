@@ -7,6 +7,7 @@ import { dashboardRequest } from "./data.js";
 import { parseDevelopersRoute } from "./developersGuide.js";
 import { parseHelpRoute } from "./helpRoute.js";
 import { WebChatRoute } from "./webChatRoute.js";
+import { CodeRoute } from "./codePageModel.js";
 import { ArtifactRoute } from "./artifactRoute.js";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
@@ -33,6 +34,7 @@ const HelpPage = lazyWithReload(() => import("./HelpPage.jsx"));
 const WebPage = lazyWithReload(() => import("./web/WebPage.jsx"));
 const WebChatPage = lazyWithReload(() => import("./WebChatPage.jsx"));
 const ArtifactPage = lazyWithReload(() => import("./ArtifactPage.jsx"));
+const CodePage = lazyWithReload(() => import("./CodePage.jsx"));
 const DesktopSignInPage = lazyWithReload(() => import("./DesktopSignInPage.jsx"));
 const ImLinkPage = lazyWithReload(() => import("./ImLinkPage.jsx"));
 
@@ -206,6 +208,10 @@ function App() {
 
   // Anyone can chat: a signed-out visitor opens the page as a guest, and the server asks them to sign in when the guest limit is reached.
   // `profile` is null for a guest. After a guest's conversations move to the account, the page is mounted again to read them.
+  // An access code's page, and the landing that sells codes: no session, the code is the credential.
+  const codeRoute = CodeRoute.parse(location.pathname);
+  if (codeRoute) return <Suspense fallback={<AppLoading />}><CodePage code={codeRoute.code} request={chatRequest} navigate={location.navigate} /></Suspense>;
+
   const chatRoute = WebChatRoute.parse(location.pathname);
   if (chatRoute) {
     if (chatWaiting) return <AppLoading />;

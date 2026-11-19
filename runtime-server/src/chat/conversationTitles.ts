@@ -1,4 +1,4 @@
-import type { BriefSnapshot } from "../brief.js";
+import { redactedForModel, type BriefSnapshot } from "../brief.js";
 import type { ConversationRecord, ConversationRepository, EndedRun, RunEnding } from "../conversationRepository.js";
 import { log } from "../observability/log.js";
 import type { Prompts } from "../prompts.js";
@@ -51,7 +51,7 @@ const clip = (text: string, chars: number) => { const all = [...text.trim()]; re
 
 /** The answers of a conversation started from a Brief, as the subject the user came with. */
 function briefText(brief: BriefSnapshot): string {
-  return brief.fields.filter(field => field.value?.trim()).map(field => `- ${clip(field.label, 120)}: ${clip(field.value!, BRIEF_VALUE_CHARS)}`).join("\n");
+  return redactedForModel(brief).fields.filter(field => field.value?.trim()).map(field => `- ${clip(field.label, 120)}: ${clip(field.value!, BRIEF_VALUE_CHARS)}`).join("\n");
 }
 
 export type TitleMessage = { role: "user" | "assistant"; content: string };

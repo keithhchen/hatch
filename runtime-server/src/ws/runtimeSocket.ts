@@ -193,6 +193,8 @@ export async function handleRuntimeSocket(
             );
             connectionAbortController.signal.throwIfAborted();
             await repositoryReady;
+            // A Product whose buyers come in by access code has no conversations for them to open.
+            if (await edge.accessGate?.required(nextBinding.productId)) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${message.conversation_id} was not found`);
             // By the owner and the id the client knows: a conversation that moved to an account when its visitor signed in keeps its id.
             const owner = conversationBinding(nextBinding);
             const conversation = nextBinding.explicit

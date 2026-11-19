@@ -152,11 +152,14 @@
 .web-chat__brief label { display: block; margin: 16px 0; }
 .web-chat__brief-label { display: flex; align-items: center; gap: 8px; color: var(--chat-ink); font-size: 15px; font-weight: 650; }
 .web-chat__brief-label em { padding: 2px 8px; border-radius: 999px; color: var(--web-gold); background: var(--web-yolk-soft); font-size: 12px; font-style: normal; font-weight: 600; }
-.web-chat__brief textarea {
+.web-chat__brief textarea,
+.web-chat__brief input {
   display: block; width: 100%; min-height: 92px; margin-top: 8px; padding: 12px 14px; resize: vertical; border: 1px solid var(--chat-border);
   border-radius: 16px; outline: 0; color: var(--chat-ink); background: var(--web-paper); font-size: 15px; line-height: 1.55;
 }
-.web-chat__brief textarea:focus { border-color: var(--web-yolk); box-shadow: 0 0 0 4px var(--web-yolk-soft); }
+.web-chat__brief input { min-height: 0; }
+.web-chat__brief textarea:focus,
+.web-chat__brief input:focus { border-color: var(--web-yolk); box-shadow: 0 0 0 4px var(--web-yolk-soft); }
 .web-chat__brief-error { margin: 0; color: var(--web-fail); font-size: 14px; font-weight: 600; }
 .web-chat__brief-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 

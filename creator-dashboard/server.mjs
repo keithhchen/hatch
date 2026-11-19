@@ -22,6 +22,10 @@ import {
 import { PortalStateStore, stateError } from "./portalState.mjs";
 import { createLibrary } from "./library.mjs";
 import { createGuestTokens } from "./guest.mjs";
+
+const ACCESS_CODE = /^[A-Z0-9_-]{4,64}$/;
+/** The page of an access code: its status, and its intake. A code is letters, digits, "_" and "-". */
+const CODE_PAGE_PATH = /^\/v1\/web-chat\/code\/([A-Za-z0-9_-]{4,64})(\/intake)?$/;
 import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
@@ -212,6 +216,8 @@ export async function createDashboardApp(options = {}) {
     ?? process.env.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN
     ?? "";
   // Guest chat needs its own signing secret, shared with the Runtime; without it there is no guest, and the answer says so.
+  // The Product the landing page (/c/) sells codes for; without one there is no landing.
+  const codePageProductId = String(options.codePageProductId ?? process.env.HATCH_CODE_PAGE_PRODUCT_ID ?? "").trim();
   const guestTokenSecret = String(options.guestTokenSecret ?? process.env.HATCH_GUEST_TOKEN_SECRET ?? "").trim();
   const guestTokens = guestTokenSecret ? createGuestTokens(guestTokenSecret) : undefined;
   const guestCookie = (request, token, maxAge = 365 * 24 * 3600) =>
@@ -396,6 +402,25 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
       }
+      // The page of an access code (/c/<code>): the code is the only credential, so these routes take no session. They reach the Runtime's
+      // /v1/codes/<code>, which limits wrong codes by the client address passed on here.
+      if (request.method === "GET" && url.pathname === "/v1/web-chat/code-landing") {
+        return codePageProductId ? send(response, 200, { product_id: codePageProductId }) : send(response, 404, { error: { code: "not_found", message: "Not found." } });
+      }
+      const codePage = CODE_PAGE_PATH.exec(url.pathname);
+      if (codePage && request.method === (codePage[2] ? "POST" : "GET")) {
+        if (codePage[2] && !allowedPublicOrigins.has(String(request.headers.origin ?? ""))) return send(response, 403, { error: { code: "origin_not_allowed", message: "Open Hatch directly and try again." } });
+        const clientAddress = String(request.headers["x-real-ip"] ?? "").trim() || String(request.headers["x-forwarded-for"] ?? "").split(",")[0].trim() || request.socket.remoteAddress || "";
+        const upstream = await fetchImpl(new URL(`/v1/codes/${codePage[1]}${codePage[2] ?? ""}`, runtimeUrl), {
+          method: request.method,
+          headers: { "x-real-ip": clientAddress, ...(codePage[2] ? { "content-type": "application/json" } : {}) },
+          ...(codePage[2] ? { body: JSON.stringify(await readJson(request)) } : {})
+        });
+        response.statusCode = upstream.status;
+        response.setHeader("cache-control", "no-store");
+        response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
+        return response.end(await upstream.text());
+      }
       if (url.pathname === "/v1/web-chat/conversations" || url.pathname.startsWith("/v1/web-chat/conversations/") || ARTIFACT_DEFINITION_PATH.test(url.pathname) || PRODUCT_AGENT_PATH.test(url.pathname)) {
         if (!["GET", "POST", "PATCH"].includes(request.method)) {
           return send(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
@@ -571,6 +596,12 @@ export async function createDashboardApp(options = {}) {
       }
       if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/assets" || url.pathname.startsWith("/assets/") || url.pathname === HATCH_CLI_DOWNLOAD)) {
         return servePortalAsset(url.pathname, response);
+      }
+      // Back from paying lands on `/c/?code=<code>`: straight to that code's page, before any page is drawn.
+      const codeRedirect = request.method === "GET" ? accessCodeRedirect(url.pathname, url.searchParams.get("code")) : null;
+      if (codeRedirect) {
+        response.writeHead(302, { location: codeRedirect, "cache-control": "no-store" });
+        return response.end();
       }
       const retiredRedirect = request.method === "GET" ? retiredPortalRedirect(url.pathname) : null;
       if (retiredRedirect) {
@@ -2527,6 +2558,12 @@ function sendHtml(response, status, body, headers = {}) {
 
 
 // Retired buyer routes. /home goes to Studio; buyer orders live under /explore.
+/** `/c` or `/c/` with `?code=` (any case, spaces around) goes to `/c/<CODE>`; anything else is not this redirect. */
+export function accessCodeRedirect(pathname, code) {
+  const normalized = String(code ?? "").trim().toUpperCase();
+  return (pathname === "/c" || pathname === "/c/") && ACCESS_CODE.test(normalized) ? `/c/${normalized}` : null;
+}
+
 export function retiredPortalRedirect(pathname) {
   if (pathname === "/home") return "/studio";
   return null;
@@ -2544,6 +2581,8 @@ function isPublicPortalRoute(pathname) {
     || pathname === "/products"
     || pathname.startsWith("/products/")
     || pathname.startsWith("/chat/product/")
+    || pathname === "/c"
+    || pathname.startsWith("/c/")
     || pathname.startsWith("/artifact/")
     || pathname === "/studio"
     || pathname.startsWith("/studio/")

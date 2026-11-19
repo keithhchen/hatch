@@ -9,6 +9,7 @@ import { AGENT_BOX_CAPABILITY } from "./capabilities.js";
 import type { BuyerFiles } from "./files.js";
 import type { HtmlPages } from "./htmlPages.js";
 import { BoxToolError } from "./ports.js";
+import type { ReportEmailJob, ReportEmails } from "./reportEmail.js";
 import { DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, Workspace } from "./workspace.js";
 
 export const BOX_TOOLS = ["box.bash", "box.write", "box.edit", "box.save_file", "box.publish_html"] as const;
@@ -43,12 +44,15 @@ export const boxToolDefinitions = (workDir: string): ToolDefinition[] => [
     { path: { type: "string" }, old_string: { type: "string", description: "The exact text to replace." }, new_string: { type: "string" }, replace_all: { type: "boolean" } }, ["path", "old_string", "new_string"]),
   definition("save_file", `Keep a file from ${workDir} for the user (an HTML page, a PDF, an image): returns its file_id and a url: a link the user can open or download. Never invent file links; give the user this url. Saving the same content again returns the same id. Save again after changing the file.`,
     { path: { type: "string", description: `The file under ${workDir}.` } }, ["path"]),
-  definition("publish_html", "Publish a saved HTML file as a web page and get its link to send to the user. The page is a whole HTML document; it is shown as is, scripts allowed. The same file_id gives the same link; a changed page is a new save and a new link.",
+  definition("publish_html", "Publish a saved HTML file as a web page and get its link to send to the user. The page is a whole HTML document; it is shown as is, scripts allowed. The same file_id gives the same link; a changed page is a new save and a new link. When the user gave an email address, the link is emailed to them automatically; do not send it yourself.",
     { file_id: { type: "string", description: "The id save_file returned." }, title: { type: "string", description: "The page's name." } }, ["file_id", "title"])
 ];
 
 /** What the box tools need, shared by every conversation. */
-export type AgentBoxDeps = { capabilities: ProductCapabilities; boxes: AgentBoxes; workDir: string; pdf: PdfPageRenderer; files: BuyerFiles; pages: HtmlPages };
+export type AgentBoxDeps = { capabilities: ProductCapabilities; boxes: AgentBoxes; workDir: string; pdf: PdfPageRenderer; files: BuyerFiles; pages: HtmlPages; reportEmail?: ReportEmails };
+
+/** What the report email of a conversation needs beyond the page: where it goes and what it says. Without a recipient nothing is sent. */
+export type ReportEmailContext = Omit<ReportEmailJob, "pageId" | "recipient" | "reportUrl"> & { recipient?: string };
 
 export class AgentBoxMode {
   constructor(private readonly deps: AgentBoxDeps) {}
@@ -59,9 +63,9 @@ export class AgentBoxMode {
    * The box tools of a turn, or undefined when the Product has none. A visitor who has not signed in has the tools but
    * every call says to sign in: the box and its files are a buyer's own.
    */
-  async turnFor(owner: { productId: string; userId: string; guest: boolean }): Promise<{ extraTools: string[]; tools: BoxToolRunner } | undefined> {
+  async turnFor(owner: { productId: string; userId: string; guest: boolean; email?: ReportEmailContext }): Promise<{ extraTools: string[]; tools: BoxToolRunner } | undefined> {
     if (!await this.deps.capabilities.has(owner.productId, AGENT_BOX_CAPABILITY)) return undefined;
-    return { extraTools: [...BOX_TOOLS], tools: owner.guest ? this.guestRunner() : this.runner({ productId: owner.productId, buyer: owner.userId }) };
+    return { extraTools: [...BOX_TOOLS], tools: owner.guest ? this.guestRunner() : this.runner({ productId: owner.productId, buyer: owner.userId }, owner.email) };
   }
 
   private owns = (raw: unknown) => typeof raw === "string" && (raw === this.deps.workDir || raw.startsWith(`${this.deps.workDir}/`));
@@ -70,8 +74,8 @@ export class AgentBoxMode {
     return { owns: this.owns, run: async () => refused("login_required", "This needs the user to sign in first. Tell them to sign in, then ask again.") };
   }
 
-  private runner(owner: BoxOwner): BoxToolRunner {
-    const { boxes, workDir, pdf, files, pages } = this.deps;
+  private runner(owner: BoxOwner, email?: ReportEmailContext): BoxToolRunner {
+    const { boxes, workDir, pdf, files, pages, reportEmail } = this.deps;
     const scope = { kind: "buyer" as const, productId: owner.productId, userId: owner.buyer };
     let workspace: Promise<Workspace> | undefined;
     // The box is opened on the first call that needs it, once per turn.
@@ -95,7 +99,12 @@ export class AgentBoxMode {
             }
             case "publish_html": {
               if (typeof args.file_id !== "string" || typeof args.title !== "string") throw new BoxToolError("file_id and title are strings.");
-              return await pages.publish(scope, args.file_id, args.title);
+              const published = await pages.publish(scope, args.file_id, args.title);
+              // After the publish has succeeded and without waiting for it: the email never delays or fails the tool.
+              if (reportEmail && email?.recipient) {
+                void reportEmail.notify({ ...email, recipient: email.recipient, pageId: published.page_id, reportUrl: published.url });
+              }
+              return published;
             }
             default: throw new Error(`No box tool: ${name}`);
           }

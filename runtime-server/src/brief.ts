@@ -6,12 +6,24 @@ export const MAX_BRIEF_FIELD_LABEL_CHARS = 500;
 export const MAX_BRIEF_ANSWER_CHARS = 32_000;
 export const MAX_BRIEF_ANSWER_TOTAL_CHARS = 128_000;
 
+const EMAIL_ADDRESS = /^[^\s@<>"',;()\\]+@[^\s@<>"',;()\\]+\.[^\s@<>"',;()\\.]+$/;
+export const isEmailAddress = (value: string): boolean => value.length <= 254 && EMAIL_ADDRESS.test(value);
+
 const FIELD_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
+
+/**
+ * How a field is asked: `text` (the default) is free multi-line text, `line` one line, `email` and `tel` are what they say, and
+ * `access_code` is the code a Product requires before its first Run (see accessGate.ts).
+ */
+export const BRIEF_FIELD_TYPES = ["text", "line", "email", "tel", "access_code"] as const;
+export type BriefFieldType = (typeof BRIEF_FIELD_TYPES)[number];
 
 export type BriefFieldSpec = {
   id: string;
   label: string;
   required: boolean;
+  /** Absent means `text`, so a spec written before types existed keeps its digest. */
+  type?: BriefFieldType;
 };
 
 export type BriefSpec = {
@@ -96,8 +108,11 @@ export function normalizeBriefSpec(value: unknown): BriefSpec {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} is invalid`);
     }
     const field = entry as Record<string, unknown>;
-    if (Object.keys(field).some((key) => !["id", "label", "required"].includes(key))) {
+    if (Object.keys(field).some((key) => !["id", "label", "required", "type"].includes(key))) {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} contains an unknown property`);
+    }
+    if (field.type !== undefined && !BRIEF_FIELD_TYPES.includes(field.type as BriefFieldType)) {
+      throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} has an unknown type`);
     }
     const id = typeof field.id === "string" ? field.id.trim() : "";
     const label = typeof field.label === "string" ? field.label.trim() : "";
@@ -111,7 +126,7 @@ export function normalizeBriefSpec(value: unknown): BriefSpec {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} must declare required`);
     }
     seen.add(id);
-    return { id, label, required: field.required };
+    return { id, label, required: field.required, ...field.type && field.type !== "text" ? { type: field.type as BriefFieldType } : {} };
   });
   return { contract_version: BRIEF_SPEC_CONTRACT_VERSION, fields };
 }
@@ -146,6 +161,10 @@ export function createBriefSnapshot(
     }
     if (value.length > MAX_BRIEF_ANSWER_CHARS || /[\u0000]/.test(value)) {
       throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is too long or invalid`);
+    }
+    const asked = spec.fields.find((field) => field.id === fieldId)!;
+    if (asked.type === "email" && value && !isEmailAddress(value)) {
+      throw new BriefValidationError("brief_answer_invalid", `Brief answer ${index + 1} is not a valid email address`);
     }
     totalCharacters += value.length;
     answers.set(fieldId, value);
@@ -198,7 +217,7 @@ export function normalizeBriefSnapshot(value: unknown): BriefSnapshot {
       throw new BriefValidationError("brief_answer_invalid", `Stored BriefSnapshot field ${index + 1} is invalid`);
     }
     const field = entry as Record<string, unknown>;
-    if (Object.keys(field).some((key) => !["id", "label", "required", "value"].includes(key))) {
+    if (Object.keys(field).some((key) => !["id", "label", "required", "type", "value"].includes(key))) {
       throw new BriefValidationError("brief_answer_invalid", `Stored BriefSnapshot field ${index + 1} contains an unknown property`);
     }
     if (field.value !== null && typeof field.value !== "string") {
@@ -208,12 +227,13 @@ export function normalizeBriefSnapshot(value: unknown): BriefSnapshot {
       id: field.id,
       label: field.label,
       required: field.required,
+      ...field.type !== undefined ? { type: field.type } : {},
       value: field.value
     };
   });
   const spec = normalizeBriefSpec({
     contract_version: BRIEF_SPEC_CONTRACT_VERSION,
-    fields: fields.map(({ id: fieldId, label, required }) => ({ id: fieldId, label, required }))
+    fields: fields.map(({ id: fieldId, label, required, type }) => ({ id: fieldId, label, required, ...type !== undefined ? { type } : {} }))
   });
   const rebuilt = createBriefSnapshot(
     spec,
@@ -243,7 +263,31 @@ function normalizeSnapshotTimestamp(value: string): string {
   return timestamp;
 }
 
+/** A conversation's Brief answer to a field, or undefined when the Product has no such field or it was left blank. */
+export function briefAnswer(snapshot: BriefSnapshot | undefined, fieldId: string): string | undefined {
+  return snapshot?.fields.find((field) => field.id === fieldId)?.value?.trim() || undefined;
+}
+
+/** Where this conversation's report is mailed: the Brief's email answer, when valid. */
+export function briefEmail(snapshot: BriefSnapshot | undefined): string | undefined {
+  const field = snapshot?.fields.find((entry) => entry.type === "email");
+  const value = field ? briefAnswer(snapshot, field.id) : undefined;
+  return value && isEmailAddress(value) ? value : undefined;
+}
+
+/** The access code the Brief was answered with: its `access_code` field. */
+export function briefAccessCode(snapshot: BriefSnapshot | undefined): string | undefined {
+  const field = snapshot?.fields.find((entry) => entry.type === "access_code");
+  return field ? briefAnswer(snapshot, field.id) : undefined;
+}
+
+/** The snapshot as a model may see it: an access code is a credential and stays in our database, so its field is left out. */
+export function redactedForModel(snapshot: BriefSnapshot): BriefSnapshot {
+  return { ...snapshot, fields: snapshot.fields.filter((field) => field.type !== "access_code") };
+}
+
 export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {
+  const shown = redactedForModel(snapshot);
   return [
     "# Task Brief",
     "This immutable BriefSnapshot is the Expert-defined input for this Task.",
@@ -252,6 +296,6 @@ export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {
     `Snapshot: ${snapshot.id}`,
     `BriefSpec digest: ${snapshot.spec_digest}`,
     "",
-    JSON.stringify({ fields: snapshot.fields }, null, 2)
+    JSON.stringify({ fields: shown.fields }, null, 2)
   ].join("\n");
 }
