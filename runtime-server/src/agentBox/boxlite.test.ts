@@ -149,3 +149,44 @@ test("a copy that failed for another reason is not retried", async () => {
   await assert.rejects((await boxOf(sdk)).readFile("/w/a"), BoxUnavailable);
   assert.equal(sdk.copies, 1);
 });
+
+test("a rate limit waits the longer schedule, a 503 the shorter one", async () => {
+  const waits: number[] = [];
+  const realTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((fn: () => void, ms?: number) => { waits.push(ms ?? 0); return realTimeout(fn, 0); }) as never;
+  try {
+    for (const [message, expected] of [["resource exhausted: Rate exceeded.", [3_000, 6_000, 12_000, 24_000]], [unavailable503.errorMessage, [1_000, 3_000, 6_000]]] as const) {
+      waits.length = 0;
+      const sdk = scripted([{ exitCode: 0 }, { exitCode: 1, errorMessage: message }]);
+      const box = await new BoxliteProvider({ create: async () => sdk as never, getInfo: async () => null, get: async () => null }, { image: "img", workDir: "/w" }).create("hatch-w");
+      await assert.rejects(box.exec("true", { cwd: "/", timeoutSeconds: 100 }), BoxUnavailable);
+      assert.deepEqual(waits.filter(ms => ms >= 1_000 && ms < 50_000), expected);
+    }
+  } finally { globalThis.setTimeout = realTimeout; }
+});
+
+test("a rate-limited exec stops waiting at the tool's own timeout", async () => {
+  const sdk = scripted([{ exitCode: 0 }, { exitCode: 1, errorMessage: "resource exhausted: Rate exceeded." }]);
+  const box = await new BoxliteProvider({ create: async () => sdk as never, getInfo: async () => null, get: async () => null }, { image: "img", workDir: "/w" }).create("hatch-t");
+  const started = Date.now();
+  await assert.rejects(box.exec("true", { cwd: "/", timeoutSeconds: 2 }), BoxUnavailable);
+  assert.ok(Date.now() - started < 1_000, "gave up at once: the first wait (3 s) already passes the 2 s timeout");
+});
+
+test("a write is one request when its directory exists; only a failed copy makes the directory first", async () => {
+  const boxWith = async (sdk: ReturnType<typeof copying>) => {
+    const commands: string[] = [];
+    const exec = sdk.exec.bind(sdk);
+    sdk.exec = (async (...args: unknown[]) => { commands.push(String((args[1] as string[])[1])); return exec(); }) as never;
+    const box = await boxOf(sdk);
+    commands.length = 0;
+    await box.writeFile("/w/a/b.txt", Buffer.from("x"));
+    return commands;
+  };
+  const present = copying("x", 0);
+  assert.deepEqual(await boxWith(present), []);
+  assert.equal(present.copies, 1);
+  const missing = copying("no such file or directory", 1);
+  assert.deepEqual(await boxWith(missing), ["mkdir -p -- '/w/a'"]);
+  assert.equal(missing.copies, 2);
+});

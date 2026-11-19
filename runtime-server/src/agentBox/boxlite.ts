@@ -30,8 +30,14 @@ const START_POLL_MS = 3_000;
 /** Waits before each retry of a call the service failed or refused. */
 export const EXEC_BACKOFF_MS = [1_000, 3_000, 6_000];
 
-/** A connection failure before the call did anything: safe to run again. */
-class Transient extends Error {}
+/** The service's edge answers 429 "Rate exceeded." (no Retry-After) and keeps answering for about a minute after a burst: waits are long. Their sum, 45 s, is the most a call waits. */
+const RATE_LIMITED = /resource exhausted|Rate exceeded/i;
+export const RATE_LIMIT_BACKOFF_MS = [3_000, 6_000, 12_000, 24_000];
+
+/** A connection failure before the call did anything: safe to run again. `limited`: the service's rate limit, which needs the longer waits. */
+class Transient extends Error {
+  get limited(): boolean { return RATE_LIMITED.test(this.message); }
+}
 
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
   const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
@@ -42,7 +48,7 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 class BoxliteBox implements AgentBox {
-  constructor(private readonly box: SdkBox, private readonly backoffMs: number[] = EXEC_BACKOFF_MS) {}
+  constructor(private readonly box: SdkBox, private readonly backoffMs: number[] = EXEC_BACKOFF_MS, private readonly limitBackoffMs: number[] = RATE_LIMIT_BACKOFF_MS) {}
 
   /** Runs `attempt` again after each backoff while it fails with Transient; the last Transient is BoxUnavailable. Stops on abort, or when waiting would pass `withinMs` in all. */
   private async retrying<T>(what: string, backoff: number[], attempt: () => Promise<T>, signal?: AbortSignal, withinMs = Infinity): Promise<T> {
@@ -50,7 +56,7 @@ class BoxliteBox implements AgentBox {
     for (let retry = 0; ; retry++) {
       try { return await attempt(); } catch (error) {
         if (!(error instanceof Transient)) throw error;
-        const delay = backoff[retry];
+        const delay = (error.limited ? this.limitBackoffMs : backoff)[retry];
         if (delay === undefined || Date.now() - started + delay > withinMs) return unavailable(error.cause);
         log.warn("agent_box_retry", { what, retry: retry + 1, delayMs: delay, error: error.message });
         await sleep(delay, signal);
@@ -118,15 +124,20 @@ class BoxliteBox implements AgentBox {
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
 
+  /** One request when the directory exists; when the copy fails for any other reason the directory is made (two more requests) and the copy tried once more. */
   async writeFile(file: string, content: Buffer): Promise<void> {
-    const made = await this.exec(`mkdir -p -- ${quote(path.posix.dirname(file))}`, { cwd: "/", timeoutSeconds: 30 });
-    if (made.exitCode !== 0) throw new BoxFileMissing(`Cannot create the directory for ${file}: ${made.stderr.trim()}`);
     const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-box-"));
     try {
       await writeFile(path.join(directory, "file"), content);
-      await this.retrying("copyIn", this.backoffMs, () => this.copy(() => this.box.copyIn(path.join(directory, "file"), file, { overwrite: true })));
+      const put = () => this.retrying("copyIn", this.backoffMs, () => this.copy(() => this.box.copyIn(path.join(directory, "file"), file, { overwrite: true })));
+      try { await put(); } catch (error) {
+        if (error instanceof BoxUnavailable) throw error;
+        const made = await this.exec(`mkdir -p -- ${quote(path.posix.dirname(file))}`, { cwd: "/", timeoutSeconds: 30 });
+        if (made.exitCode !== 0) throw new BoxFileMissing(`Cannot create the directory for ${file}: ${made.stderr.trim()}`);
+        await put();
+      }
     } catch (error) {
-      if (error instanceof BoxUnavailable) throw error;
+      if (error instanceof BoxUnavailable || error instanceof BoxFileMissing) throw error;
       return unavailable(error);
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
@@ -159,10 +170,16 @@ export class BoxliteProvider implements BoxProvider {
 
   get workDir(): string { return this.options.workDir; }
 
+  /** `retryBackoffMs` (tests) sets the waits of both kinds of refusal. */
+  private wrap(box: SdkBox): BoxliteBox {
+    const { retryBackoffMs } = this.options;
+    return new BoxliteBox(box, retryBackoffMs, retryBackoffMs ?? RATE_LIMIT_BACKOFF_MS);
+  }
+
   async find(name: string): Promise<AgentBox | undefined> {
     try {
       const box = await this.runtime.get(name);
-      return box ? new BoxliteBox(box, this.options.retryBackoffMs) : undefined;
+      return box ? this.wrap(box) : undefined;
     } catch (error) { return unavailable(error); }
   }
 
@@ -177,7 +194,7 @@ export class BoxliteProvider implements BoxProvider {
       if (!STARTING.test(message)) return unavailable(error);
       box = await this.started(name, error);
     }
-    const created = new BoxliteBox(box, this.options.retryBackoffMs);
+    const created = this.wrap(box);
     const made = await created.exec(`mkdir -p -- ${quote(this.options.workDir)}`, { cwd: "/", timeoutSeconds: 60 });
     if (made.exitCode !== 0) return unavailable(new Error(`Cannot create ${this.options.workDir}: ${made.stderr}`));
     return created;

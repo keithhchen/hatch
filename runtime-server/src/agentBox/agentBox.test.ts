@@ -66,6 +66,26 @@ test("calls that arrive together open one box; a lost create race finds the winn
   assert.equal(await new AgentBoxes(racing).of(owner), winner);
 });
 
+test("an opened box is reused across turns until its handle expires; a failed open is not kept", async () => {
+  const provider = new FakeProvider();
+  let finds = 0;
+  const find = provider.find.bind(provider);
+  provider.find = async (name) => { finds += 1; return find(name); };
+  let now = 0;
+  const boxes = new AgentBoxes(provider, 1000, () => now);
+  const owner = { productId: "p", buyer: "u" };
+  const first = await boxes.of(owner);
+  assert.equal(await boxes.of(owner), first);
+  assert.equal(finds, 1);
+  assert.notEqual(await boxes.of({ productId: "p", buyer: "other" }), first);
+  now = 1001;
+  assert.equal(await boxes.of(owner), first);
+  assert.equal(finds, 3);
+  const down = new AgentBoxes({ find: async () => { throw new Error("down"); }, create: async () => { throw new Error("no"); } });
+  await assert.rejects(down.of(owner), /down/);
+  await assert.rejects(down.of(owner), /down/);
+});
+
 test("a Product without the capability has no box tools; a guest's every call asks to sign in", async () => {
   const { mode, runnerFor } = await setup();
   assert.equal(await mode.turnFor({ productId: "other", userId: "u", guest: false }), undefined);

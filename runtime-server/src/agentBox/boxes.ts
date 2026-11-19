@@ -8,22 +8,27 @@ export type BoxOwner = { productId: string; buyer: string };
 export const boxName = ({ productId, buyer }: BoxOwner): string =>
   `hatch-${createHash("sha256").update(`${productId}\n${buyer}`).digest("hex").slice(0, 40)}`;
 
+/** How long an opened box is reused before it is looked up again: every lookup is a request, and the service rate-limits requests. */
+export const BOX_HANDLE_TTL_MS = 5 * 60_000;
+
 /**
- * Get-or-create of a buyer's box. Calls that arrive together share one lookup, so two tool calls of one turn never create two
- * boxes; a create that loses a race to another process finds the box it lost to.
+ * Get-or-create of a buyer's box. The opened box is kept for BOX_HANDLE_TTL_MS, so the tool calls of one turn, and of the
+ * next turns, share one lookup and never create two boxes; a failed open is not kept. A create that loses a race to another
+ * process finds the box it lost to.
  */
 export class AgentBoxes {
-  private readonly pending = new Map<string, Promise<AgentBox>>();
-  constructor(private readonly provider: BoxProvider) {}
+  private readonly opened = new Map<string, { box: Promise<AgentBox>; until: number }>();
+  constructor(private readonly provider: BoxProvider, private readonly ttlMs = BOX_HANDLE_TTL_MS, private readonly now = Date.now) {}
 
   of(owner: BoxOwner): Promise<AgentBox> {
     const name = boxName(owner);
-    let opening = this.pending.get(name);
-    if (!opening) {
-      opening = this.open(name).finally(() => this.pending.delete(name));
-      this.pending.set(name, opening);
-    }
-    return opening;
+    const kept = this.opened.get(name);
+    if (kept && kept.until > this.now()) return kept.box;
+    const box = this.open(name);
+    const entry = { box, until: this.now() + this.ttlMs };
+    this.opened.set(name, entry);
+    box.catch(() => { if (this.opened.get(name) === entry) this.opened.delete(name); });
+    return box;
   }
 
   private async open(name: string): Promise<AgentBox> {
