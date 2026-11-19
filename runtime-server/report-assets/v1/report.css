@@ -15,21 +15,9 @@ h3{font-size:22px}
 main>section:not(.hero){counter-increment:sec;padding:104px var(--pad);border-top:1px solid var(--line)}
 main>section:not(.hero) .kicker::before{content:counter(sec,decimal-leading-zero) " · "}
 
-/* loading overlay */
-.loader{position:fixed;z-index:9999;inset:0;background:#fff;display:flex;align-items:center;justify-content:center;transition:opacity .6s}
-.loader.done{opacity:0;pointer-events:none}
-.loadbox{width:min(620px,86vw);text-align:center}
-.spinner{width:58px;height:58px;border:4px solid #edf0f1;border-top-color:#469A21;border-right-color:#0D7FBB;border-radius:50%;margin:0 auto 22px;animation:spin 1s linear infinite}
-.loadtitle{font-family:var(--serif);font-size:30px;font-weight:700;margin-bottom:28px}
-.sources{height:156px;overflow:hidden;text-align:left;margin:0 auto 28px;max-width:470px;-webkit-mask-image:linear-gradient(transparent,#000 25%,#000 75%,transparent);mask-image:linear-gradient(transparent,#000 25%,#000 75%,transparent)}
-.sources div{transition:transform .4s;transform:translateY(calc(62px - var(--k,0)*31px))}
-.sources p{margin:0;height:31px;font-size:13px;line-height:31px;color:#a3a8ad;transition:.3s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sources p.on{color:#111;font-weight:600;transform:translateX(8px)}
-.track{height:3px;background:#eceeef;overflow:hidden}
-.progress{height:100%;width:0;background:var(--grad)}
-.percent{font-size:12px;color:#777;margin-top:8px;text-align:right}
+/* old reports still contain a .loader element: never show it */
+.loader{display:none!important}
 .report-error{margin:0;padding:24px;background:#111;color:#fff}
-@keyframes spin{to{transform:rotate(360deg)}}
 
 /* scroll reveal: JS adds .reveal to each section and .visible when it enters the viewport */
 .reveal{opacity:0;transform:translateY(24px);transition:.8s ease}
@@ -177,12 +165,11 @@ footer small{color:#888}
 }
 @media(prefers-reduced-motion:reduce){
   *{transition-duration:.01ms!important;transition-delay:0s!important;animation-duration:.01ms!important}
-  .spinner{animation:none}
   html{scroll-behavior:auto}
 }
 @page{size:A4;margin:12mm}
 @media print{
-  .loader,.book,.modal{display:none!important}
+  .book,.modal{display:none!important}
   .reveal{opacity:1!important;transform:none!important;transition:none!important}
   main>section:not(.hero){padding:34px 0;border-top:1px solid var(--line)}
   .hero{padding:12px 0 24px;break-inside:avoid;gap:40px}
