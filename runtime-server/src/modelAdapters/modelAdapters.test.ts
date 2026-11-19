@@ -32,6 +32,7 @@ test("every profile names a family that resolves to an adapter", () => {
       ["kimi-k3.1-pro", "kimi"],
       ["kimi-k3.1-pro-highspeed", "kimi"],
       ["deepseek-v4-pro", "openai-compatible"],
+      ["deepseek-flash", "openai-compatible"],
       ["gemini-4-argon", "gemini"],
       ["gemini-4-carbon", "gemini"],
       ["gemini-4-hydrogen", "gemini"]
