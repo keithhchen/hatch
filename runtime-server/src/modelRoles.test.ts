@@ -104,7 +104,7 @@ test("the in-memory resolver serves the seeds and what a test sets, uncached", a
 });
 
 test("the Gemini 4 profiles are valid names for every role that takes a catalogue profile, and not for ingest", () => {
-  for (const name of ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"]) {
+  for (const name of ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon", "gemini-3.8-flash"]) {
     for (const role of ["chat", "assistant", "factory", "inspiration", "content", "title"] as const) assert.equal(profileForRole(role, name, "test").name, name);
     assert.throws(() => profileForRole("ingest", name, "test"), { code: "model_profile_invalid" });
   }
