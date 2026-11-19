@@ -8,7 +8,7 @@ import { HatchPay, handleHatchPayRoute, siteDomain } from "./routes.js";
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 const BACK = `https://gethatchapp.com/p/${PRODUCT}`;
-const corpora = { resolveByProduct: async () => ({ corpus: { creator: { name: "MSC咨询" }, product: { name: "外贸官网获客诊断", description: "一份说清官网为什么没有询盘的诊断" } } }) };
+const corpora = { resolveByProduct: async () => ({ corpus: { creator: { name: "MSC咨询" }, product: { name: "出海官网获客诊断", description: "一份说清官网为什么没有询盘的诊断" } } }) };
 
 async function serve(withCorpora = true) {
   const pay = new HatchPay({
@@ -30,7 +30,7 @@ test("pay page shows logo, product, expert, order lines, price and email; site a
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("referrer-policy"), "origin");
     assert.match(html, /hatch-downloads\.oss-cn-shanghai\.aliyuncs\.com\/brand\/hatch-lockup\.png/);
-    assert.match(html, /外贸官网获客诊断/);
+    assert.match(html, /出海官网获客诊断/);
     assert.match(html, /MSC咨询/);
     assert.match(html, /一份说清官网为什么没有询盘的诊断/);
     assert.match(html, /<dd>example\.com<\/dd>/, "the site is a bare domain");

@@ -1,4 +1,4 @@
-# 外贸官网诊断报告：组件参考 v1
+# 出海官网诊断报告：组件参考 v1
 
 报告只写 HTML 结构和文字，不写 CSS、不写绘图代码。样式和脚本固定在：
 
@@ -11,7 +11,7 @@
 
 ```html
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>公司名 外贸官网获客诊断 · MSC咨询</title>
+<title>公司名 出海官网获客诊断 · MSC咨询</title>
 <link rel="stylesheet" href="https://gethatchapp.com/report-assets/v1/report.css"></head><body>
 <script type="application/json" id="report-data">{…数据…}</script>
 <main> …下面 9 个区块，按顺序… </main>

@@ -34,7 +34,7 @@ async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "re
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-code-pages-"));
   await mkdir(path.join(root, "runtime"), { recursive: true });
   await writeFile(path.join(root, "runtime", "progress.json"), JSON.stringify(PROGRESS));
-  const resolved = { root, digest: "corpus", corpus: { creator: { id: "creator", name: "MSC咨询" }, product: { id: PRODUCT, name: "外贸官网获客诊断", brief_spec: AUDIT_SPEC } } };
+  const resolved = { root, digest: "corpus", corpus: { creator: { id: "creator", name: "MSC咨询" }, product: { id: PRODUCT, name: "出海官网获客诊断", brief_spec: AUDIT_SPEC } } };
   const corpora = { resolveByProduct: async () => resolved } as unknown as AgentCorpusResolverLike;
   const repository = new InMemoryConversationRepository(new LocalRuntimeAuthority());
   const hub = new RunEventHub();
@@ -77,7 +77,7 @@ test("entry: no code, an unknown code, an unpaid code, and the code of a Product
 
 test("landing: the product page reads the Product's name and the configured price", async () => {
   const { pages } = await setup();
-  assert.deepEqual(await pages.landing(PRODUCT), { product: { id: PRODUCT, name: "外贸官网获客诊断" }, price_fen: 990 });
+  assert.deepEqual(await pages.landing(PRODUCT), { product: { id: PRODUCT, name: "出海官网获客诊断" }, price_fen: 990 });
 });
 
 test("intake: an active code gets the Brief's fields, without the code itself", async () => {
@@ -128,7 +128,7 @@ test("ready: a published report gives its link", async () => {
   const { pages, world } = await setup();
   await pages.intake(CODE, answers);
   world.report = "https://gethatchapp.com/html/abc?t=sig";
-  assert.deepEqual(await pages.status(CODE), { state: "ready", product: { id: PRODUCT, name: "外贸官网获客诊断" }, creator: { name: "MSC咨询" }, website: "example.com", report_url: world.report });
+  assert.deepEqual(await pages.status(CODE), { state: "ready", product: { id: PRODUCT, name: "出海官网获客诊断" }, creator: { name: "MSC咨询" }, website: "example.com", report_url: world.report });
 });
 
 test("failed: a failed Run, or no report after the follow-ups, is a plain failure", async () => {

@@ -27,7 +27,7 @@ function Header({ product, creator, website }) {
   return <header className="code-page__header">
     <WebChatEgg size={36} />
     <div className="code-page__who">
-      <strong>{product?.name ?? "外贸官网获客诊断"}</strong>
+      <strong>{product?.name ?? "出海官网获客诊断"}</strong>
       {creator?.name ? <span>{creator.name}</span> : null}
     </div>
     {domain ? <span className="code-page__site">{domain}</span> : null}
@@ -82,7 +82,7 @@ function Landing({ request, navigate, reason }) {
   return <Card>
     {reason ? <p className="code-page__error" role="alert">{REFUSALS[reason]}</p> : null}
     <form onSubmit={pay} noValidate>
-      <h1 className="code-page__title">{landing?.name ?? "外贸官网获客诊断"}</h1>
+      <h1 className="code-page__title">{landing?.name ?? "出海官网获客诊断"}</h1>
       {landing?.description ? <p className="code-page__lead">{landing.description}</p> : null}
       {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
       {BUYER_FIELDS.map(field => <Field key={field.id} field={field} value={values[field.id] ?? ""} onChange={value => { setValues(current => ({ ...current, [field.id]: value })); setError(null); }} />)}
