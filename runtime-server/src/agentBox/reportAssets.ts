@@ -9,7 +9,7 @@ const MIME: Record<string, string> = { ".css": "text/css; charset=utf-8", ".js":
 
 /**
  * GET /report-assets/vN/report.css|report.js: the stylesheet and script audit reports load by a fixed HTTPS URL, from the
- * buyer's browser and from the Agent's computer. A version's files never change (a new look is a new vN), so they cache forever.
+ * buyer's browser and from the Agent's computer. A version only gets bug fixes (a changed design is a new vN) and reports link it without a version query, so it caches for an hour, never as immutable.
  * Returns false for a path that is not an asset.
  */
 export async function handleReportAssetRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, root = ROOT): Promise<boolean> {
@@ -23,7 +23,7 @@ export async function handleReportAssetRoute(request: http.IncomingMessage, resp
   }
   response.writeHead(200, {
     "content-type": MIME[path.extname(match[2]!)]!,
-    "cache-control": "public, max-age=31536000, immutable",
+    "cache-control": "public, max-age=3600",
     "x-content-type-options": "nosniff",
     "access-control-allow-origin": "*"
   });

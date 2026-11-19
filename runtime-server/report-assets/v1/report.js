@@ -1,6 +1,6 @@
 /* Hatch audit report script, v1. Reads <script type="application/json" id="report-data"> and draws the data parts:
    loading overlay, score ring, level scale, 10x10 dots, radar and bars, D9 meter, paid services, appendix, footer.
-   Frozen like report.css. window.reportFinish() jumps to the final state (screenshots, PDF). */
+   Bug fixes only; a changed design is a new /report-assets/vN/ path. window.reportFinish() jumps to the final state (screenshots, PDF). */
 (() => {
   const NAMES = ["D1 首屏 3 秒", "D2 技术与性能", "D3 信息架构", "D4 内容与英文", "D5 信任与证明", "D6 转化路径", "D7 SEO 与 AI 搜索", "D8 设计与品牌", "D9 可持续与社会影响"];
   const MAX = [15, 8, 14, 12, 14, 14, 8, 5, 10];
@@ -21,6 +21,22 @@
     return;
   }
   const html = (el, s) => { el.innerHTML = s; return el; };
+
+  // 0 normalise hand-written repeated blocks, so a model that packs several into one still gets one block each (numbers are CSS counters)
+  const blocks = (parent, starts, wrap) => {
+    const groups = [];
+    [...parent.children].forEach(c => { const last = groups.at(-1); last && !starts(c, last) ? last.push(c) : groups.push([c]); });
+    return groups.map(g => { if (!wrap || (g.length === 1 && g[0].tagName === "DIV")) return g; const d = document.createElement("div"); d.append(...g); return [d]; });
+  };
+  const rebuild = (sel, starts, wrap) => document.querySelectorAll(sel).forEach(b => {
+    const g = blocks(b, starts, wrap);
+    if (g.length < 2 && g.flat().every((k, i) => k === b.children[i])) return;
+    b.replaceWith(...g.map(kids => { const n = b.cloneNode(false); n.append(...kids); return n; }));
+  });
+  const item = c => c.tagName === "DIV" || c.tagName === "H3";
+  rebuild("#redlines .redline", item, true);
+  rebuild("#reasons .reason", (c, last) => last.some(k => k.className === c.className));
+  document.querySelectorAll(".minors").forEach(m => m.replaceChildren(...blocks(m, item, true).flat()));
 
   // 1 hero: ring, level, scale
   const level = LEVELS.find(l => D.score >= l[0] && D.score <= l[1])[2];

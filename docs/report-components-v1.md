@@ -5,7 +5,7 @@
 - `https://gethatchapp.com/report-assets/v1/report.css`
 - `https://gethatchapp.com/report-assets/v1/report.js`
 
-版本路径永不改动（改版会是 `v2`）。Agent 的电脑和买家浏览器都用这两个地址；PDF 用 Playwright 打开本地报告 HTML 时同样加载它们。
+版本路径只做缺陷修复（浏览器缓存 1 小时），改版或破坏性改动一律走 `v2`。Agent 的电脑和买家浏览器都用这两个地址；PDF 用 Playwright 打开本地报告 HTML 时同样加载它们。
 
 ## 文件骨架
 

@@ -140,7 +140,7 @@
         import upstream runtime 8400
     }
 
-    # Stylesheet and script of audit reports, at a versioned path that never changes (/report-assets/v1/report.css). The Runtime owns them.
+    # Stylesheet and script of audit reports, at a versioned path (/report-assets/v1/report.css, bug fixes only, a new design is v2). The Runtime owns them.
     @report_assets path /report-assets/*
     handle @report_assets {
         import upstream runtime 8400

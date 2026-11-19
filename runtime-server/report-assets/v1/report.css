@@ -1,4 +1,4 @@
-/* Hatch audit report stylesheet, v1. Frozen: a changed look is a new /report-assets/vN/ path, never an edit of this one. */
+/* Hatch audit report stylesheet, v1. Bug fixes only: a changed look is a new /report-assets/vN/ path. */
 @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700;900&display=swap");
 @property --n{syntax:"<integer>";initial-value:0;inherits:false}
 :root{--ink:#111315;--muted:#6e747b;--line:#e4e7e9;--soft:#f5f6f6;--dark:#15191c;--grad:linear-gradient(120deg,#469A21,#0D7FBB);--serif:"Noto Serif SC",serif;--pad:max(32px,calc((100% - 1180px)/2))}
