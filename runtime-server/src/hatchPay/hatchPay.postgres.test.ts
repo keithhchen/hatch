@@ -85,7 +85,7 @@ run("redeem from two conversations at once: exactly one wins", async db => {
   assert.deepEqual(results.filter(r => !r.ok), [{ ok: false, reason: "used" }, { ok: false, reason: "used" }, { ok: false, reason: "used" }]);
   const winner = (await db.codes.peek(" msc048213 "))!;
   assert.equal(winner.status, "used");
-  assert.deepEqual(await db.codes.lookup(" msc048213 "), { status: "used", source: "free", productId: PRODUCT, conversationId: winner.usedByConversationId });
+  assert.deepEqual(await db.codes.lookup(" msc048213 "), { status: "used", source: "free", productId: PRODUCT, conversationId: winner.usedByConversationId, outcome: null });
   assert.equal(await db.codes.lookup("MSC000000"), null);
   // The same conversation redeeming again is the same redeem.
   assert.deepEqual(await db.codes.redeem({ code: "MSC048213", productId: PRODUCT, conversationId: winner.usedByConversationId! }), { ok: true });
