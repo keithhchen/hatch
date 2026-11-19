@@ -1,6 +1,7 @@
 import type http from "node:http";
 import type { AccessCodes, Activation } from "../accessCodes/accessCodes.js";
 import { payerIp as payerIpOf } from "../accessCodes/rateLimit.js";
+import type { AgentCorpusResolverLike } from "../agentCorpus.js";
 import type { ProductCapabilities } from "../agentBox/capabilities.js";
 import { log } from "../observability/log.js";
 import { readBoundedBytes } from "../http/httpSupport.js";
@@ -18,6 +19,8 @@ export type HatchPayDeps = {
   wechat: WeChatPay;
   openids: OpenIdResolver;
   mailer: CodeMailer;
+  /** Where the checkout card reads the Product's name, description and expert from. */
+  corpora?: AgentCorpusResolverLike;
   /** `https://anyteach.cn/hatch-pay`: where the merchant's pages are reached, whatever host Runtime sits behind. */
   publicBase: string;
   priceFen: number;
@@ -41,6 +44,37 @@ const PAGE_HEAD = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"
 <style>body{font:16px/1.6 system-ui,sans-serif;margin:0;padding:64px 24px;text-align:center}.price{font-size:44px;margin:0 0 32px}.btn{display:inline-block;font:inherit;padding:12px 40px;border:0;border-radius:8px;background:#111;color:#fff;text-decoration:none}.btn:disabled{opacity:.5}.alt{display:block;margin-top:20px;color:#555}.code{font:700 32px ui-monospace,monospace;letter-spacing:4px}#err{color:#b00020;margin-top:16px}</style></head><body>`;
 const GUIDE = `<svg width="72" height="72" viewBox="0 0 72 72" style="position:fixed;top:12px;right:16px" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 58C20 36 38 22 58 14M40 12l18 2-4 18"/></svg><p style="margin-top:120px;font-size:20px">请点击右上角 ··· 选择『在浏览器打开』</p>`;
 const page = (body: string, script = "") => `${PAGE_HEAD}${body}${script ? `<script>${script}</script>` : ""}</body></html>`;
+const LOGO = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/hatch-lockup.png";
+const CHECKOUT_CSS = `<style>
+:root{--ink:#111315;--bg:#faf8f4;--line:#e8e4dc;--mute:#6b6f73}
+body{background:var(--bg);color:var(--ink);padding:28px 16px;text-align:left}
+main.co{max-width:420px;margin:0 auto}
+.co .logo{display:block;width:96px;height:auto;margin:0 auto 20px}
+.co .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 1px 2px rgba(17,19,21,.04)}
+.co h1{font-size:19px;line-height:1.35;margin:0}
+.co .by{margin:4px 0 0;color:var(--mute);font-size:14px}
+.co .desc{margin:10px 0 0;font-size:14px;color:#3a3d40}
+.co dl{margin:16px 0 0;border-top:1px solid var(--line)}
+.co dl div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
+.co dt{color:var(--mute);flex:none}.co dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.co .price{font-size:36px;font-weight:700;letter-spacing:-.5px;margin:18px 0 0;background:linear-gradient(90deg,#469A21,#0D7FBB);-webkit-background-clip:text;background-clip:text;color:transparent}
+.co .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:16px;padding:14px;border-radius:12px;font-size:17px;font-weight:600;cursor:pointer}
+.co .btn:disabled{opacity:.6;cursor:default}
+.co .spin{display:none;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+.co .btn.busy .spin{display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.co #err{min-height:20px;text-align:center;font-size:14px}
+</style>`;
+/** The site as a bare domain, or undefined when it is not a plausible one. */
+export const siteDomain = (value: string | null): string | undefined => {
+  const raw = (value ?? "").trim();
+  if (!raw || raw.length > 300) return undefined;
+  try {
+    const host = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./i, "").toLowerCase();
+    return /^(?=.{3,253}$)([a-z0-9¡-￿-]{1,63}\.)+[a-z¡-￿]{2,63}$/.test(host) ? host : undefined;
+  } catch { return undefined; }
+};
+const buyerName = (value: string | null) => { const name = (value ?? "").replace(/\s+/g, " ").trim(); return name && name.length <= 40 ? name : undefined; };
 const jsLiteral = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 export class HatchPay {
@@ -100,7 +134,7 @@ export class HatchPay {
       // Not reached while handle() sends WeChat's browser to the guide; kept for a later JSAPI flow. Inside WeChat the payer is known by openid, which only an OAuth round trip reveals.
       return this.redirect(res, this.deps.openids.authorizeUrl(`${this.deps.publicBase}/oauth?${new URLSearchParams(ask)}`));
     }
-    this.html(res, 200, this.payHtml(ask));
+    this.html(res, 200, await this.payHtml(ask, undefined, { site: siteDomain(url.searchParams.get("site")), name: buyerName(url.searchParams.get("name")) }));
   }
 
   private async oauth(res: http.ServerResponse, url: URL) {
@@ -113,20 +147,38 @@ export class HatchPay {
       log.error("hatch_pay_oauth_failed", { error });
       return this.html(res, 502, page(`<p>授权失败</p><a class="btn" href="${escapeHtml(this.payUrl(ask))}">重试</a>`));
     }
-    this.html(res, 200, this.payHtml(ask, openid));
+    this.html(res, 200, await this.payHtml(ask, openid));
   }
 
-  private payHtml(ask: { product: string; email: string; back: string }, openid?: string) {
+  /** What the card says about the Product; whatever the corpus cannot tell is left out, never invented. */
+  private async productInfo(productId: string): Promise<{ name?: string; description?: string; expert?: string }> {
+    try {
+      const resolved = await this.deps.corpora?.resolveByProduct(productId);
+      if (!resolved) return {};
+      const expert = resolved.corpus.creator.name;
+      return { name: resolved.corpus.product.name, description: resolved.corpus.product.description, ...expert && expert !== "Expert" ? { expert } : {} };
+    } catch (error) { log.warn("hatch_pay_corpus_unavailable", { productId, error }); return {}; }
+  }
+
+  private async payHtml(ask: { product: string; email: string; back: string }, openid?: string, order: { site?: string; name?: string } = {}) {
     const yuan = (this.deps.priceFen / 100).toFixed(2).replace(/\.?0+$/, "");
-    return page(`<p class="price">¥${yuan}</p><button class="btn" id="pay">支付</button><div id="err"></div>`, `
-const ask=${jsLiteral({ ...ask, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err');
-const fail=m=>{err.textContent=m;btn.disabled=false};
-btn.onclick=async()=>{btn.disabled=true;err.textContent='';
+    const info = await this.productInfo(ask.product), e = escapeHtml;
+    const row = (label: string, value?: string) => value ? `<div><dt>${label}</dt><dd>${e(value)}</dd></div>` : "";
+    const head = `${info.name ? `<h1>${e(info.name)}</h1>` : ""}${info.expert ? `<p class="by">${e(info.expert)}</p>` : ""}${info.description ? `<p class="desc">${e(info.description)}</p>` : ""}`;
+    return page(`${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="96" alt="Hatch"><div class="card">${head}<dl>${row("网站", order.site)}${row("姓名", order.name)}${row("兑换码发送至", ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>支付</button><div id="err"></div></div></main>`, `
+const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err');
+const fail=m=>{err.textContent=m;btn.disabled=false;btn.classList.remove('busy')};
+const go=async()=>{btn.disabled=true;btn.classList.add('busy');err.textContent='';
  try{const r=await fetch(${jsLiteral(`${this.deps.publicBase}/order`)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ask)});
   const j=await r.json();if(!r.ok)return fail(j.error||'下单失败');
   if(j.mode==='h5'){location.href=j.url;return}
   WeixinJSBridge.invoke('getBrandWCPayRequest',j.params,x=>{if(x.err_msg==='get_brand_wcpay_request:ok')location.href=j.returnUrl;else fail('支付未完成')});
- }catch(e){fail('网络错误，请重试')}};`);
+ }catch(e){fail('网络错误，请重试')}};
+btn.onclick=go;
+let started=false;
+const start=()=>{if(started)return;started=true;go()};
+if(!ask.openid&&((performance.getEntriesByType('navigation')[0]||{}).type!=='back_forward'))start();
+addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
   }
 
   /** Origin (or Referer, for a client that sends no Origin) must be the merchant's own domain. */
@@ -143,11 +195,12 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     const ask = this.ask(new URL(`http://x/?${new URLSearchParams({ product: String(body.product ?? ""), email: String(body.email ?? ""), back: String(body.back ?? "") })}`));
     if (!ask) return this.json(res, 400, { error: "链接无效" });
     if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.json(res, 403, { error: "不可购买" });
+    const name = buyerName(typeof body.name === "string" ? body.name : null);
     const openid = typeof body.openid === "string" && body.openid ? body.openid : undefined;
     const payerIp = payerIpOf(req.headers);
     if (!openid && !payerIp) return this.json(res, 400, { error: "无法获取网络地址" });
 
-    const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, payChannel: openid ? "jsapi" : "h5" });
+    const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, ...name ? { name } : {}, payChannel: openid ? "jsapi" : "h5" });
     const returnUrl = `${this.deps.publicBase}/return?${new URLSearchParams({ o: outTradeNo, back: ask.back })}`;
     const order = {
       outTradeNo, description: "Hatch 兑换码", amountFen: this.deps.priceFen,
@@ -219,7 +272,7 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     else if (activation.status === "pending") log.error("hatch_pay_amount_mismatch", { outTradeNo: state.outTradeNo, transactionId: state.transactionId, amountFen: state.amountFen });
     else if (activation.activated && activation.email) {
       try {
-        await this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email });
+        await this.deps.mailer.send({ code: activation.code, productId: activation.productId, to: activation.email, ...activation.name ? { name: activation.name } : {} });
       } catch (error) { log.error("hatch_pay_email_failed", { outTradeNo: state.outTradeNo, code: activation.code, error }); }
     }
     return activation;

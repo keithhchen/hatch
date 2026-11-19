@@ -9,7 +9,7 @@ import { InMemoryProductCapabilities } from "./capabilities.js";
 import { BuyerFiles, FileLinks } from "./files.js";
 import { HtmlLinks, HtmlPages, MemoryHtmlPageRepository, PostgresHtmlPageRepository, type HtmlPageRepository } from "./htmlPages.js";
 import { BoxFileMissing, BoxNameTaken, type AgentBox, type BoxProvider } from "./ports.js";
-import { escapeHtml, htmlToText, readCorpusEmailTemplate, renderTemplate, ReportEmails, TransientEmailError, type EmailMessage, type EmailSender } from "./reportEmail.js";
+import { bareDomain, escapeHtml, htmlToText, readCorpusEmailTemplate, renderTemplate, ReportEmails, TransientEmailError, type EmailMessage, type EmailSender } from "./reportEmail.js";
 import { AgentBoxMode, type ReportEmailContext } from "./tools.js";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -208,4 +208,33 @@ test("postgres: concurrent publishes and retries email one page once", { skip: !
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     await admin.end();
   }
+});
+
+test("the report email can address the buyer: {{name}} is the job's name, and the block vanishes without one", async () => {
+  const { runnerFor, saveFile, sender } = await setup();
+  const template = { html: "<p>{{#name}}{{name}}，{{/name}}你好</p>" };
+  const box = await runnerFor("u1", { recipient: "buyer@example.com", chatUrl: "c", productName: "P", name: "王<小明>", template });
+  await box.run("publish_html", { file_id: await saveFile(box, "r.html", PAGE), title: "T" });
+  await until(() => sender!.sent.length === 1);
+  assert.equal(sender!.sent[0]!.html, "<p>王&lt;小明&gt;，你好</p>");
+  const anonymous = await runnerFor("u2", { recipient: "buyer@example.com", chatUrl: "c", productName: "P", template });
+  await anonymous.run("publish_html", { file_id: await saveFile(anonymous, "r2.html", PAGE), title: "T" });
+  await until(() => sender!.sent.length === 2);
+  assert.equal(sender!.sent[1]!.html, "<p>你好</p>");
+});
+
+test("bareDomain strips scheme, www., path, query and trailing slash, and lowercases", () => {
+  assert.equal(bareDomain("https://www.LecusoStreetlight.com/about"), "lecusostreetlight.com");
+  assert.equal(bareDomain("HTTP://Shop.Example.com/?a=1#x"), "shop.example.com");
+  assert.equal(bareDomain("example.com/"), "example.com");
+  assert.equal(bareDomain("  "), undefined);
+  assert.equal(bareDomain(undefined), undefined);
+});
+
+test("the report email's {{domain}} is the Brief's website as a bare domain", async () => {
+  const { runnerFor, saveFile, sender } = await setup();
+  const box = await runnerFor("u1", { recipient: "buyer@example.com", chatUrl: "c", productName: "P", website: "https://www.LecusoStreetlight.com/about", template: { html: "<p>{{domain}}</p>" } });
+  await box.run("publish_html", { file_id: await saveFile(box, "r.html", PAGE), title: "T" });
+  await until(() => sender!.sent.length === 1);
+  assert.equal(sender!.sent[0]!.html, "<p>lecusostreetlight.com</p>");
 });

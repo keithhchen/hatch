@@ -106,3 +106,13 @@ test("the access code never reaches the model: not in the Brief text, not in the
   assert.ok(title.includes("example.com") && !title.includes("MSC234567"));
   assert.equal(briefAccessCode(snapshot), "MSC234567", "our own copy keeps it");
 });
+
+test("the report email context carries the Brief's name answer, and none when the Brief has no name", async () => {
+  const { reportEmailContext } = await import("./index.js");
+  const field = (id: string, type: string) => ({ id, label: id, required: false, type });
+  const spec = { contract_version: "1", fields: [field("email", "email"), field("name", "line")] } as never;
+  const context = (values: Array<{ field_id: string; value: string }>) =>
+    reportEmailContext({ publicId: "conv_1", briefSnapshot: createBriefSnapshot(spec, values) } as never, { productId: "p1" } as never, "https://x.test");
+  assert.equal((await context([{ field_id: "email", value: "a@b.co" }, { field_id: "name", value: " 王小明 " }]))?.name, "王小明");
+  assert.equal((await context([{ field_id: "email", value: "a@b.co" }]))?.name, undefined);
+});

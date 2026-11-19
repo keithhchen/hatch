@@ -70,6 +70,10 @@ export async function readCorpusEmailTemplate(corpusRoot: string | undefined): P
   return html || subject ? { ...html ? { html } : {}, ...subject ? { subject } : {} } : undefined;
 }
 
+/** `https://www.Example.com/about?x=1` -> `example.com`: no scheme, leading www., path, query, port or trailing slash. */
+export const bareDomain = (website: string | undefined): string | undefined =>
+  website?.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/[/?#].*$/, "").replace(/:\d+$/, "").replace(/^www\./i, "").toLowerCase() || undefined;
+
 export type ReportEmailJob = {
   pageId: string;
   recipient: string;
@@ -78,6 +82,8 @@ export type ReportEmailJob = {
   productName: string;
   expertName?: string;
   website?: string;
+  /** The buyer, from the Brief's `name` field. */
+  name?: string;
   /** The access code of a code-gated Product and the page of it (/c/<code>). */
   code?: string;
   codeUrl?: string;
@@ -124,7 +130,7 @@ export class ReportEmails {
     if (!sender) return this.log("report_email_off", { page_id: job.pageId, reason: "RESEND_API_KEY is not set" });
     if (!await pages.claimEmail(job.pageId, to, STALE_CLAIM_SECONDS)) return this.log("report_email_skipped", { page_id: job.pageId, to });
     try {
-      const values = { report_url: job.reportUrl, chat_url: job.chatUrl, product_name: job.productName, expert_name: job.expertName, website: job.website, code: job.code, code_url: job.codeUrl };
+      const values = { report_url: job.reportUrl, chat_url: job.chatUrl, product_name: job.productName, expert_name: job.expertName, website: job.website, domain: bareDomain(job.website), name: job.name, code: job.code, code_url: job.codeUrl };
       const [html, subject] = await Promise.all([
         job.template?.html ?? prompts.get("report-email-default"),
         job.template?.subject ?? prompts.get("report-email-default-subject")

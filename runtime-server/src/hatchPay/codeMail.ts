@@ -47,7 +47,7 @@ async function corpusTemplate(corpusRoot: string | undefined): Promise<{ html?: 
   return { ...html ? { html } : {}, ...subject ? { subject } : {} };
 }
 
-export interface CodeMailer { send(input: { code: string; productId: string; to: string }): Promise<void> }
+export interface CodeMailer { send(input: { code: string; productId: string; to: string; name?: string }): Promise<void> }
 
 /** The access code email: the Product's own template, else the platform default; both rendered with the same variables. */
 export class AccessCodeMailer implements CodeMailer {
@@ -57,12 +57,12 @@ export class AccessCodeMailer implements CodeMailer {
     origin?: string;
   }) {}
 
-  async send({ code, productId, to }: { code: string; productId: string; to: string }): Promise<void> {
+  async send({ code, productId, to, name }: { code: string; productId: string; to: string; name?: string }): Promise<void> {
     const product = await this.deps.products.describe(productId);
     const own = await corpusTemplate(product.corpusRoot);
     const [html, subject] = await Promise.all([own.html ?? this.deps.prompts.get(DEFAULT_TEMPLATE_PROMPT), own.subject ?? this.deps.prompts.get(DEFAULT_SUBJECT_PROMPT)]);
     const values = {
-      product_name: product.productName, expert_name: product.expertName, code,
+      product_name: product.productName, expert_name: product.expertName, name, code,
       amount: (this.deps.priceFen / 100).toFixed(2), code_url: `${this.deps.origin ?? "https://gethatchapp.com"}/c/${code}`
     };
     const rendered = renderTemplate(html, values);
