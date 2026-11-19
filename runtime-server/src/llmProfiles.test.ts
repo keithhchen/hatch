@@ -40,3 +40,15 @@ test("deepseek-flash is the vision-capable DeepSeek profile: images allowed, thi
   assert.equal(profile.thinkingType, "disabled");
   assert.equal(profile.input, undefined, "text and image");
 });
+
+test("deepseek-flash-thinking is deepseek-flash with thinking enabled, low effort, and earlier reasoning replayed", () => {
+  const profile = llmProfile("deepseek-flash-thinking");
+  assert.equal(profile.model, "deepseek-flash");
+  assert.equal(profile.apiKeyEnv, "DEEPSEEK_API_KEY");
+  assert.equal(profile.thinkingType, "enabled");
+  assert.equal(profile.reasoning, true);
+  assert.equal(profile.reasoningEffort, "low");
+  assert.equal(profile.replaysEarlierReasoning, true);
+  assert.equal(profile.input, undefined, "text and image");
+  assert.equal(llmProfile("deepseek-flash").thinkingType, "disabled");
+});

@@ -321,7 +321,7 @@ export class PiAgentRuntime implements AgentRuntime {
         liveState ??= ctx.liveState?.();
         const live = await liveState;
         return [
-          ...withoutEarlierReasoning(await compactContext(messages), earlierTurns),
+          ...(profile.replaysEarlierReasoning ? await compactContext(messages) : withoutEarlierReasoning(await compactContext(messages), earlierTurns)),
           // Request-only: Pi sends the transformed list but keeps its own
           // transcript, so the reminder is never stored or repeated in history.
           piUserMessage([

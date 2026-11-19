@@ -87,7 +87,8 @@ class BoxliteBox implements AgentBox {
           options.signal?.throwIfAborted();
           return { exitCode: 124, stdout: stdout.text(), stderr: `${stderr.text()}\n[Stopped: the command ran longer than ${options.timeoutSeconds} seconds.]`.trimStart() };
         }
-        if (result.exitCode !== 0 && TRANSPORT.test(result.errorMessage ?? "")) {
+        // A silent result never ran the command, even when BoxLite reports it as exit 0.
+        if (TRANSPORT.test(result.errorMessage ?? "") && (result.exitCode !== 0 || silent())) {
           const failure = new Error(result.errorMessage);
           if (!silent()) return unavailable(failure);
           throw new Transient(failure.message, { cause: failure });
