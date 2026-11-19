@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""ip_info --target HOST_OR_IP: same JSON as the Runtime's ip_info tool. Key: CF_API_TOKEN (sent as a bearer header)."""
+import argparse, ipaddress, json, os, socket, sys, urllib.parse, urllib.request, urllib.error
+
+def fail(code, message):
+    print(json.dumps({"status": "error", "error": {"code": code, "message": message}}, ensure_ascii=False)); sys.exit(1)
+
+p = argparse.ArgumentParser(); p.add_argument("--target")
+target = (p.parse_args().target or "").strip()
+if not target: fail("invalid_call", "target is a non-empty string.")
+token = os.environ.get("CF_API_TOKEN", "")
+if not token: fail("not_configured", "CF_API_TOKEN is not set.")
+try:
+    ipaddress.ip_address(target); addresses = [target]
+except ValueError:
+    try: addresses = list(dict.fromkeys(i[4][0] for i in socket.getaddrinfo(target, None, socket.AF_INET)))
+    except Exception: fail("not_found", f"{target} has no IPv4 address.")
+ips = []
+for ip in addresses[:10]:
+    req = urllib.request.Request("https://api.cloudflare.com/client/v4/radar/entities/ip?ip=" + urllib.parse.quote(ip, safe=""), headers={"Authorization": "Bearer " + token})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r: body = json.load(r)
+    except urllib.error.HTTPError as e:
+        text = e.read().decode("utf-8", "replace")
+        try: msg = (json.loads(text).get("errors") or [{}])[0].get("message") or text[:200]
+        except Exception: msg = text[:200]
+        fail(f"http_{e.code}", f"The service answered {e.code}: {msg}")
+    except Exception:
+        fail("unavailable", "The service could not be reached or did not answer within 30 seconds.")
+    f = ((body.get("result") or {}).get("ip")) or {}
+    ips.append({"ip": ip, "country": f.get("locationName") or f.get("location"), "country_code": f.get("location"), "asn": f.get("asn"), "asn_name": f.get("asnName"), "organization": f.get("asnOrgName")})
+print(json.dumps({"target": target, "ips": ips}, ensure_ascii=False))

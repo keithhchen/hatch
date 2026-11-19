@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""page_speed --url URL [--strategy mobile|desktop]: same JSON as the Runtime's page_speed tool. Key: PAGESPEED_API_KEY (sent as a header)."""
+import argparse, json, os, sys, urllib.parse, urllib.request, urllib.error
+
+def fail(code, message):
+    print(json.dumps({"status": "error", "error": {"code": code, "message": message}}, ensure_ascii=False)); sys.exit(1)
+
+p = argparse.ArgumentParser(); p.add_argument("--url"); p.add_argument("--strategy", default="mobile")
+a = p.parse_args()
+url = (a.url or "").strip()
+if not url: fail("invalid_call", "url is a non-empty string.")
+if a.strategy not in ("mobile", "desktop"): fail("invalid_call", "strategy is mobile or desktop.")
+key = os.environ.get("PAGESPEED_API_KEY", "")
+if not key: fail("not_configured", "PAGESPEED_API_KEY is not set.")
+query = urllib.parse.urlencode({"url": url, "strategy": a.strategy, "category": "performance"})
+req = urllib.request.Request("https://www.googleapis.com/pagespeedonline/v5/runPagespeed?" + query, headers={"X-Goog-Api-Key": key})
+try:
+    with urllib.request.urlopen(req, timeout=120) as r: body = json.load(r)
+except urllib.error.HTTPError as e:
+    text = e.read().decode("utf-8", "replace")
+    try: msg = json.loads(text).get("error", {}).get("message") or text[:200]
+    except Exception: msg = text[:200]
+    fail(f"http_{e.code}", f"The service answered {e.code}: {msg}")
+except Exception:
+    fail("unavailable", "The service could not be reached or did not answer within 120 seconds.")
+lh = body.get("lighthouseResult") or {}
+score = ((lh.get("categories") or {}).get("performance") or {}).get("score")
+if not lh or not isinstance(score, (int, float)): fail("no_result", "The test returned no performance score for this page.")
+audits = lh.get("audits") or {}
+ids = {"lcp": "largest-contentful-paint", "fcp": "first-contentful-paint", "cls": "cumulative-layout-shift", "tbt": "total-blocking-time", "speed_index": "speed-index"}
+metrics = {n: {"display": (audits.get(i) or {}).get("displayValue"), "value": (audits.get(i) or {}).get("numericValue")} for n, i in ids.items()}
+opps = sorted((x for x in audits.values() if (x.get("details") or {}).get("type") == "opportunity" and (x["details"].get("overallSavingsMs") or 0) > 0), key=lambda x: -x["details"]["overallSavingsMs"])[:5]
+print(json.dumps({"url": lh.get("finalUrl") or url, "strategy": a.strategy, "performance_score": round(score * 100), "metrics": metrics, "opportunities": [{"title": x.get("title"), "display": x.get("displayValue")} for x in opps]}, ensure_ascii=False))

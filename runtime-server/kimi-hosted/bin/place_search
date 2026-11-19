@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""place_search --query "...": same JSON as the Runtime's place_search tool. Key: GOOGLE_MAPS_API_KEY (sent as a header)."""
+import argparse, json, os, sys, urllib.request, urllib.error
+
+def fail(code, message):
+    print(json.dumps({"status": "error", "error": {"code": code, "message": message}}, ensure_ascii=False)); sys.exit(1)
+
+p = argparse.ArgumentParser(); p.add_argument("--query")
+q = (p.parse_args().query or "").strip()
+if not q: fail("invalid_call", "query is a non-empty string.")
+key = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+if not key: fail("not_configured", "GOOGLE_MAPS_API_KEY is not set.")
+fields = "places.displayName,places.formattedAddress,places.types,places.rating,places.userRatingCount,places.googleMapsUri,places.businessStatus"
+req = urllib.request.Request("https://places.googleapis.com/v1/places:searchText", data=json.dumps({"textQuery": q}).encode(), method="POST",
+    headers={"content-type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": fields})
+try:
+    with urllib.request.urlopen(req, timeout=30) as r: body = json.load(r)
+except urllib.error.HTTPError as e:
+    text = e.read().decode("utf-8", "replace")
+    try: msg = json.loads(text).get("error", {}).get("message") or text[:200]
+    except Exception: msg = text[:200]
+    fail(f"http_{e.code}", f"The service answered {e.code}: {msg}")
+except Exception:
+    fail("unavailable", "The service could not be reached or did not answer within 30 seconds.")
+print(json.dumps({"places": [{"name": (x.get("displayName") or {}).get("text"), "address": x.get("formattedAddress"), "types": x.get("types"), "rating": x.get("rating"), "rating_count": x.get("userRatingCount"), "map_url": x.get("googleMapsUri"), "status": x.get("businessStatus")} for x in (body.get("places") or [])[:5]]}, ensure_ascii=False))
