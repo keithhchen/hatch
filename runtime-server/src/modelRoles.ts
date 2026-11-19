@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS hatch_model_roles (
   profile TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- The instruction a role's model is given, for the roles that have one (see prompts.ts).
+ALTER TABLE hatch_model_roles ADD COLUMN IF NOT EXISTS prompt TEXT;
 CREATE TABLE IF NOT EXISTS hatch_product_models (
   product_id TEXT PRIMARY KEY,
   profile TEXT NOT NULL,

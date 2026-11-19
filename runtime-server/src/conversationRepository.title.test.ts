@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
 import { InMemoryConversationRepository, PostgresConversationRepository, type ConversationRepository } from "./conversationRepository.js";
+import { PostgresModelRoleResolver } from "./modelRoles.js";
 import { FilePrompts, PostgresPrompts, PROMPT_FILES } from "./prompts.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
@@ -82,17 +83,27 @@ test("postgres: the title is written by one conditional UPDATE, not a read and a
 // ── the prompt the title model is given ────────────────────────────────
 
 test("the title prompt file is the default instruction", async () => {
-  const body = await new FilePrompts().get("conversation_title");
+  const body = await new FilePrompts().get("title");
   assert.match(body, /Answer with the title only/);
-  assert.equal(PROMPT_FILES.conversation_title, "conversation-title/TITLE.md");
+  assert.equal(PROMPT_FILES.title, "conversation-title/TITLE.md");
 });
+
+test("postgres: a role row the model resolver made first still gets the prompt, and the resolver's boot keeps an edited one", { skip: !databaseUrl, timeout: 30_000 }, async () => withBackend("postgres", async (_repository, pool) => {
+  const roles = () => new PostgresModelRoleResolver(pool!, { cacheMs: 0 });
+  await roles().resolve("title");
+  assert.equal((await pool!.query("SELECT prompt FROM hatch_model_roles WHERE role = 'title'")).rows[0].prompt, null);
+  assert.equal(await new PostgresPrompts(pool!).get("title"), await new FilePrompts().get("title"));
+  await pool!.query("UPDATE hatch_model_roles SET prompt = 'Edited' WHERE role = 'title'");
+  assert.equal((await roles().resolve("title")).name, "gemini-api");
+  assert.equal(await new PostgresPrompts(pool!).get("title"), "Edited", "a reboot of either keeps the edit");
+}));
 
 test("postgres: the prompt is seeded from its file once, read from the table, and an edited row is never overwritten", { skip: !databaseUrl, timeout: 30_000 }, async () => withBackend("postgres", async (_repository, pool) => {
   const prompts = new PostgresPrompts(pool!);
-  assert.equal(await prompts.get("conversation_title"), await new FilePrompts().get("conversation_title"));
-  await pool!.query("UPDATE hatch_prompts SET body = $1 WHERE name = 'conversation_title'", ["Edited in the database"]);
-  assert.equal(await prompts.get("conversation_title"), "Edited in the database", "read at each use");
-  assert.equal(await new PostgresPrompts(pool!).get("conversation_title"), "Edited in the database", "a later boot keeps the edit");
-  await pool!.query("UPDATE hatch_prompts SET body = '  ' WHERE name = 'conversation_title'");
-  await assert.rejects(prompts.get("conversation_title"), /no prompt named conversation_title/);
+  assert.equal(await prompts.get("title"), await new FilePrompts().get("title"));
+  await pool!.query("UPDATE hatch_model_roles SET prompt = $1 WHERE role = 'title'", ["Edited in the database"]);
+  assert.equal(await prompts.get("title"), "Edited in the database", "read at each use");
+  assert.equal(await new PostgresPrompts(pool!).get("title"), "Edited in the database", "a later boot keeps the edit");
+  await pool!.query("UPDATE hatch_model_roles SET prompt = '  ' WHERE role = 'title'");
+  await assert.rejects(prompts.get("title"), /no prompt for role title/);
 }));

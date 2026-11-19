@@ -113,7 +113,7 @@ export class ConversationTitles {
     if (!conversation || conversation.title || await this.deps.skip?.(id)) return undefined;
     const input = titleInput(conversation, await this.firstMessages(id));
     if (!input) return undefined;
-    const system = await this.deps.prompts.get("conversation_title");
+    const system = await this.deps.prompts.get("title");
     const title = cleanTitle(await this.bounded(signal => this.deps.model({ system, user: input, signal })));
     if (!title) return undefined;
     return this.deps.repository.setTitleIfUnset(id, title);
