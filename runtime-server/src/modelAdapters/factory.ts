@@ -104,7 +104,7 @@ export class FactoryGeminiAdapter extends GeminiAdapter implements FactoryModelA
   recordedProvider(profile: LlmProfile): string { return profile.provider; }
 }
 
-const FACTORY_ADAPTERS: Record<ModelFamily, FactoryModelAdapter> = {
+const FACTORY_ADAPTERS: Record<Exclude<ModelFamily, "replay">, FactoryModelAdapter> = {
   kimi: new FactoryKimiAdapter(),
   "openai-compatible": new FactoryOpenAICompatibleAdapter(),
   gemini: new FactoryGeminiAdapter()
@@ -112,5 +112,6 @@ const FACTORY_ADAPTERS: Record<ModelFamily, FactoryModelAdapter> = {
 
 /** The adapter Creator Factory uses for a profile, chosen by the profile's family. */
 export function factoryAdapterFor(profile: LlmProfile): FactoryModelAdapter {
+  if (profile.family === "replay") throw new Error("The replay profile is for Product chat load tests only, never Creator Factory");
   return FACTORY_ADAPTERS[profile.family];
 }

@@ -95,6 +95,7 @@ import type { HatchPay } from "./hatchPay/routes.js";
 import type { AccessCodes } from "./accessCodes/accessCodes.js";
 import { openSiteResearchMode } from "./siteTools/open.js";
 import type { SiteResearchMode } from "./siteTools/tools.js";
+import { LoadTestReplay } from "./loadTestReplay/mode.js";
 import { GUEST_PREFIX } from "./chat/principal.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { MAX_CONSUMER_BUFFERED_BYTES } from "./chat/sinks.js";
@@ -220,6 +221,8 @@ export type RuntimeServerOptions = {
   agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string; reportLeads?: (contactOf: ContactOf) => ReportLeads };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
+  /** Load testing: a Product with the `load_test_replay` capability runs on a recorded Run instead of a model and outside tools. Off (undefined) without the Agent boxes' page publishing. */
+  loadTestReplay?: LoadTestReplay;
   /** The Products with the engine_kimi_hosted row run on Kimi Hosted Agents. */
   kimiHosted?: KimiHostedMode;
   /** Products with the `access_code` capability take a Run only for a conversation that redeemed the Brief's code. */
@@ -360,6 +363,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(artifact ? { artifact } : {}),
     ...(agentBox ? { agentBox } : {}),
     ...(siteResearch ? { siteResearch } : {}),
+    ...(agentBox && productCapabilities ? { loadTestReplay: new LoadTestReplay({ capabilities: productCapabilities, boxDefinitions: agentBox.mode.definitions(), publish: (owner, email, name, html, title) => agentBox.mode.publishBytes(owner, email, name, html, title) }) } : {}),
     ...(kimiHosted ? { kimiHosted } : {}),
     ...(accessGate ? { accessGate } : {}),
     ...(productCapabilities ? { productCapabilities } : {}),
@@ -493,6 +497,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const agentBox = options.agentBox;
   if (agentBox) for (const definition of agentBox.mode.definitions()) toolRegistry.set(definition.name, definition);
   if (options.siteResearch) for (const definition of options.siteResearch.definitions()) toolRegistry.set(definition.name, definition);
+  // A load-test recording calls tools this Runtime may not have configured (no site keys): they resolve by name, and the real ones, when present, win.
+  if (options.loadTestReplay) for (const definition of options.loadTestReplay.definitions()) if (!toolRegistry.has(definition.name)) toolRegistry.set(definition.name, definition);
   const parts: PartsReader = chatAssets ?? new TextPartsReader();
 
   const admission: RunAdmission = {
@@ -546,15 +552,21 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         serverTools.setBox(box?.tools);
         const site = report ? undefined : await options.siteResearch?.turnFor(binding.productId);
         serverTools.setSite(site?.tools);
-        const productTools = [...box?.extraTools ?? [], ...site?.extraTools ?? []];
-        const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot, Boolean(box));
+        // Load-test replay: only a Product with the load_test_replay row. The model and the outside tools are a recording; the rest of this turn is real.
+        const replay = report ? undefined : await options.loadTestReplay?.turnFor({
+          productId: binding.productId, userId: binding.userId, corpusRoot: binding.agentCorpusRoot,
+          email: await gatedReportEmailContext(options.accessGate, turn.conversation, binding, agentBox?.origin)
+        });
+        serverTools.setReplay(replay?.tools);
+        const productTools = [...box?.extraTools ?? [], ...site?.extraTools ?? [], ...replay?.extraTools ?? []];
+        const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot, Boolean(box) || Boolean(replay));
         await runModelTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
-          { usage: turn.usage, ...productTools.length ? { extraTools: productTools } : {}, ...box ? { toolCallLimit: BOX_TOOL_CALL_LIMIT } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
+          { usage: turn.usage, ...productTools.length ? { extraTools: productTools } : {}, ...box || replay ? { toolCallLimit: BOX_TOOL_CALL_LIMIT } : {}, ...replay ? { replay: replay.stream } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
       } catch (error) {
         await failRun(turn, error);

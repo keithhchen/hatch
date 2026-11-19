@@ -7,14 +7,19 @@ export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "ge
 export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon", "gemini-3.8-flash"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
-export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
+/**
+ * The load-test replay profile (see loadTestReplay/): it calls no model. It is deliberately in neither list above, so no role but
+ * `chat` can be set to it (modelRoles.ts), and it runs only when a Product with the `load_test_replay` capability supplies its recording.
+ */
+export const REPLAY_PROFILE_NAME = "replay" as const;
+export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName | typeof REPLAY_PROFILE_NAME;
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
 
 /** The model every Kimi use runs; the one place its name is spelled outside the profile table. */
 export const KIMI_MODEL = "kimi-k3.1-pro" as const;
 
 /** Which provider adapter owns a profile's endpoint, model object and request normalization. */
-export type ModelFamily = "kimi" | "openai-compatible" | "gemini";
+export type ModelFamily = "kimi" | "openai-compatible" | "gemini" | "replay";
 
 export type LlmProfile = {
   name: LlmProfileName;
@@ -49,6 +54,24 @@ export type LlmProfile = {
 export const GEMINI_4_STALL: StallLimits = { firstEventMs: 180_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 };
 
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
+  // Load-test replay: a recorded Run played back instead of a model call. Nothing here is a real endpoint or key. The window is the
+  // largest of any profile, so compaction never summarizes a replayed Run (that would be a model call); the stall limits are long
+  // because the recording's own thinking pauses are played back.
+  replay: {
+    name: "replay",
+    family: "replay",
+    provider: "load_test_replay",
+    providerName: "Load test replay",
+    api: "openai-completions",
+    model: "load_test_replay",
+    baseUrl: "replay://load-test",
+    apiKeyEnv: "LLM_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    thinkingLevel: "low",
+    stall: { firstEventMs: 600_000, silenceMs: 600_000 }
+  },
   "deepseek-v4-flash": {
     name: "deepseek-v4-flash",
     family: "openai-compatible",

@@ -1,5 +1,5 @@
 import { ModelProfileError } from "./errors/modelProfile.js";
-import { FACTORY_LLM_PROFILE_NAMES, RUNTIME_LLM_PROFILE_NAMES, llmProfile, type LlmProfile, type LlmProfileName } from "./llmProfiles.js";
+import { FACTORY_LLM_PROFILE_NAMES, REPLAY_PROFILE_NAME, RUNTIME_LLM_PROFILE_NAMES, llmProfile, type LlmProfile, type LlmProfileName } from "./llmProfiles.js";
 
 /**
  * Which model plays which role: the seed rows of `hatch_model_roles`. A row is inserted only when its role has none;
@@ -27,7 +27,8 @@ export type ModelRole = keyof typeof MODEL_ROLES;
 export const MODEL_ROLE_NAMES = Object.keys(MODEL_ROLES) as ModelRole[];
 
 const ALLOWED: Record<ModelRole, readonly string[]> = {
-  chat: RUNTIME_LLM_PROFILE_NAMES, assistant: RUNTIME_LLM_PROFILE_NAMES,
+  // Only a Product's chat may be set to replay: the load-test Product's model setting (`hatch_product_models`).
+  chat: [...RUNTIME_LLM_PROFILE_NAMES, REPLAY_PROFILE_NAME], assistant: RUNTIME_LLM_PROFILE_NAMES,
   factory: FACTORY_LLM_PROFILE_NAMES,
   ingest: ["kimi-k3.1-pro"], inspiration: FACTORY_LLM_PROFILE_NAMES, content: FACTORY_LLM_PROFILE_NAMES,
   title: RUNTIME_LLM_PROFILE_NAMES

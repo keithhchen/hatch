@@ -1,5 +1,6 @@
 import path from "node:path";
 import { realpath } from "node:fs/promises";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { z } from "zod";
 import {
   renderUserMessageForModel,
@@ -105,6 +106,8 @@ export type RunContext = {
   turnReminder?: (now: Date) => string;
   /** Tool calls one Run may make, and the model-visible tool names that never count (a Run's delivery must always be callable). Defaults to the chat budget. */
   toolCallLimit?: { max: number; uncounted: string[] };
+  /** Load-test replay: the recording this Run plays in place of a model call. Set only for a Product with the `load_test_replay` capability. */
+  replay?: StreamFn;
   /** `agentSystemPrompt` is the agent's own whole prompt, not an Expert's instructions inside the Expert Agent frame. */
   ownPrompt?: boolean;
   /** A Run may end having said nothing: the agent had nothing to tell the user, or a tool handed the conversation over. */
@@ -1130,7 +1133,7 @@ export async function executeChatTool(
         signal: executionSignal
       });
     }
-    return ctx.serverTools.execute(dispatch.runtimeName, args, executionSignal);
+    return ctx.serverTools.execute(dispatch.runtimeName, args, executionSignal, toolCallId);
   }
   if (dispatch.target === "hybrid" && dispatch.spec.runtimeName === "file_list") {
     const target = String(args.path ?? "");
