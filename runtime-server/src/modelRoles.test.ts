@@ -5,7 +5,7 @@ import { MODEL_ROLES, InMemoryModelRoleResolver, PostgresModelRoleResolver, prof
 const quiet = async <T>(work: () => Promise<T>): Promise<T> => { const log = console.error; console.error = () => undefined; try { return await work(); } finally { console.error = log; } };
 
 test("the seed rows keep today's production choices", () => {
-  assert.deepEqual({ ...MODEL_ROLES }, { chat: "kimi-k3.1-pro", assistant: "gemini-api", factory: "gemini-3.1-pro", ingest: "kimi-k3.1-pro", inspiration: "kimi-k3.1-pro", content: "kimi-k3.1-pro" });
+  assert.deepEqual({ ...MODEL_ROLES }, { chat: "kimi-k3.1-pro", assistant: "gemini-api", factory: "gemini-3.1-pro", ingest: "kimi-k3.1-pro", inspiration: "kimi-k3.1-pro", content: "kimi-k3.1-pro", title: "gemini-api" });
 });
 
 /** A database of two tables, counting the reads that reach it. */
@@ -105,7 +105,7 @@ test("the in-memory resolver serves the seeds and what a test sets, uncached", a
 
 test("the Gemini 4 profiles are valid names for every role that takes a catalogue profile, and not for ingest", () => {
   for (const name of ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"]) {
-    for (const role of ["chat", "assistant", "factory", "inspiration", "content"] as const) assert.equal(profileForRole(role, name, "test").name, name);
+    for (const role of ["chat", "assistant", "factory", "inspiration", "content", "title"] as const) assert.equal(profileForRole(role, name, "test").name, name);
     assert.throws(() => profileForRole("ingest", name, "test"), { code: "model_profile_invalid" });
   }
 });

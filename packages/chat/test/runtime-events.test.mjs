@@ -101,3 +101,12 @@ test("a Runtime identity refines the current one only when the host binding acce
   assert.equal(refined.productName, "Tutor Pro");
   assert.equal(refined.creatorAvatarUrl, "m.png");
 });
+
+test("a title event is a conversation-level outcome, heard whichever run the page holds, and an empty one is ignored", () => {
+  const timeline = new ChatTimeline();
+  const event = { type: "conversation.titled", conversation_id: "conv", title: "Tokyo trip, 5 days" };
+  for (const activeRun of [null, "run"]) {
+    assert.deepEqual({ ...reducer.reduce(timeline, event, activeRun) }, { kind: "titled", conversationId: "conv", title: "Tokyo trip, 5 days" });
+  }
+  assert.equal(reducer.reduce(timeline, { ...event, title: "" }, null).kind, "ignored");
+});

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { webChatCopy, webChatErrorText, webChatT } from "./webChatI18n.js";
+import { conversationTitle, webChatCopy, webChatErrorText, webChatT } from "./webChatI18n.js";
 
 test("Web Chat provides complete English, Chinese, and Japanese copy", () => {
   const keys = Object.keys(webChatCopy.en).sort();
@@ -45,4 +45,20 @@ test("the retired purchase model has no Web Chat copy left", () => {
   for (const copy of Object.values(webChatCopy)) {
     for (const key of Object.keys(copy)) assert.doesNotMatch(key, /paywall|noAccess|subscribe|checkingSubscription/i, key);
   }
+});
+
+test("the sidebar shows a conversation's title, and the localized new-conversation name only while it has none", () => {
+  const label = (locale, conversation) => conversationTitle(conversation, (key, values) => webChatT(locale, key, values));
+  assert.equal(label("zh", { id: "c1", title: "juduvalve.com 获客诊断" }), "juduvalve.com 获客诊断");
+  assert.equal(label("zh", { id: "c1" }), "新对话");
+  assert.equal(label("en", { id: "c1", title: null }), "New conversation");
+  assert.equal(label("ja", { id: "c1", title: "  " }), "新しい会話");
+  assert.equal(label("en", { id: "c1", title: "Pricing review" }), "Pricing review");
+});
+
+test("the sidebar renders its titles through that helper", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const shell = await readFile(new URL("./WebChatShell.jsx", import.meta.url), "utf8");
+  assert.match(shell, /conversationTitle\(item, t\)/);
+  assert.doesNotMatch(shell, /item\.title \|\|/);
 });

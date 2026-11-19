@@ -286,6 +286,7 @@ on lives in two tables, created and seeded on first use by whichever process rea
 | `ingest` | `kimi-k3.1-pro` | The hosted ingest agent. Kimi profiles only. |
 | `inspiration` | `kimi-k3.1-pro` | The Inspiration node of a Product workspace (research on the open web). |
 | `content` | `kimi-k3.1-pro` | The Content Creation node of a Product workspace. |
+| `title` | `gemini-api` | The title of a Product conversation, written once after its first Run completes (see below). Any profile in the catalogue. |
 
 A seed row is inserted only when its role has no row; after that the database rules. List the valid profile names with
 `node -e 'import("./dist/llmProfiles.js").then(m => console.log(m.LLM_PROFILE_NAMES.join("\n")))'` (`chat` and `assistant` accept all
@@ -303,6 +304,17 @@ Each process reads a choice at most every 30 seconds, so a change reaches every 
 of each Run, job and compaction: a Run in progress keeps the model it began with. An unknown profile name, a profile not allowed for
 the role, or a profile whose API key is missing fails the Run with the logged error `model_profile_invalid`; nothing falls back to
 another model. Without a database (local development and tests) the seed rows apply.
+
+## Conversation titles
+
+After a Product conversation's Run completes, and while the conversation has no title, the Runtime asks the `title` model for one: the
+first thing the user wrote (or, for a conversation started from a Brief, the Brief's answers) and the start of the first reply go in; a short title
+in the conversation's language comes out. It is written by one conditional `UPDATE hatch_conversations SET title = $1 WHERE id = $2 AND title IS NULL`,
+so concurrent instances and retries write at most once and a title the user set (`PATCH`) is never replaced. The call is background, bounded
+(20 s) and never changes the Run: a failure leaves the title empty and the next completed Run tries again. Open pages hear it as the live event
+`conversation.titled {conversation_id, title}`; the list endpoints return `title`, and clients show "New conversation" only while it is null.
+The instruction text lives in `hatch_prompts` (name `conversation_title`), seeded from `prompts/conversation-title/TITLE.md` when absent and
+changed with an `UPDATE`, no deploy. Conversations that predate this are titled the next time one of their Runs completes.
 
 ## Protocol
 

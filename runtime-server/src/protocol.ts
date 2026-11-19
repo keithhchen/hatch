@@ -557,6 +557,13 @@ export type ConversationChanged = {
   committed: "claimed";
 };
 
+/** The conversation was given its title (once, after its first Run); a page that lists conversations shows it without reading again. */
+export type ConversationTitled = {
+  type: "conversation.titled";
+  conversation_id: string;
+  title: string;
+};
+
 export type CompactionEvent = {
   type: "session.compacted";
   run_id: string;
@@ -629,7 +636,7 @@ export type FrameRejected = {
   error: { code: string; message: string; reference?: string };
 };
 
-export type OutboundMessage = SessionError | FrameRejected | MessageRejected | RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | ConversationChanged | CompactionEvent | RunFinal | RunError;
+export type OutboundMessage = SessionError | FrameRejected | MessageRejected | RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | ConversationChanged | ConversationTitled | CompactionEvent | RunFinal | RunError;
 
 export function contextAttachmentTextSha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
