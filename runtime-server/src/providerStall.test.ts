@@ -196,3 +196,20 @@ test("a caller that aborted is not asked again after a transient failure", async
   assert.deepEqual((await retrying(failsThenAnswers([[errorOf("fetch failed")]], seen), 2, controller.signal)).map((event) => event.type), ["error"]);
   assert.equal(seen.requests, 1);
 });
+
+test("the thinking Gemini 4 profiles wait 180 s for a first event and keep the 60 s silence limit and retries; others stay at 45 s", () => {
+  for (const name of ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon"] as const) {
+    assert.deepEqual(llmProfile(name).stall, { firstEventMs: 180_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 });
+  }
+  for (const name of ["gemini-3.1-pro", "gemini-3.8-flash", "gemini-api"] as const) assert.equal(llmProfile(name).stall?.firstEventMs, 45_000);
+});
+
+test("the guard waits for the per-profile first-event deadline and asks a stalled call again with the same budget", async () => {
+  const seen = { requests: 0, aborted: 0 };
+  const guarded = withStallGuard(hangsThenAnswers(1, seen), { firstEventMs: 150, silenceMs: 40, restarts: 1 });
+  const started = Date.now();
+  const events = await drain(guarded(model, { messages: [] }, {}) as ReturnType<typeof call>);
+  assert.ok(Date.now() - started >= 150);
+  assert.equal(seen.requests, 2);
+  assert.notEqual(events.at(-1)?.type, "error");
+});

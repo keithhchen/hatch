@@ -45,6 +45,9 @@ export type LlmProfile = {
   stall?: StallLimits;
 };
 
+/** Gemini 4 thinks before it emits anything (thought summaries arrive as one chunk), 45-65 s on ~28k tokens and longer on bigger contexts, so the first event gets 180 s; once streaming, 60 s of silence is still a stall. A stalled call is asked again with the same budget. */
+export const GEMINI_4_STALL: StallLimits = { firstEventMs: 180_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 };
+
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
   "deepseek-v4-flash": {
     name: "deepseek-v4-flash",
@@ -225,7 +228,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
     thinkingLevel: "low",
-    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+    stall: GEMINI_4_STALL
   },
   "gemini-4-carbon": {
     name: "gemini-4-carbon",
@@ -241,7 +244,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
     thinkingLevel: "low",
-    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+    stall: GEMINI_4_STALL
   },
   "gemini-4-hydrogen": {
     name: "gemini-4-hydrogen",
@@ -257,7 +260,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
     thinkingLevel: "low",
-    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+    stall: GEMINI_4_STALL
   },
   // Gemini 4 Neon (aistudio.google.com/docs/models/gemini-4-neon): 1,048,576 context, 65,536 output, text/image/video/audio/PDF in.
   // Thinking levels low | medium | high | xhigh (default high; minimal is a 400). $3 / $15 per 1M tokens, thinking billed as output.
@@ -274,7 +277,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "medium",
-    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+    stall: GEMINI_4_STALL
   }
 };
 

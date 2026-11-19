@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LLM_PROFILE_NAMES, llmProfile, requireLlmApiKey } from "./llmProfiles.js";
+import { GEMINI_4_STALL, LLM_PROFILE_NAMES, llmProfile, requireLlmApiKey } from "./llmProfiles.js";
 
 test("the catalogue names every usable profile, and each resolves to its own data", () => {
   for (const name of LLM_PROFILE_NAMES) assert.equal(llmProfile(name).name, name);
@@ -28,7 +28,7 @@ test("Gemini 4 profiles: the API's own limits, thinking low, and valid for the r
     assert.equal(profile.contextWindow, 1_048_576);
     assert.equal(profile.maxTokens, maxTokens);
     assert.equal(profile.thinkingLevel, "low");
-    assert.deepEqual(profile.stall, llmProfile("gemini-3.1-pro").stall);
+    assert.deepEqual(profile.stall, GEMINI_4_STALL);
   }
 });
 
@@ -67,6 +67,6 @@ test("gemini-3.8-flash is gemini-api by name, and gemini-4-neon has the API's li
     assert.equal(profile.reasoning, true);
     assert.equal(profile.thinkingLevel, "medium");
     assert.equal(profile.input, undefined, "text and image");
-    assert.deepEqual(profile.stall, llmProfile("gemini-3.1-pro").stall);
+    assert.deepEqual(profile.stall, profile.model.startsWith("gemini-4-") ? GEMINI_4_STALL : llmProfile("gemini-3.1-pro").stall);
   }
 });
