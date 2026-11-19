@@ -4,11 +4,12 @@ import type http from "node:http";
 import path from "node:path";
 import { limited, type AccessGate } from "../accessGate.js";
 import type { AgentCorpusResolverLike } from "../agentCorpus.js";
-import { BriefValidationError, createBriefSnapshot, type BriefSpec } from "../brief.js";
+import { BriefValidationError, briefAnswer, briefEmail, createBriefSnapshot, type BriefSpec } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
 import { DELIVERABLE_FOLLOWUP_PREFIX, MAX_DELIVERABLE_FOLLOWUPS } from "../chat/deliverableFollowup.js";
 import { conversationBinding, durableConversationId } from "../chat/sessionBinding.js";
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
+import { recentActivity, type ToolCallView } from "./activity.js";
 import { log } from "../observability/log.js";
 import type { RuntimeStore } from "../store.js";
 
@@ -19,11 +20,19 @@ export type CodePageStatus = {
   /** Entry only: why the code did not open a page. */
   reason?: "not_found" | "not_paid" | "used_elsewhere";
   product?: { id: string; name: string };
+  /** The expert whose Product it is, for the page header. */
+  creator?: { name: string };
+  /** What the buyer asked to be diagnosed, as they gave it (the Brief's `website`); known once the intake is in. */
+  website?: string;
   /** Intake only: what to ask. The access code is not asked: the page's own address is it. */
   fields?: Array<{ id: string; label: string; required: boolean; type?: string }>;
   /** Generating only: the steps the Product's own mapping names, and which one the Run has reached (-1: none yet). */
   steps?: Array<{ id: string; label: string }>;
   step?: number;
+  /** Generating only: where the report will be mailed (the Brief's email), as the buyer gave it. */
+  email?: string;
+  /** Generating only: plain-language lines for what the Run has really called, oldest first. */
+  activity?: string[];
   report_url?: string;
 };
 
@@ -81,14 +90,17 @@ export class CodePages {
     if (held.status === "pending" || held.status === "void") return { state: "entry", reason: "not_paid" };
     const resolved = await corpora.resolveByProduct(held.productId);
     const product = { id: held.productId, name: resolved.corpus.product.name };
+    const creator = { name: resolved.corpus.creator.name };
     const conversation = held.status === "used" ? await repository.findOwnedConversation({ ownerAccountId: codeOwner(code), creatorId: resolved.corpus.creator.id }, codeConversationId(code)) : undefined;
     if (!conversation) {
       // Active, or spent whose conversation never got made (the process died between): the intake is still the way forward.
       const spec = resolved.corpus.product.brief_spec as BriefSpec | undefined;
-      return { state: "intake", product, fields: (spec?.fields ?? []).filter((field) => field.type !== "access_code").map((field) => ({ ...field })) };
+      return { state: "intake", product, creator, fields: (spec?.fields ?? []).filter((field) => field.type !== "access_code").map((field) => ({ ...field })) };
     }
+    const website = briefAnswer(conversation.briefSnapshot, "website");
+    const who = { product, creator, ...(website ? { website } : {}) };
     const report = await this.deps.reportUrl(conversation);
-    if (report) return { state: "ready", product, report_url: report };
+    if (report) return { state: "ready", ...who, report_url: report };
     const runs = (await repository.listRuns(conversation.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     const last = runs.at(-1);
     let followups = 0;
@@ -96,13 +108,15 @@ export class CodePages {
     const failed = last?.status === "failed" || last?.status === "cancelled" || (last?.status === "completed" && followups >= MAX_DELIVERABLE_FOLLOWUPS);
     if (failed) {
       if (!this.reported.has(code)) { this.reported.add(code); log.error("code_page_failed", { conversation_id: conversation.id, product_id: held.productId, last_run: last?.id, last_status: last?.status }); }
-      return { state: "failed", product };
+      return { state: "failed", ...who };
     }
     const map = await readProgressMap(resolved.root);
     const names = new Set<string>();
-    for (const run of runs) for (const call of (await this.deps.store.readRunActivity(conversation.id, run.id)).tool_calls ?? []) names.add(call.name);
+    const calls: ToolCallView[] = [];
+    for (const run of runs) for (const call of (await this.deps.store.readRunActivity(conversation.id, run.id)).tool_calls ?? []) { names.add(call.name); calls.push(call); }
     const step = map ? map.steps.reduce((reached, entry, index) => entry.tools.some((tool) => names.has(tool)) ? index : reached, -1) : -1;
-    return { state: "generating", product, ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
+    const email = briefEmail(conversation.briefSnapshot);
+    return { state: "generating", ...who, ...(email ? { email } : {}), activity: recentActivity(calls), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
   }
 
   /**

@@ -17,9 +17,60 @@ export const CodeRoute = Object.freeze({
  * Where buying a code starts: the pay page for the Product and the buyer's email, which sends the buyer back to `back` with `?code=`
  * once paid. The landing is where they come back to, and it opens the code's own page.
  */
-export function accessCodePayUrl({ productId, email, origin }) {
-  const params = new URLSearchParams({ product: productId, email: email.trim(), back: `${origin}${CodeRoute.landingPath()}` });
+export function accessCodePayUrl({ productId, email, origin, site, name }) {
+  const params = new URLSearchParams({ product: productId, email: email.trim(), back: `${origin}${CodeRoute.landingPath()}`, site: String(site ?? "").trim(), name: String(name ?? "").trim() });
   return `${PAY_URL}?${params}`;
+}
+
+/** The diagnosed website as a domain: no scheme, no www, no path. Whatever the buyer typed that is not a URL is shown trimmed. */
+export function siteDomain(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  try { return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`).hostname.replace(/^www\./, "") || undefined; }
+  catch { return text; }
+}
+
+/**
+ * Reads the code's status until its report is ready. `accept` takes any status (a poll's, or the intake's answer) and keeps the loop
+ * going while the state is "generating", however the page got there; a failed read is reported and tried again. Time and reading are injected.
+ */
+export function createStatusPoller({ read, onStatus, onError, every = 5000, schedule = setTimeout, cancel = clearTimeout }) {
+  let timer;
+  let alive = true;
+  const arm = () => { if (alive && timer === undefined) timer = schedule(tick, every); };
+  const accept = status => { if (!alive) return; onStatus(status); if (status?.state === "generating") arm(); };
+  async function tick() {
+    timer = undefined;
+    try { const status = await read(); accept(status); }
+    catch (error) { if (alive) { onError(error); arm(); } }
+  }
+  return { start: tick, accept, stop() { alive = false; cancel(timer); timer = undefined; } };
+}
+
+/** The Product's own map without a publish step: the page ends at writing the report, whatever the map still lists. */
+export const visibleSteps = steps => (steps ?? []).filter(step => step.id !== "publish" && step.label !== "发布");
+
+const CHECKS = Object.freeze([
+  "像海外买家一样打开官网首页", "询盘表单能不能顺利提交", "手机端与电脑端的打开速度", "HTTPS 证书是否有效", "Google 地图上的商家信息",
+  "服务器所在的地区", "英文文案是否通顺清楚", "产品页有没有足够的证据", "资质与认证展示", "联系方式是否好找"
+]);
+const DIMENSIONS = Object.freeze([
+  "首页第一屏", "询盘转化路径", "产品页说服力", "信任背书", "英文表达", "打开速度", "网站安全", "搜索与地图曝光", "联系渠道"
+]);
+
+/**
+ * The lines of the wait: what the Run has really called come first, then the checks of an audit, then the scoring dimensions, opening up
+ * as the steps advance. The checks and dimensions are what is being looked at ("正在核对"), never a claim that one is done.
+ */
+export function feedPool({ activity, steps, step }) {
+  const shown = Math.max(0, step ?? -1) < 0 ? 0 : Math.ceil(DIMENSIONS.length * Math.min(1, (step + 1) / Math.max(1, steps?.length ?? 1)));
+  return [...(activity ?? []), ...CHECKS.map(item => `正在核对${item}`), ...DIMENSIONS.slice(0, shown).map(item => `正在评估「${item}」`)];
+}
+
+/** `size` consecutive lines of the pool starting at `tick`, wrapping around. */
+export function feedWindow(pool, tick, size = 3) {
+  if (!pool.length) return [];
+  return Array.from({ length: Math.min(size, pool.length) }, (_, index) => pool[(tick + index) % pool.length]);
 }
 
 /** What the visitor typed, as a code: letters and digits, upper case; undefined when it cannot be one. */

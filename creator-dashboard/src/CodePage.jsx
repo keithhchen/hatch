@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Check } from "lucide-react";
 import { WebChatEgg } from "./webChatGate.jsx";
-import { BUYER_FIELDS, CodeRoute, PendingIntake, accessCodePayUrl, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, stepStates, typedCode } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -9,10 +9,30 @@ import "./codePage.css";
 const POLL_MS = 5000;
 const API = "/v1/web-chat/code";
 const REFUSALS = { not_found: "兑换码不存在", not_paid: "尚未支付" };
+const FEED_MS = 2400;
 const INPUT_TYPES = { email: "email", tel: "tel", url: "url" };
 
 /** The card every state sits in. */
 const Card = ({ children }) => <main className="code-page"><div className="code-page__card">{children}</div></main>;
+
+/** The mark of WeChat Pay: two speech bubbles, in the button's own colour. */
+const WeChatPayMark = () => <svg className="code-page__wxmark" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+  <path fill="currentColor" d="M9.5 3C5.4 3 2 5.8 2 9.3c0 2 1.1 3.7 2.8 4.9l-.7 2.1 2.5-1.3c.9.3 1.8.4 2.9.4h.5a5.5 5.5 0 0 1-.3-1.7c0-3.2 3-5.8 6.7-5.8h.4C16.1 5 13.1 3 9.5 3Zm-3 3.6a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm6 0a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z" />
+  <path fill="currentColor" d="M22 14.2c0-2.8-2.7-5-6-5s-6 2.2-6 5 2.7 5 6 5c.8 0 1.6-.1 2.3-.4l2 1.1-.6-1.8c1.5-.9 2.3-2.3 2.3-3.9Zm-7.9-.7a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Zm3.8 0a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Z" />
+</svg>;
+
+/** The header of every state of a code's page: the mark, the Product, the expert, and the website being diagnosed. */
+function Header({ product, creator, website }) {
+  const domain = siteDomain(website);
+  return <header className="code-page__header">
+    <WebChatEgg size={36} />
+    <div className="code-page__who">
+      <strong>{product?.name ?? "外贸官网获客诊断"}</strong>
+      {creator?.name ? <span>{creator.name}</span> : null}
+    </div>
+    {domain ? <span className="code-page__site">{domain}</span> : null}
+  </header>;
+}
 
 /** One field: the label above, the box below. A Brief field of type text is a textarea; the rest are one line. */
 function Field({ field, value, onChange, autoFocus }) {
@@ -56,7 +76,7 @@ function Landing({ request, navigate, reason }) {
     const invalid = invalidField(values);
     if (invalid) { setError(invalid); return; }
     PendingIntake.save(window.localStorage, values);
-    window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin }));
+    window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name }));
   };
   if (failed) return <Card><p className="code-page__error" role="alert">暂时无法打开，请稍后再试</p></Card>;
   return <Card>
@@ -67,7 +87,7 @@ function Landing({ request, navigate, reason }) {
       {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
       {BUYER_FIELDS.map(field => <Field key={field.id} field={field} value={values[field.id] ?? ""} onChange={value => { setValues(current => ({ ...current, [field.id]: value })); setError(null); }} />)}
       {error ? <p className="code-page__error" role="alert">{error}</p> : null}
-      <button type="submit" className="code-page__button" disabled={!ready}>支付 {landing?.price_fen ? formatPrice(landing.price_fen) : ""} 开始诊断</button>
+      <button type="submit" className="code-page__button code-page__button--wechat" disabled={!ready}><WeChatPayMark /><span>微信支付 {landing?.price_fen ? formatPrice(landing.price_fen) : ""}<small>开始诊断</small></span></button>
     </form>
     <button type="button" className="code-page__link" aria-expanded={codeOpen} onClick={() => setCodeOpen(open => !open)}>有兑换码？</button>
     {codeOpen ? <CodeBox navigate={navigate} /> : null}
@@ -104,23 +124,31 @@ function Intake({ status, code, request, onStatus }) {
     void send(values);
   };
   if (sending) return <Card><div className="web-chat__loading code-page__sending" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>正在开始诊断</span></div></Card>;
-  return <Card><form onSubmit={submit} noValidate>
-    <h1 className="code-page__title">{status.product?.name}</h1>
+  return <Card><Header product={status.product} creator={status.creator} website={values.website} /><form onSubmit={submit} noValidate>
     {status.fields.map((field, index) => <Field key={field.id} field={field} autoFocus={index === 0} value={values[field.id] ?? ""} onChange={value => setValues(current => ({ ...current, [field.id]: value }))} />)}
     {error ? <p className="code-page__error" role="alert">{error}</p> : null}
     <button type="submit" className="code-page__button">开始诊断</button>
   </form></Card>;
 }
 
+/** Buying another report: back to the product page. */
+const NewReport = ({ navigate }) => <button type="button" className="code-page__button code-page__button--quiet code-page__new" onClick={() => navigate(CodeRoute.landingPath())}>新建报告</button>;
+
 /** The wait: the steps of the Product's own map, marked by what the Run has really done. Without a map, only the wait. */
-function Generating({ status }) {
-  const steps = stepStates(status.steps, status.step);
-  return <Card><div className="artifact__generating">
+function Generating({ status, navigate }) {
+  const steps = stepStates(visibleSteps(status.steps), status.step);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), FEED_MS); return () => clearInterval(timer); }, []);
+  const lines = feedWindow(feedPool({ activity: status.activity, steps, step: status.step }), tick);
+  return <Card><Header product={status.product} creator={status.creator} website={status.website} /><div className="code-page__wait">
     <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>报告正在生成</span></div>
     {steps.length ? <ol className="code-page__steps">{steps.map(step => <li key={step.id} className={`code-page__step code-page__step--${step.state}`} aria-current={step.state === "now" ? "step" : undefined}>
-      {step.state === "done" ? <Check size={16} aria-hidden /> : step.state === "now" ? <span className="artifact__glyph artifact__glyph--researching code-page__pulse" aria-hidden /> : <span className="code-page__dot" aria-hidden />}
+      {step.state === "done" ? <Check size={16} aria-hidden /> : step.state === "now" ? <span className="code-page__spinner" aria-hidden /> : <span className="code-page__dot" aria-hidden />}
       <span>{step.label}</span>
     </li>)}</ol> : null}
+    <ul className="code-page__feed" aria-live="off">{lines.map(line => <li key={`${tick}-${line}`}>{line}</li>)}</ul>
+    <p className="code-page__note">您可以关闭此页面，约 10 分钟后报告会发送至{status.email ? ` ${status.email}` : "您的邮箱"}</p>
+    <NewReport navigate={navigate} />
   </div></Card>;
 }
 
@@ -128,26 +156,20 @@ function Generating({ status }) {
 function CodePageBody({ code, request, navigate }) {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
-  const live = useRef(true);
+  const poller = useRef(null);
 
   useEffect(() => {
-    live.current = true;
     setStatus(null);
     setError(null);
     if (!code) return undefined;
-    let timer;
-    const poll = async () => {
-      try {
-        const next = await request(`${API}/${encodeURIComponent(code)}`);
-        if (!live.current) return;
-        setStatus(next);
-        setError(null);
-        if (next.state !== "generating") return;
-      } catch (cause) { if (!live.current) return; setError(cause); }
-      timer = setTimeout(poll, POLL_MS);
-    };
-    void poll();
-    return () => { live.current = false; clearTimeout(timer); };
+    const next = createStatusPoller({
+      read: () => request(`${API}/${encodeURIComponent(code)}`),
+      onStatus: value => { setStatus(value); setError(null); },
+      onError: setError, every: POLL_MS
+    });
+    poller.current = next;
+    void next.start();
+    return () => next.stop();
   }, [code, request]);
 
   if (!code) return <Landing request={request} navigate={navigate} />;
@@ -155,12 +177,13 @@ function CodePageBody({ code, request, navigate }) {
   if (!status) return <Card><div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /></div></Card>;
   switch (status.state) {
     case "entry": return <Landing request={request} navigate={navigate} reason={status.reason} />;
-    case "intake": return <Intake status={status} code={code} request={request} onStatus={next => { setStatus(next); setError(null); }} />;
-    case "generating": return <Generating status={status} />;
-    case "ready": return <Card><div className="code-page__done">
+    case "intake": return <Intake status={status} code={code} request={request} onStatus={next => poller.current.accept(next)} />;
+    case "generating": return <Generating status={status} navigate={navigate} />;
+    case "ready": return <Card><Header product={status.product} creator={status.creator} website={status.website} /><div className="code-page__done">
       <a className="code-page__button code-page__report" href={status.report_url} rel="noopener">查看报告</a>
+      <NewReport navigate={navigate} />
     </div></Card>;
-    default: return <Card><p className="code-page__failed" role="alert">生成遇到问题，我们会尽快处理</p></Card>;
+    default: return <Card><Header product={status.product} creator={status.creator} website={status.website} /><p className="code-page__failed" role="alert">生成遇到问题，我们会尽快处理</p></Card>;
   }
 }
 

@@ -58,7 +58,29 @@
 .code-page__step { display: flex; align-items: center; gap: 12px; color: var(--web-muted); }
 .code-page__step--now { color: var(--web-ink); font-weight: 650; }
 .code-page__step--done { color: var(--web-body); }
-.code-page__pulse { width: 24px; height: 24px; border-radius: 8px; }
-.code-page__dot { width: 8px; height: 8px; margin: 0 8px; border-radius: 50%; background: var(--web-rule); }
+.code-page__dot { width: 8px; height: 8px; margin: 0 8px; flex: none; border-radius: 50%; background: var(--web-rule); }
+.code-page__header { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px solid var(--web-rule); }
+.code-page__who { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.code-page__who strong { color: var(--web-ink); font-size: 17px; line-height: 1.3; }
+.code-page__who span { color: var(--web-muted); font-size: 13px; }
+.code-page__site { max-width: 40%; padding: 4px 10px; border-radius: 999px; overflow: hidden; color: var(--web-body); background: var(--web-panel); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.code-page__wait { display: grid; }
+.code-page__spinner { width: 16px; height: 16px; margin: 0 4px; flex: none; box-sizing: border-box; border: 2px solid var(--web-yolk-soft); border-top-color: var(--web-yolk); border-radius: 50%; animation: code-page-spin .8s linear infinite; }
+.code-page__step > svg { flex: none; margin: 0 4px; color: var(--web-pass); }
+@keyframes code-page-spin { to { transform: rotate(360deg); } }
+@keyframes code-page-line { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.code-page__feed { list-style: none; margin: 22px 0 0; padding: 14px 16px; display: grid; gap: 8px; min-height: 5.6em; border-radius: 14px; color: var(--web-body); background: var(--web-panel); font-size: 14px; line-height: 1.5; }
+.code-page__feed li { animation: code-page-line 360ms var(--chat-motion) both; }
+.code-page__feed li:last-child { color: var(--web-ink); }
+.code-page__note { margin: 14px 0 0; color: var(--web-muted); font-size: 13px; line-height: 1.6; }
+.code-page__new { width: 100%; margin-top: 16px; }
+.code-page__done .code-page__new { margin-top: 10px; }
+.code-page__button--wechat { gap: 10px; border-color: #07c160; color: #fff; background: #07c160; box-shadow: 0 6px 16px rgba(7, 193, 96, .3); }
+.code-page__button--wechat:hover:not(:disabled) { box-shadow: 0 10px 22px rgba(7, 193, 96, .4); }
+.code-page__button--wechat:focus-visible { outline-color: rgba(7, 193, 96, .35); }
+.code-page__button--wechat span { display: grid; text-align: left; line-height: 1.2; }
+.code-page__button--wechat small { font-size: 12px; font-weight: 500; opacity: .9; }
+.code-page__button--wechat:disabled .code-page__wxmark { opacity: .6; }
+@media (prefers-reduced-motion: reduce) { .code-page__spinner { animation-duration: 2s; } .code-page__feed li { animation: none; } }
 .code-page__done { display: grid; padding: 8px 0; }
 .code-page__failed { margin: 0; padding: 24px 0; text-align: center; font-size: 17px; color: var(--web-ink); }
