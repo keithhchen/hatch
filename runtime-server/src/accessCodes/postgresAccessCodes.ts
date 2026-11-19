@@ -19,8 +19,9 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
   used_by_conversation_id TEXT
 );`;
 
-// MSC and six digits, free or bought: digits only, because letters are hard to read for the people typing them.
-const newCode = () => `MSC${String(randomInt(1_000_000)).padStart(6, "0")}`;
+// MSC and six characters, free or bought. No 0, 1, I, L or O: a code is read and typed by hand.
+const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const newCode = () => `MSC${Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("")}`;
 const normalize = (code: string) => code.trim().toUpperCase();
 
 type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; used_by_conversation_id: string | null };

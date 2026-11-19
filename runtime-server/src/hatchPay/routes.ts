@@ -1,13 +1,18 @@
 import type http from "node:http";
 import type { AccessCodes, Activation } from "../accessCodes/accessCodes.js";
-import { clientIp } from "../accessCodes/rateLimit.js";
+import { payerIp as payerIpOf } from "../accessCodes/rateLimit.js";
+import type { ProductCapabilities } from "../agentBox/capabilities.js";
 import { log } from "../observability/log.js";
 import { readBoundedBytes } from "../http/httpSupport.js";
 import { accessCodeEmail, escapeHtml, type EmailSender } from "./email.js";
 import type { OpenIdResolver } from "./wechatOAuth.js";
 import { NotificationRejected, type OrderState, type WeChatPay } from "./wechatPay.js";
 
+/** A Product sells access codes only by a row in hatch_product_capabilities. */
+export const ACCESS_CODE_CAPABILITY = "access_code";
+
 export type HatchPayDeps = {
+  capabilities: ProductCapabilities;
   codes: AccessCodes;
   wechat: WeChatPay;
   openids: OpenIdResolver;
@@ -44,7 +49,7 @@ export class HatchPay {
   async handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     const route = url.pathname.replace(/^\/hatch-pay\/?/, "/");
     try {
-      if (req.method === "GET" && route === "/") return this.payPage(req, res, url);
+      if (req.method === "GET" && route === "/") return await this.payPage(req, res, url);
       if (req.method === "GET" && route === "/oauth") return await this.oauth(res, url);
       if (req.method === "POST" && route === "/order") return await this.order(req, res);
       if (req.method === "GET" && route === "/return") return await this.return(res, url);
@@ -78,9 +83,10 @@ export class HatchPay {
     return `${this.deps.publicBase}/?${new URLSearchParams(ask)}`;
   }
 
-  private payPage(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
+  private async payPage(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const ask = this.ask(url);
     if (!ask) return this.html(res, 400, page("<p>链接无效</p>"));
+    if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.html(res, 403, page("<p>不可购买</p>"));
     if (/MicroMessenger/i.test(req.headers["user-agent"] ?? "")) {
       // Inside WeChat the payer is known by openid, which only an OAuth round trip reveals.
       return this.redirect(res, this.deps.openids.authorizeUrl(`${this.deps.publicBase}/oauth?${new URLSearchParams(ask)}`));
@@ -91,6 +97,7 @@ export class HatchPay {
   private async oauth(res: http.ServerResponse, url: URL) {
     const ask = this.ask(url), code = url.searchParams.get("code");
     if (!ask) return this.html(res, 400, page("<p>链接无效</p>"));
+    if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.html(res, 403, page("<p>不可购买</p>"));
     if (!code) return this.html(res, 400, page(`<p>未获得授权</p><a class="btn" href="${escapeHtml(this.payUrl(ask))}">重试</a>`));
     let openid: string;
     try { openid = await this.deps.openids.openidFor(code); } catch (error) {
@@ -126,8 +133,9 @@ btn.onclick=async()=>{btn.disabled=true;err.textContent='';
     try { body = JSON.parse((await readBoundedBytes(req, 8 * 1024)).toString("utf8")); } catch { return this.json(res, 400, { error: "请求无效" }); }
     const ask = this.ask(new URL(`http://x/?${new URLSearchParams({ product: String(body.product ?? ""), email: String(body.email ?? ""), back: String(body.back ?? "") })}`));
     if (!ask) return this.json(res, 400, { error: "链接无效" });
+    if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.json(res, 403, { error: "不可购买" });
     const openid = typeof body.openid === "string" && body.openid ? body.openid : undefined;
-    const payerIp = clientIp(req.headers);
+    const payerIp = payerIpOf(req.headers);
     if (!openid && !payerIp) return this.json(res, 400, { error: "无法获取网络地址" });
 
     const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, payChannel: openid ? "jsapi" : "h5" });

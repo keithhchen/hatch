@@ -4,6 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { Pool } from "pg";
+import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
 import { PostgresAccessCodes } from "../accessCodes/postgresAccessCodes.js";
 import type { EmailMessage, EmailSender } from "./email.js";
 import { HatchPay, handleHatchPayRoute } from "./routes.js";
@@ -46,7 +47,7 @@ async function harness(db: Awaited<ReturnType<typeof isolated>>) {
   const email: EmailSender = { send: async message => { mails.push(message); return { id: `mail-${mails.length}` }; } };
   const publicBase = "https://anyteach.cn/hatch-pay";
   const pay = new HatchPay({
-    codes: db.codes, email, emailFrom: "Hatch <noreply@send.gethatchapp.com>", publicBase, priceFen: 990,
+    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, email, emailFrom: "Hatch <noreply@send.gethatchapp.com>", publicBase, priceFen: 990,
     wechat: new WeChatPayV3(keys.config, { hosts: [wechat.url], log: () => undefined }),
     openids: new WeChatOAuth("wxtestappid", "secret", { apiBase: wechat.url })
   });
@@ -96,7 +97,7 @@ run("redeem says why not: not_found, not_paid, wrong_product, void", async db =>
 
 run("createPending draws a typable 8-character code and a unique trade number", async db => {
   const a = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co", payChannel: "h5" }), b = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co" });
-  assert.match(a.code, /^MSC\d{6}$/);
+  assert.match(a.code, /^MSC[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
   assert.equal((await db.codes.peek(a.code))!.source, "paid");
   assert.notEqual(a.outTradeNo, b.outTradeNo);
   assert.equal((await db.codes.peek(a.code))!.status, "pending");
@@ -180,6 +181,23 @@ run("pay page: WeChat gets OAuth, a browser gets the price; the OAuth return car
   } finally { await h.close(); }
 });
 
+run("a Product without the access_code capability cannot be bought: page, OAuth return and order all refuse", async db => {
+  const h = await harness(db);
+  try {
+    const other = "11111111-2222-4333-8444-555555555555";
+    const query = `?${new URLSearchParams({ product: other, email: "a@b.co", back: BACK })}`;
+    const page = await h.get(`/${query}`);
+    assert.equal(page.status, 403);
+    assert.match(await page.text(), /不可购买/);
+    const inWeChat = await h.get(`/${query}`, { "user-agent": "MicroMessenger" });
+    assert.equal(inWeChat.status, 403, "no OAuth round trip either");
+    assert.equal((await h.get(`/oauth${query}&code=CODE`)).status, 403);
+    assert.equal((await h.order({ product: other }, { ...ORIGIN, "x-real-ip": "203.0.113.9" })).status, 403);
+    assert.equal(h.wechat.requests.length, 0, "WeChat was never asked");
+    assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 0, "no pending code was made");
+  } finally { await h.close(); }
+});
+
 const returnPath = (outTradeNo: string, back = BACK) => `/return?${new URLSearchParams({ o: outTradeNo, back })}`;
 const startOrder = async (h: Awaited<ReturnType<typeof harness>>) => {
   const body = await (await h.order({}, { ...ORIGIN, "x-forwarded-for": "203.0.113.9" })).json() as { url: string };
@@ -203,7 +221,7 @@ run("return page: not paid shows the query and re-pay buttons; paid redirects to
     const location = new URL(paid.headers.get("location")!);
     assert.equal(location.origin + location.pathname, BACK);
     const code = location.searchParams.get("code")!;
-    assert.match(code, /^MSC\d{6}$/);
+    assert.match(code, /^MSC[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
     assert.equal(h.mails.length, 1);
     assert.equal(h.mails[0]!.to, "a@b.co");
     assert.match(h.mails[0]!.text, new RegExp(code));
@@ -224,7 +242,7 @@ run("return page: a wrong back shows the code instead; unknown orders and WeChat
     h.pay(outTradeNo);
     const noBack = await h.get(returnPath(outTradeNo, "https://evil.example/"));
     assert.equal(noBack.status, 200);
-    assert.match(await noBack.text(), /MSC\d{6}/);
+    assert.match(await noBack.text(), /MSC[2-9A-Z]{6}/);
     assert.equal((await h.get("/return?o=hp000000000000000000000000")).status, 404);
     assert.equal((await h.get("/return?o=bogus")).status, 400);
 
@@ -286,7 +304,7 @@ run("an email that fails does not undo the activation", async db => {
     h.pay(outTradeNo);
     // The harness' sender is replaced by a failing one through a second HatchPay on the same codes.
     const failing = new HatchPay({
-      codes: db.codes, emailFrom: "x", publicBase: "https://anyteach.cn/hatch-pay", priceFen: 990,
+      capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, emailFrom: "x", publicBase: "https://anyteach.cn/hatch-pay", priceFen: 990,
       email: { send: async () => { throw new Error("resend down"); } },
       wechat: new WeChatPayV3(testKeys().config, { hosts: [h.wechat.url], log: () => undefined }),
       openids: new WeChatOAuth("wx", "s", { apiBase: h.wechat.url })
