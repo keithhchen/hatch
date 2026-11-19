@@ -181,9 +181,12 @@ test("postgres: concurrent publishes and retries email one page once", { skip: !
     const file = await saveFile(box, "r.html", PAGE);
     const results = await Promise.all(Array.from({ length: 12 }, (_, i) => box.run("publish_html", { file_id: file, title: "T" })));
     assert.equal(new Set(results.map(r => r.page_id)).size, 1);
-    await until(() => events.filter(e => e.event === "report_email_skipped").length === 11);
+    await until(() => events.filter(e => e.event === "report_email_skipped").length === 11 && sender!.sent.length === 1);
     assert.equal(sender!.sent.length, 1);
-    const row = (await pool.query("SELECT emailed_at, email_message_id, emailed_to FROM hatch_html_pages")).rows[0];
+    // The message id is written after the send returns, a moment after the last skip is logged.
+    const read = async () => (await pool!.query("SELECT emailed_at, email_message_id, emailed_to FROM hatch_html_pages")).rows[0];
+    for (let i = 0; i < 200 && !(await read()).email_message_id; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    const row = await read();
     assert.equal(row.email_message_id, "msg-1");
     assert.match(row.emailed_to, /^[0-9a-f]{12}$/);
 

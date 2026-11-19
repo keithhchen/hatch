@@ -186,7 +186,6 @@ services:
       HATCH_PAY_NOTIFY_URL: ${HATCH_PAY_NOTIFY_URL:-}
       HATCH_PAY_PRICE_FEN: ${HATCH_PAY_PRICE_FEN:-}
       HATCH_PAY_EMAIL_FROM: ${HATCH_PAY_EMAIL_FROM:-Hatch <noreply@gethatchapp.com>}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
       # What one contact may send to one Product, in all.
       HATCH_RUNTIME_MAX_CONTACT_MESSAGES: ${HATCH_RUNTIME_MAX_CONTACT_MESSAGES:-1000}
       # Voice messages are transcribed by the first of these that works: gemini (GEMINI_API_KEY), then qwen (DASHSCOPE_API_KEY).
