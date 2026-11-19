@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ApiKeyCredential, BoxliteRestOptions, JsBoxlite, errorCode, type Boxlite } from "@boxlite-ai/boxlite";
-import { log } from "../observability/log.js";
 import { OutputCapture } from "./output.js";
+import { Transient, quote, retrying, unavailable } from "./retry.js";
 import { BoxFileMissing, BoxNameTaken, BoxUnavailable, type AgentBox, type BoxProvider, type ExecResult } from "./ports.js";
 
 /** Pinned: a new image is a code change, so BoxLite never pulls one under a live buyer. Built by keithhchen/hatch-agent-box. */
@@ -13,11 +13,6 @@ export const DEFAULT_WORK_DIR = "/home/agent/work";
 const OUTPUT_CHARS = 30_000;
 
 type SdkBox = NonNullable<Awaited<ReturnType<Boxlite["get"]>>>;
-
-const unavailable = (error: unknown): never => {
-  log.error("agent_box_failed", { error });
-  throw new BoxUnavailable(error);
-};
 
 /** BoxLite gave up waiting for a box to start, or is still starting it: the box comes up on its own (a new image's first pull is slow). */
 const STARTING = /reach started|state change in progress/i;
@@ -34,39 +29,15 @@ export const EXEC_BACKOFF_MS = [1_000, 3_000, 6_000];
 const RATE_LIMITED = /resource exhausted|Rate exceeded/i;
 export const RATE_LIMIT_BACKOFF_MS = [3_000, 6_000, 12_000, 24_000];
 
-/** A connection failure before the call did anything: safe to run again. `limited`: the service's rate limit, which needs the longer waits. */
-class Transient extends Error {
-  get limited(): boolean { return RATE_LIMITED.test(this.message); }
-}
-
-const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
-  const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
-  const onAbort = () => { clearTimeout(timer); reject(signal?.reason); };
-  signal?.addEventListener("abort", onAbort, { once: true });
-});
-
-const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+/** A connection failure before the call did anything: safe to run again; `limited` when it is the service's rate limit. */
+const transient = (message: string, cause: unknown) => new Transient(message, { cause, limited: RATE_LIMITED.test(message) });
 
 class BoxliteBox implements AgentBox {
   constructor(private readonly box: SdkBox, private readonly backoffMs: number[] = EXEC_BACKOFF_MS, private readonly limitBackoffMs: number[] = RATE_LIMIT_BACKOFF_MS) {}
 
-  /** Runs `attempt` again after each backoff while it fails with Transient; the last Transient is BoxUnavailable. Stops on abort, or when waiting would pass `withinMs` in all. */
-  private async retrying<T>(what: string, backoff: number[], attempt: () => Promise<T>, signal?: AbortSignal, withinMs = Infinity): Promise<T> {
-    const started = Date.now();
-    for (let retry = 0; ; retry++) {
-      try { return await attempt(); } catch (error) {
-        if (!(error instanceof Transient)) throw error;
-        const delay = (error.limited ? this.limitBackoffMs : backoff)[retry];
-        if (delay === undefined || Date.now() - started + delay > withinMs) return unavailable(error.cause);
-        log.warn("agent_box_retry", { what, retry: retry + 1, delayMs: delay, error: error.message });
-        await sleep(delay, signal);
-      }
-    }
-  }
-
   exec(command: string, options: { cwd: string; timeoutSeconds: number; signal?: AbortSignal }): Promise<ExecResult> {
     options.signal?.throwIfAborted();
-    return this.retrying("exec", this.backoffMs, () => this.execOnce(command, options), options.signal, options.timeoutSeconds * 1000);
+    return retrying("exec", this.backoffMs, () => this.execOnce(command, options), options.signal, options.timeoutSeconds * 1000, this.limitBackoffMs);
   }
 
   private async execOnce(command: string, options: { cwd: string; timeoutSeconds: number; signal?: AbortSignal }): Promise<ExecResult> {
@@ -97,7 +68,7 @@ class BoxliteBox implements AgentBox {
         if (TRANSPORT.test(result.errorMessage ?? "") && (result.exitCode !== 0 || silent())) {
           const failure = new Error(result.errorMessage);
           if (!silent()) return unavailable(failure);
-          throw new Transient(failure.message, { cause: failure });
+          throw transient(failure.message, failure);
         }
         return { exitCode: result.exitCode, stdout: stdout.text(), stderr: result.errorMessage ? `${stderr.text()}\n${result.errorMessage}`.trimStart() : stderr.text() };
       } finally {
@@ -107,7 +78,7 @@ class BoxliteBox implements AgentBox {
     } catch (error) {
       if (options.signal?.aborted || error instanceof Transient || error instanceof BoxUnavailable) throw error;
       const message = error instanceof Error ? error.message : "";
-      if (TRANSPORT.test(message) && silent()) throw new Transient(message, { cause: error });
+      if (TRANSPORT.test(message) && silent()) throw transient(message, error);
       return unavailable(error);
     }
   }
@@ -115,7 +86,7 @@ class BoxliteBox implements AgentBox {
   async readFile(file: string): Promise<Buffer> {
     const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-box-"));
     try {
-      await this.retrying("copyOut", this.backoffMs, () => this.copy(() => this.box.copyOut(file, path.join(directory, "file"), {})));
+      await retrying("copyOut", this.backoffMs, () => this.copy(() => this.box.copyOut(file, path.join(directory, "file"), {})), undefined, Infinity, this.limitBackoffMs);
       return await readFile(path.join(directory, "file"));
     } catch (error) {
       if (error instanceof BoxUnavailable) throw error;
@@ -129,7 +100,7 @@ class BoxliteBox implements AgentBox {
     const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-box-"));
     try {
       await writeFile(path.join(directory, "file"), content);
-      const put = () => this.retrying("copyIn", this.backoffMs, () => this.copy(() => this.box.copyIn(path.join(directory, "file"), file, { overwrite: true })));
+      const put = () => retrying("copyIn", this.backoffMs, () => this.copy(() => this.box.copyIn(path.join(directory, "file"), file, { overwrite: true })), undefined, Infinity, this.limitBackoffMs);
       try { await put(); } catch (error) {
         if (error instanceof BoxUnavailable) throw error;
         const made = await this.exec(`mkdir -p -- ${quote(path.posix.dirname(file))}`, { cwd: "/", timeoutSeconds: 30 });
@@ -146,7 +117,7 @@ class BoxliteBox implements AgentBox {
   private async copy(run: () => Promise<unknown>): Promise<void> {
     try { await run(); } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (TRANSPORT.test(message)) throw new Transient(message, { cause: error });
+      if (TRANSPORT.test(message)) throw transient(message, error);
       throw error;
     }
   }

@@ -151,6 +151,12 @@ services:
       HATCH_RUNTIME_CHAT_SERVICE_TOKEN: ${HATCH_RUNTIME_CHAT_SERVICE_TOKEN:?set HATCH_RUNTIME_CHAT_SERVICE_TOKEN in /opt/hatch/.env}
       # The Agent's own computer (BoxLite Cloud) for Products with the agent_box capability; off without a key.
       BOXLITE_API_KEY: ${BOXLITE_API_KEY:-}
+      # `vercel` runs the boxes on Vercel Sandbox (VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID, image from Vercel Container Registry) instead of BoxLite.
+      HATCH_AGENT_BOX_PROVIDER: ${HATCH_AGENT_BOX_PROVIDER:-}
+      VERCEL_TOKEN: ${VERCEL_TOKEN:-}
+      VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
+      VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:-}
+      HATCH_VERCEL_SANDBOX_IMAGE: ${HATCH_VERCEL_SANDBOX_IMAGE:-}
       # Site research tools (site_research capability), run by the Runtime itself: each tool is off without its key. Never given to a box.
       PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
