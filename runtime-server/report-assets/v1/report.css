@@ -6,6 +6,8 @@
 html{scroll-behavior:smooth}
 body{margin:0;color:var(--ink);background:#fff;font-family:"Noto Sans SC",sans-serif;line-height:1.75;counter-reset:sec}
 h1,h2,h3,p{margin-top:0}
+/* long URLs, encoded paths and English strings in agent text must wrap, never widen the page */
+main p,main h1,main h2,main h3,main li,main td,main dd,main summary{overflow-wrap:anywhere}
 h1,h2,h3{font-family:var(--serif);line-height:1.35}
 h2{font-size:clamp(28px,3vw,44px);margin-bottom:18px;letter-spacing:-.03em}
 h3{font-size:22px}
@@ -72,7 +74,7 @@ main>section:not(.hero) .kicker::before{content:counter(sec,decimal-leading-zero
 .reason .think{font:400 21px/1.75 var(--serif);color:#343a3e}
 
 /* 5 minor reasons */
-.minors{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:42px}
+.minors{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:42px}
 .minors>div{border-top:3px solid #171a1c;padding:24px 8px;break-inside:avoid}
 .minors h3{font-size:20px}
 .minors p{font-size:14px;color:#646b70;margin:0}
@@ -154,7 +156,7 @@ footer small{color:#888}
   .reason::before,.redline::before{font-size:48px}
   .reason .think{grid-column:2}
   .redline{grid-template-columns:60px 1fr}
-  .minors,.cards{grid-template-columns:1fr}
+  .minors,.cards{grid-template-columns:minmax(0,1fr)}
   .card{min-height:auto}
   .six-labels{grid-template-columns:repeat(2,1fr)}
   footer{display:block}footer small{display:block;margin-top:8px}
