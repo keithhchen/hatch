@@ -28,7 +28,8 @@ export const transcriptEnds = (store: Pick<RuntimeStore, "append">, conversation
 
 export class RunStateMachine {
   private currentStatus: RunStatus;
-  private produced: () => RunReply | undefined = () => undefined;
+  private stopping: RunStatus | undefined;
+  private beforeEnding: () => Promise<void> = async () => undefined;
 
   constructor(
     readonly runId: string,
@@ -43,18 +44,13 @@ export class RunStateMachine {
     this.currentStatus = initial;
   }
 
+  /** Where the Run is, or, once a stop is on its way, where it is going: whoever reads it while the stop is written sees the stop, not a Run that still works. */
   get status(): RunStatus {
-    return this.currentStatus;
+    return this.stopping ?? this.currentStatus;
   }
 
   async queued(): Promise<void> {
-    await this.store.append({
-      type: "turn.state",
-      conversation_id: this.conversationId,
-      run_id: this.runId,
-      to: "queued"
-    });
-    await this.onTransition?.("queued");
+    await this.record(undefined, "queued");
   }
 
   async start(): Promise<void> {
@@ -78,26 +74,21 @@ export class RunStateMachine {
     return this.end({ status: "completed", reply });
   }
 
-  /** Where the Run reads what it has produced so far: a Run that does not complete keeps it as its reply. */
-  keepsReplyFrom(produced: () => RunReply | undefined): void {
-    this.produced = produced;
+  /** Runs before the Run ends, whatever ends it: what the Run showed must be in the log first, because the ending keeps it as the reply of a Run that does not complete. */
+  beforeEnd(hook: () => Promise<void>): void {
+    this.beforeEnding = hook;
   }
 
   async fail(failure: PublicFailure): Promise<void> {
-    await this.end({ status: "failed", failure, ...this.kept() });
+    await this.end({ status: "failed", failure });
   }
 
   async cancel(reason: string): Promise<void> {
-    await this.end({ status: "cancelled", failure: { code: "run_cancelled", message: reason }, ...this.kept() });
+    await this.end({ status: "cancelled", failure: { code: "run_cancelled", message: reason } });
   }
 
   async interrupt(reason: string): Promise<void> {
-    await this.end({ status: "interrupted", failure: { code: "run_interrupted", message: reason }, ...this.kept() });
-  }
-
-  private kept(): { reply?: RunReply } {
-    const reply = this.produced();
-    return reply ? { reply } : {};
+    await this.end({ status: "interrupted", failure: { code: "run_interrupted", message: reason } });
   }
 
   private async end(ending: RunEnding): Promise<boolean> {
@@ -105,7 +96,13 @@ export class RunStateMachine {
     if (!allowedTransitions[this.currentStatus].includes(ending.status)) {
       throw new Error(`Invalid run transition ${this.currentStatus} -> ${ending.status}`);
     }
-    const { ended, status } = await this.ends(ending);
+    if (ending.status !== "completed") this.stopping = ending.status;
+    let result: { ended: boolean; status: DurableRunStatus };
+    try {
+      await this.beforeEnding();
+      result = await this.ends(ending);
+    } finally { this.stopping = undefined; }
+    const { ended, status } = result;
     // Whoever ended it first decides what it is: a stop that raced the executor's own ending wins.
     if (ended || ["completed", "failed", "cancelled", "interrupted"].includes(status)) this.currentStatus = status as RunStatus;
     return ended;
@@ -119,14 +116,12 @@ export class RunStateMachine {
     }
     const from = this.currentStatus;
     this.currentStatus = next;
-    await this.store.append({
-      type: "turn.state",
-      conversation_id: this.conversationId,
-      run_id: this.runId,
-      from,
-      to: next,
-      reason
-    });
-    await this.onTransition?.(next, reason);
+    await this.record(from, next, reason);
+  }
+
+  /** A Run with a durable record has its `turn.state` row written by the record's own transaction; one without, such as an evaluation, writes it here. */
+  private async record(from: RunStatus | undefined, to: LiveRunStatus, reason?: string): Promise<void> {
+    if (this.onTransition) { await this.onTransition(to, reason); return; }
+    await this.store.append({ type: "turn.state", conversation_id: this.conversationId, run_id: this.runId, ...(from ? { from } : {}), to, ...(reason ? { reason } : {}) });
   }
 }

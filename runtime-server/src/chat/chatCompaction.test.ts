@@ -39,7 +39,7 @@ async function harness(summarize: Summarize, options: { hard?: number; timeoutMs
   const repository = new InMemoryConversationRepository(authority);
   const store = new RuntimeStore(authority);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "compaction" });
-  const hub = new RunEventHub();
+  const hub = new RunEventHub(undefined, async () => 0);
   const strategy = new CompactionStrategy(chatCompactionAdapter(summarize), { ...policyFor(20_000), prune: 150, trigger: 300, hard: options.hard ?? 300, tail: 80, cacheTtlMs: 1_000, timeoutMs: options.timeoutMs ?? 3_000, maxOverflowRetries: 2 });
   const compaction = (executorId: string) => new ChatCompaction({ repository, store, hub, strategy: async () => strategy, executorId, waitPollMs: 10, leaseMarginMs: options.leaseMarginMs });
   /** A finished conversation: the first Run's question, a file it wrote, and its answer. */
@@ -48,7 +48,7 @@ async function harness(summarize: Summarize, options: { hard?: number; timeoutMs
     for (const message of [writeCall("c1", "out/report.md"), output("c1", 1_600)]) {
       await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message });
     }
-    await repository.endRun(run.id, { status: "completed", reply: { message: { role: "assistant", content: "Done: the report is written." }, finishReason: "stop", visibleParts: [] } });
+    await repository.endRun(run.id, { status: "completed", reply: { message: { role: "assistant", content: "Done: the report is written." }, finishReason: "stop" } });
     return run;
   };
   return { repository, store, hub, strategy, compaction, finished };
@@ -142,7 +142,7 @@ test("a turn that is about to run answers without a summary while the history fi
   await repository.transitionRun(run.id, "running");
   const state = new RunStateMachine(run.id, conversationId, store, endsOf(repository, run.id), (status, reason) => repository.transitionRun(run.id, status, reason).then(() => undefined), "running");
   const conversation = (await repository.getConversation(conversationId))!;
-  const turn = compaction("a").forRun({ run, conversation, state, publish: () => undefined, signal: new AbortController().signal });
+  const turn = compaction("a").forRun({ run, conversation, state, signal: new AbortController().signal });
   assert.equal(await turn.ifNeeded(await store.readConversation(conversationId), "pre_turn"), undefined);
   assert.deepEqual(model.inputs, []);
   assert.deepEqual((await repository.snapshot(conversationId)).events.filter((row) => row.type.startsWith("compaction.")), []);
@@ -213,7 +213,7 @@ test("a message that joins a compacting Run waits and is claimed afterwards, aft
   await repository.transitionRun(run.id, "running");
   const state = new RunStateMachine(run.id, conversationId, store, endsOf(repository, run.id), (status, reason) => repository.transitionRun(run.id, status, reason).then(() => undefined), "running");
   const conversation = (await repository.getConversation(conversationId))!;
-  const turn = compaction("a").forRun({ run, conversation, state, publish: () => undefined, signal: new AbortController().signal });
+  const turn = compaction("a").forRun({ run, conversation, state, signal: new AbortController().signal });
   const checkpoint = await turn.ifNeeded(await store.readConversation(conversationId), "pre_turn");
   assert.ok(checkpoint);
   assert.deepEqual(joined, [{ consumed: 0, status: "compacting" }], "it joined while the Run was compacting and was not taken");
@@ -233,7 +233,7 @@ test("recovery from a provider overflow is bounded, and a manual compaction that
   const { run } = await repository.acceptSubmission(submission(2, "carry on"));
   const state = new RunStateMachine(run.id, conversationId, store, endsOf(repository, run.id), (status, reason) => repository.transitionRun(run.id, status, reason).then(() => undefined), "queued");
   await state.start();
-  const turn = compaction("a").forRun({ run, conversation: (await repository.getConversation(conversationId))!, state, publish: () => undefined, signal: new AbortController().signal });
+  const turn = compaction("a").forRun({ run, conversation: (await repository.getConversation(conversationId))!, state, signal: new AbortController().signal });
   const attempts = [] as unknown[];
   for (let n = 0; n < 4; n++) attempts.push(await turn.recoverFromOverflow(await store.readConversation(conversationId)));
   assert.equal(attempts.filter(Boolean).length <= 2, true);
@@ -245,7 +245,7 @@ test("recovery from a provider overflow is bounded, and a manual compaction that
   const next = await failing.repository.acceptSubmission(submission(2, "carry on"));
   const failingState = new RunStateMachine(next.run.id, conversationId, failing.store, endsOf(failing.repository, next.run.id), (status, reason) => failing.repository.transitionRun(next.run.id, status, reason).then(() => undefined), "queued");
   await failingState.start();
-  const manual = failing.compaction("a").forRun({ run: next.run, conversation: (await failing.repository.getConversation(conversationId))!, state: failingState, publish: () => undefined, signal: new AbortController().signal });
+  const manual = failing.compaction("a").forRun({ run: next.run, conversation: (await failing.repository.getConversation(conversationId))!, state: failingState, signal: new AbortController().signal });
   const before = await failing.store.readConversation(conversationId);
   await assert.rejects(manual.manual(before), /provider down/);
   assert.deepEqual(await failing.store.readConversation(conversationId), before);

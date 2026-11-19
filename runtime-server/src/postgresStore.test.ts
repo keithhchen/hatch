@@ -769,7 +769,7 @@ test("Postgres visible history preserves committed text and tool order", async (
     finish_reason: "stop",
     visible_parts: parts,
     timestamp: "2026-08-11T00:00:02.000Z"
-  });
+  } as never);
 
   const visible = await store.readVisibleConversation("ordered-history");
   assert.equal(visible.length, 1);

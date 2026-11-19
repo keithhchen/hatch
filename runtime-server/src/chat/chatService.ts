@@ -89,7 +89,7 @@ export class ChatService<Scope> {
     /** A Run that cannot be admitted ends here, like any other: observers and the journal both hear of it. */
     terminator: Pick<RunTerminator, "end">;
     supervisor: Pick<RunSupervisor, "adopt" | "executorId" | "holdsConversation" | "steered">;
-    hub: RunEventHub;
+    hub: Pick<RunEventHub, "advancedToHead">;
     admission: RunAdmission;
     registry: RunRegistry<Scope>;
     limits?: PrincipalLimits;
@@ -131,7 +131,7 @@ export class ChatService<Scope> {
       registry.rememberClient(binding.id, command.client, command.timeZone);
       registry.rememberScope(accepted.run.id, command.scope);
       supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });
-      hub.publish(binding.id, { type: "turn.state", run_id: accepted.run.id, status: "queued" });
+      await hub.advancedToHead(binding.id);
       return { outcome: "started", run: accepted.run };
     } catch (error) {
       release();
@@ -203,8 +203,8 @@ export class ChatService<Scope> {
         release();
       }
       if (outcome !== "replayed") {
-        hub.publish(command.conversation.id, { type: "message.accepted", conversation_id: command.conversation.publicId, run_id: accepted.run.id, client_message_id: command.clientMessageId, outcome });
-        if (outcome === "started") hub.publish(command.conversation.id, { type: "turn.state", run_id: accepted.run.id, status: "queued" });
+        // The message and the Run's `queued` state were written with the acceptance: observers read them from the log.
+        await hub.advancedToHead(command.conversation.id);
         // The message is recorded: wake whoever executes the Run.
         if (outcome === "steered") supervisor.steered(accepted.run.id);
       }

@@ -1,6 +1,8 @@
 import { reported } from "../observability/reported.js";
 import type { ConversationJournalEvent, ConversationJournalPage } from "../conversationRepository.js";
 import { publicJournalPayload } from "./messageLedger.js";
+import type { PublicLogEvent, RuntimeStore } from "../store.js";
+import { LogTail } from "./logTail.js";
 import type { EventSink, RunEventHub } from "./runEventHub.js";
 
 export interface JournalSource {
@@ -20,20 +22,20 @@ export const journalEnvelope = (event: ConversationJournalEvent): Record<string,
 export type FeedOptions = {
   /** Resume point: the cursor of a snapshot or of the last event received. */
   afterCursor: number;
-  /** Also receive the live deltas of the Run, not only its durable events. */
+  /** Also receive what the Run says as it goes (its text, its tool calls), not only its durable events. */
   stream: boolean;
 };
 
 /**
- * Observes a conversation. Durable events come from the journal by cursor, so
- * they reach any client whichever instance runs the Run and survive a restart;
- * live deltas come from the hub when the client wants to stream.
+ * The public REST API's view of a conversation: durable events from the journal by cursor, and, when the client wants to
+ * stream, the Run's words and tool calls as they enter the conversation's log (`assistant.delta`, `tool_call.delta`).
  */
 export class ConversationFeed {
   constructor(
     private readonly source: JournalSource,
-    private readonly hub: RunEventHub,
-    private readonly pollMs = 200
+    private readonly hub: Pick<RunEventHub, "subscribe">,
+    private readonly pollMs = 200,
+    private readonly log?: Pick<RuntimeStore, "readLogPage" | "readLogTurns" | "logHead">
   ) {}
 
   attach(conversationId: string, options: FeedOptions, sink: EventSink): () => void {
@@ -42,14 +44,12 @@ export class ConversationFeed {
     let timer: NodeJS.Timeout | undefined;
     let lastFailure: string | undefined;
     let lastFailureAt = 0;
-    const drop = (): void => { stopped = true; clearTimeout(timer); unsubscribe(); };
+    let stopTail = (): void => undefined;
+    const drop = (): void => { stopped = true; clearTimeout(timer); stopTail(); };
     const guarded = (event: Record<string, unknown>): void => {
       try { sink.push(event); } catch { drop(); }
     };
-    const unsubscribe = options.stream ? this.hub.subscribe(conversationId, { push: guarded }) : () => undefined;
-    // Subscribing and catching up are one step, so the text is neither cut nor repeated.
-    const caughtUp = options.stream ? this.hub.catchUp(conversationId) : undefined;
-    if (caughtUp) guarded(caughtUp);
+    if (options.stream && this.log) void this.follow(conversationId, guarded).then((stop) => { if (stopped) stop(); else stopTail = stop; });
     const poll = async (): Promise<void> => {
       try {
         for (;;) {
@@ -67,5 +67,26 @@ export class ConversationFeed {
     };
     void poll();
     return drop;
+  }
+
+  /** The words and tool calls of the conversation's latest turn so far, then as they come, in the shapes the REST streams have always carried. */
+  private async follow(conversationId: string, push: (event: Record<string, unknown>) => void): Promise<() => void> {
+    const log = this.log!;
+    const sent = new Map<string, number>();
+    const translate = (event: PublicLogEvent): void => {
+      const e = event as unknown as Record<string, unknown>;
+      if (e.type === "assistant.text" && typeof e.content === "string") {
+        const runId = String(e.run_id);
+        const offset = sent.get(runId) ?? 0;
+        sent.set(runId, offset + e.content.length);
+        push({ type: "assistant.delta", run_id: e.run_id, delta: { kind: "text", content: e.content, offset } });
+      } else if (e.type === "tool.call") {
+        push({ ...e, type: "tool_call.delta" });
+        if (e.locality === "client" && e.status === "requested" && e.approval === "ask") push({ ...e, type: "tool_call.request" });
+      }
+    };
+    const { events, head } = await log.readLogTurns(conversationId, { turns: 1 });
+    for (const event of events) translate(event);
+    return new LogTail({ source: log, hub: this.hub }).attach(conversationId, head, { push: (event) => translate(event as unknown as PublicLogEvent) });
   }
 }

@@ -17,12 +17,13 @@ const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent
 const id = `scope:${"f".repeat(24)}:accepted`;
 const databaseUrl = process.env.HATCH_TEST_DATABASE_URL;
 
-type Harness = { repository: ConversationRepository; store: RuntimeStore | PostgresStore; service: ChatService<object>; heard: Array<Record<string, unknown>>; ghostActiveRun: () => void };
+type Harness = { repository: ConversationRepository; store: RuntimeStore | PostgresStore; service: ChatService<object>; ghostActiveRun: () => void };
+
+const runStates = async (h: Harness, runId: string) => (await h.store.readLogPage(id, { after: 0, limit: 200 })).events
+  .filter((event) => event.type === "run.state" && event.run_id === runId).map((event) => (event as unknown as { status: string }).status);
 
 function harness(repository: ConversationRepository, store: Harness["store"], overrides: { cap?: () => Promise<void>; adopt?: () => void } = {}): Harness {
-  const hub = new RunEventHub();
-  const heard: Array<Record<string, unknown>> = [];
-  hub.subscribe(id, { push: (event) => { heard.push(event); } });
+  const hub = new RunEventHub(undefined, async () => 0);
   // One read of the active Run that sees a Run which has ended by the time the message is accepted.
   let ghost = false;
   const racing = new Proxy(repository, {
@@ -36,7 +37,7 @@ function harness(repository: ConversationRepository, store: Harness["store"], ov
     hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>(),
     ...(overrides.cap ? { cap: overrides.cap } : {})
   });
-  return { repository, store, service, heard, ghostActiveRun: () => { ghost = true; } };
+  return { repository, store, service, ghostActiveRun: () => { ghost = true; } };
 }
 
 async function withBackend(name: "memory" | "postgres", overrides: Parameters<typeof harness>[2], body: (h: Harness) => Promise<void>): Promise<void> {
@@ -95,7 +96,7 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.equal(submission.outcome, "started");
     const runs = await assertAnswered(h, "m1");
     assert.deepEqual(runs.map((run) => [run.id, run.status]), [["run-m1", "failed"]]);
-    assert.deepEqual(h.heard.filter((event) => event.run_id === "run-m1").map((event) => event.type), ["message.accepted", "turn.state", "turn.failed", "turn.state"]);
+    assert.deepEqual(await runStates(h, "run-m1"), ["queued", "failed"]);
     // The client's retry under the same key is the same message, not a duplicate.
     assert.equal((await submit(h, "m1")).outcome, "replayed");
     assert.equal((await h.repository.listRuns(id)).length, 1);
@@ -108,7 +109,7 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.equal(submission.outcome, "started");
     const runs = await assertAnswered(h, "m2");
     assert.deepEqual(runs.map((run) => [run.id, run.status]), [["run-m2", "failed"]]);
-    assert.ok(h.heard.some((event) => event.type === "turn.failed" && event.run_id === "run-m2"), "the client is told the Run failed");
+    assert.ok((await runStates(h, "run-m2")).includes("failed"), "the log tells every client the Run failed");
     assert.equal((await submit(h, "m2")).outcome, "replayed");
   }));
 }

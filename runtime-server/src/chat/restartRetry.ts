@@ -8,7 +8,7 @@ export const restartRetryKey = (interruptedRunId: string): string => `${RESTART_
 /** A reply interrupted by a restart is started again at most this many times in a row; after that its partial reply stays quietly. */
 export const MAX_RESTART_RETRIES = 2;
 
-/** How long the buyer's snapshot keeps reporting an interrupted reply as being started again, when its retry has not appeared. */
+/** How long an interrupted reply shows as being started again, when its retry has not appeared. */
 export const RETRY_PENDING_MS = 2 * 60_000;
 
 /**
@@ -39,6 +39,8 @@ export class RestartRetrier {
     repository: Pick<ConversationRepository, "listRuns" | "restartInterruptedRuns">;
     /** Conversations with their own retrier (report mode) are left to it. */
     skip?(conversationId: string): Promise<boolean>;
+    /** Writes `run.retrying` to the conversation's log and tells observers: the reply is owed, so it shows as still being worked on until `until`. */
+    announce(run: ConversationRunRecord, until: Date): Promise<void>;
     /** Starts the answer-again Run: the same path as the buyer's own "answer again". */
     start(run: ConversationRunRecord, key: string, runId: string): Promise<unknown>;
     /** Interruptions older than this are left alone. */
@@ -73,6 +75,7 @@ export class RestartRetrier {
       if (await this.deps.skip?.(run.conversationId)) return;
       const runs = await this.deps.repository.listRuns(run.conversationId);
       if (!owesRestartRetry(runs, run)) return;
+      await this.deps.announce(run, new Date((this.deps.clock ?? (() => new Date()))().getTime() + RETRY_PENDING_MS));
       await this.deps.start(run, restartRetryKey(run.id), `run_${randomUUID().replaceAll("-", "")}`);
     } catch (error) {
       // Busy or not retryable means somebody else got there first or the buyer moved on: nothing to do.

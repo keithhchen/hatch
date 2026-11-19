@@ -5,6 +5,7 @@ import { parseContent, resolveContent } from "./assets.js";
 import { awaitTurn } from "./awaitTurn.js";
 import { MAX_BYTES } from "../assets/pipeline.js";
 import { ConversationError, type Conversation, type SendInput } from "./conversation.js";
+import { parseLogQuery } from "../chat/publicLog.js";
 import { messageKey } from "../chat/messageKey.js";
 import { ChatError } from "../chat/principal.js";
 import { toProblem } from "../errors/problem.js";
@@ -30,12 +31,12 @@ export type ConversationRouteDeps = StudioDeps & {
   pace?: { pollMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number };
 };
 
-type Action = "messages" | "events" | "stop" | "snapshot" | "assets" | "retry" | "view" | "timezone" | "asset";
+type Action = "messages" | "events" | "stop" | "snapshot" | "assets" | "retry" | "view" | "timezone" | "asset" | "log";
 
 const WORKERS_ROUTE = /^\/v1\/creator\/products\/([^/]+)\/workers(?:\/([^/]+)\/(messages|events|stop|snapshot|assets))?$/;
-const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets|retry|view|timezone)$/;
+const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets|retry|view|timezone|log)$/;
 const ASSISTANT_ASSET_ROUTE = /^\/v1\/creator\/assistant\/conversation\/assets\/([^/]+)$/;
-const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"], retry: ["POST"], view: ["GET"], timezone: ["PUT"], asset: ["GET"] };
+const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"], retry: ["POST"], view: ["GET"], timezone: ["PUT"], asset: ["GET"], log: ["GET"] };
 /** The newest messages the Studio view holds, and the most it is asked for. */
 const VIEW_PAGE = 200;
 
@@ -93,6 +94,11 @@ export class ConversationRoutes {
     if (action === "retry") { await this.retry(conversation, request, response); return; }
     if (action === "assets") { await this.upload(target, request, response, url); return; }
     if (action === "asset") { await this.show(target, assetId!, response); return; }
+    if (action === "log") {
+      if (!conversation.log) throw new ConversationError(501, "log_unavailable", "This conversation keeps no log.");
+      this.deps.json(response, 200, await conversation.log(parseLogQuery(url.searchParams, message => new ConversationError(400, "invalid_log_query", message))));
+      return;
+    }
     if (action === "view") { await this.view(target, url, response); return; }
     if (action === "timezone") { await this.timezone(target, request, response); return; }
     if (action === "snapshot") { this.deps.json(response, 200, await snapshotOf(conversation, this.studio.eventLog)); return; }

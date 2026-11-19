@@ -221,7 +221,7 @@ test("responses: stream emits the OpenAI event sequence with sequence numbers, a
   for await (const event of stream) events.push(event as never);
   assert.deepEqual(events.map((event) => event.type), [
     "response.created", "response.in_progress", "response.output_item.added", "response.content_part.added",
-    "response.output_text.delta", "response.output_text.delta", "response.output_text.done", "response.content_part.done",
+    "response.output_text.delta", "response.output_text.done", "response.content_part.done",
     "response.output_item.done", "response.completed"
   ]);
   assert.deepEqual(events.map((event) => event.sequence_number), events.map((_, index) => index));

@@ -1,62 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConversationController } from "../src/application/conversation-controller.js";
-import { AttachmentSource, ConversationTransport, MemoryPendingStore, RuntimeConnection, ToolExecutor } from "../src/ports/index.js";
+import { MemoryPendingStore } from "../src/ports/index.js";
+import { LogTransport, flush, openController, rows, say, sleep, text, runState, user } from "./harness.mjs";
 
-const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
+const soon = () => new Date(Date.now() + 60_000).toISOString();
 
-class Connection extends RuntimeConnection {
-  constructor(handlers) { super(); this.handlers = handlers; this.open = true; queueMicrotask(() => handlers.onOpen()); }
-  hello() { this.handlers.onEvent({ type: "session.ready", conversation_id: "assistant" }); }
-  async send(message) { this.handlers.onEvent({ type: "message.accepted", client_message_id: message.clientMessageId, run_id: "run_1", outcome: "started" }); }
-  toolResult() {}
-  cancel() {}
-  get ready() { return this.open; }
-  close() { this.open = false; }
-}
-
-/** In-memory double of a transport that can answer a failed Run again: automated tests only. */
-class FakeTransport extends ConversationTransport {
-  constructor({ retries = true } = {}) { super(); this.retries = retries; this.calls = []; this.outcomes = []; this.connections = []; this.runs = []; }
-  get steerable() { return true; }
-  get journal() { return false; }
-  get retriesRun() { return this.retries; }
-  async retryRun(conversationId, key) {
-    this.calls.push({ conversationId, key });
-    const outcome = this.outcomes.shift() ?? { run_id: "run_2" };
+/** A steerable transport that answers a failed Run again by starting Run 2. */
+function transportFor(options = {}) {
+  const transport = new LogTransport({ steerable: true, autoOpen: true, autoReady: true, retriesRun: true, conversationId: "assistant", ...options });
+  transport.calls = [];
+  transport.outcomes = [];
+  transport.retryRun = async (conversationId, key) => {
+    transport.calls.push({ conversationId, key });
+    const outcome = transport.outcomes.shift() ?? { run_id: "run_2" };
     if (outcome instanceof Error) throw outcome;
-    this.runs = [{ id: outcome.run_id, status: "running" }];
+    transport.stream(["run.superseded", { run_id: "run_1", by: outcome.run_id }], runState(outcome.run_id, "running"));
     return outcome;
-  }
-  snapshot() { return Promise.resolve({ conversation: { id: "assistant" }, messages: [], runs: this.runs, events: [], cursor: 1, has_more: false }); }
-  history() { return Promise.resolve({ messages: [], has_more: false }); }
-  run(_id, runId) { return Promise.resolve({ id: runId, status: "running" }); }
-  connect(_id, handlers) { const connection = new Connection(handlers); this.connections.push(connection); return connection; }
+  };
+  return transport;
 }
-class NoAttachments extends AttachmentSource { accepts() { return false; } prepareAll() { return Promise.resolve([]); } }
-class NoTools extends ToolExecutor { execute() { return Promise.resolve({ status: "error", error: { code: "x" } }); } cancel() {} requestApproval() { return Promise.resolve({ approved: false }); } }
+
+const open = async (transport, options = {}) => openController({ transport, id: "assistant", pendingStore: new MemoryPendingStore(), reconnectAttempts: 0, ...options });
 
 async function failedReply(options) {
-  const transport = new FakeTransport(options);
+  const transport = transportFor(options);
   const pendingStore = new MemoryPendingStore();
-  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore, pollMs: 60_000, reconnectAttempts: 0 });
-  controller.open("assistant");
-  await flush();
-  controller.setDraft("hello");
-  await controller.send();
-  await flush();
-  transport.connections[0].handlers.onEvent({ type: "turn.failed", run_id: "run_1", error: { code: "upstream_error", message: "fetch failed" } });
-  await flush();
-  return { transport, controller, pendingStore };
+  const { controller, connection } = await open(transport, { pendingStore });
+  await say(controller, "hello");
+  const sent = connection.messages[0];
+  transport.stream(user(sent.clientMessageId, "run_1", "hello"), runState("run_1", "running"), runState("run_1", "failed", { failure: { code: "upstream_error", message: "fetch failed" } }));
+  return { transport, controller, pendingStore, connection };
 }
 
 test("a failed reply is told apart from a connection error, and answering it starts a Run under a key minted at the click", async () => {
   const { transport, controller, pendingStore } = await failedReply();
   assert.deepEqual(controller.getState().failedRun, { id: "run_1" });
+  assert.equal(controller.getState().error.code, "upstream_error");
   assert.equal(controller.canRetryRun, true);
   assert.equal(transport.calls.length, 0, "nothing is sent until the user clicks");
   await controller.retryRun();
-  await flush();
   assert.equal(transport.calls.length, 1);
   assert.match(transport.calls[0].key, /^retry_/);
   assert.equal(controller.getState().failedRun, null);
@@ -84,22 +66,19 @@ test("a reload does not send a retry key as a message", async () => {
   const { transport, controller, pendingStore } = await failedReply();
   transport.outcomes.push(new Error("network down"));
   await controller.retryRun();
-  const reopened = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore, pollMs: 60_000, reconnectAttempts: 0 });
-  reopened.open("assistant");
-  await flush();
+  const { controller: reopened } = await open(transport, { pendingStore });
   assert.equal(reopened.pendings.size, 0);
   reopened.dispose();
   controller.dispose();
 });
 
 test("without transport support there is nothing to answer again, and a connection error still reconnects", async () => {
-  const { transport, controller } = await failedReply({ retries: false });
+  const { transport, controller } = await failedReply({ retriesRun: false });
   assert.equal(controller.canRetryRun, false);
   await controller.retryRun();
   assert.equal(transport.calls.length, 0);
   controller.dismissError();
   assert.equal(controller.getState().failedRun, null);
-  // A connection error is not a failed reply: retry() reconnects as before.
   controller.fail(new Error("connection lost"));
   const connections = transport.connections.length;
   controller.retry();
@@ -108,70 +87,36 @@ test("without transport support there is nothing to answer again, and a connecti
   controller.dispose();
 });
 
-test("opening a conversation whose last reply failed offers to answer it again, without a live failure", async () => {
-  const transport = new FakeTransport();
-  transport.runs = [{ id: "run_1", status: "completed" }, { id: "run_9", status: "failed", failure: { code: "upstream_error", message: "fetch failed" } }];
-  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
-  controller.open("assistant");
-  await flush();
+test("opening a conversation whose last reply failed offers to answer it again; one that completed offers nothing", async () => {
+  const transport = transportFor();
+  transport.push(user("m1", "run_9"), runState("run_9", "failed", { failure: { code: "upstream_error", message: "fetch failed" } }));
+  const { controller } = await open(transport);
   assert.deepEqual(controller.getState().failedRun, { id: "run_9" });
   assert.ok(controller.getState().error);
-});
-
-test("opening a conversation whose last reply completed offers nothing", async () => {
-  const transport = new FakeTransport();
-  transport.runs = [{ id: "run_9", status: "failed" }, { id: "run_10", status: "completed" }];
-  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
-  controller.open("assistant");
-  await flush();
-  assert.equal(controller.getState().failedRun, null);
-  assert.equal(controller.getState().error, null);
+  const completed = transportFor();
+  completed.push(user("m1", "run_9"), runState("run_9", "failed"), user("m2", "run_10"), runState("run_10", "completed"));
+  const { controller: other } = await open(completed);
+  assert.equal(other.getState().failedRun, null);
+  assert.equal(other.getState().error, null);
 });
 
 test("a Run a restart interrupted shows no error and offers no answer again: the server starts the reply again", async () => {
-  const transport = new FakeTransport();
-  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
-  controller.open("assistant");
-  await flush();
-  controller.setDraft("hello");
-  await controller.send();
-  await flush();
-  transport.connections[0].handlers.onEvent({ type: "turn.failed", run_id: "run_1", error: { code: "run_interrupted", message: "The Runtime restarted while this Run was in progress. Send the message again to continue." } });
-  await flush();
+  const transport = transportFor();
+  const { controller, connection } = await open(transport);
+  await say(controller, "hello");
+  const sent = connection.messages[0];
+  transport.stream(user(sent.clientMessageId, "run_1", "hello"), runState("run_1", "running"), text("run_1", "partial"), runState("run_1", "interrupted", { failure: { code: "run_interrupted" } }));
   const state = controller.getState();
   assert.equal(state.error, null, "no notice, technical or not");
   assert.equal(state.failedRun, null);
   assert.equal(transport.calls.length, 0, "nothing is answered again by the client");
+  assert.deepEqual(rows(controller), ["user:hello", "assistant:partial"], "the partial reply stays, quietly");
 });
 
-test("opening a conversation whose last Run a restart interrupted shows no error either", async () => {
-  const transport = new FakeTransport();
-  transport.runs = [{ id: "run_9", status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted" } }];
-  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
-  controller.open("assistant");
-  await flush();
-  assert.equal(controller.getState().error, null);
-  assert.equal(controller.getState().failedRun, null);
-});
-
-test("a failed Run is still shown and answered again", async () => {
-  const { controller } = await failedReply();
-  assert.deepEqual(controller.getState().failedRun, { id: "run_1" });
-});
-
-const interruptedRun = (retrying) => ({ id: "run_9", status: "interrupted", ...(retrying ? { retrying: true } : {}), failure: { code: "run_interrupted", message: "The Runtime restarted" } });
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-const open = (transport) => {
-  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 20, reconnectAttempts: 0 });
-  controller.open("assistant");
-  return controller;
-};
-
-test("reload in the gap: the interrupted reply being started again shows as working, with no notice", async () => {
-  const transport = new FakeTransport();
-  transport.runs = [interruptedRun(true)];
-  const controller = open(transport);
-  await wait(60);
+test("a reload in the gap: the interrupted reply being started again shows as working, with no notice", async () => {
+  const transport = transportFor();
+  transport.push(user("m1", "run_9"), runState("run_9", "running"), text("run_9", "partial"), runState("run_9", "interrupted"), ["run.retrying", { run_id: "run_9", until: soon() }]);
+  const { controller } = await open(transport);
   const state = controller.getState();
   assert.equal(state.activeRun, "run_9");
   assert.equal(state.error, null);
@@ -180,40 +125,30 @@ test("reload in the gap: the interrupted reply being started again shows as work
   controller.dispose();
 });
 
-test("a live client in the gap shows working, then adopts the retry's Run and streams it", async () => {
-  const transport = new FakeTransport();
-  const controller = open(transport);
-  await flush();
-  controller.setDraft("hello");
-  await controller.send();
-  await flush();
-  transport.connections[0].handlers.onEvent({ type: "turn.failed", run_id: "run_1", error: { code: "run_interrupted", message: "x" } });
-  transport.runs = [{ ...interruptedRun(true), id: "run_1" }];
-  await wait(80);
-  assert.ok(controller.getState().activeRun, "working in the gap");
+test("a live client in the gap shows working, then the retry's Run replaces the interrupted reply and streams", async () => {
+  const transport = transportFor();
+  const { controller } = await open(transport);
+  transport.stream(user("m1", "run_1", "hello"), runState("run_1", "running"), text("run_1", "part"), runState("run_1", "interrupted"), ["run.retrying", { run_id: "run_1", until: soon() }]);
+  assert.equal(controller.getState().activeRun, "run_1", "working in the gap");
   assert.equal(controller.getState().error, null);
-  transport.runs = [{ id: "run_2", status: "running" }];
-  await wait(80);
-  assert.equal(controller.getState().activeRun, "run_2", "adopted " + JSON.stringify({ s: controller.getState().status, m: controller.getState().messages.map(m => [m.id, m.role, m.run_id, m.transient]), e: String(controller.getState().error?.message) }));
-  transport.connections[0].handlers.onEvent({ type: "assistant.delta", run_id: "run_2", delta: { kind: "text", content: "whole answer" } });
-  await wait(60);
-  assert.match(JSON.stringify(controller.getState().messages), /whole answer/);
+  transport.stream(["run.superseded", { run_id: "run_1", by: "run_2" }], runState("run_2", "running"), text("run_2", "whole answer"));
+  assert.equal(controller.getState().activeRun, "run_2");
+  assert.deepEqual(rows(controller), ["user:hello", "assistant:whole answer*"]);
   assert.equal(controller.getState().error, null);
   controller.dispose();
 });
 
-test("budget exhausted: the server stops reporting the reply as retrying and the client goes idle, quietly", async () => {
-  const transport = new FakeTransport();
-  transport.runs = [interruptedRun(true)];
-  const controller = open(transport);
-  await wait(60);
+test("budget exhausted: the retry lapses and the client goes idle, quietly, the partial reply kept", async () => {
+  const transport = transportFor();
+  transport.push(user("m1", "run_9"), runState("run_9", "running"), text("run_9", "partial"), runState("run_9", "interrupted"), ["run.retrying", { run_id: "run_9", until: new Date(Date.now() + 80).toISOString() }]);
+  const { controller } = await open(transport);
   assert.equal(controller.getState().activeRun, "run_9");
-  transport.runs = [interruptedRun(false)];
-  await wait(80);
+  await sleep(150);
   const state = controller.getState();
   assert.equal(state.activeRun, null);
   assert.equal(state.error, null);
   assert.equal(state.failedRun, null);
-  assert.ok(!state.messages.some(message => message.transient), "no working row is left");
+  assert.deepEqual(rows(controller), ["user:m1", "assistant:partial"]);
   controller.dispose();
+  await flush();
 });

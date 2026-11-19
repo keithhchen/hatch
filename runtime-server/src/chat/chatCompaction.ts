@@ -4,10 +4,11 @@ import {
 } from "../compaction.js";
 import { BackgroundCompactor, CompactionAborted, newCompactionId, type CompactionOutcome, type CompactionStrategy } from "../compactionStrategy.js";
 import type { ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
-import type { ConversationMessage, OutboundMessage } from "../protocol.js";
+import type { ConversationMessage } from "../protocol.js";
 import type { RunStateMachine } from "../runState.js";
-import type { RuntimeStore } from "../store.js";
+import type { RuntimeStore, StoreEventInput } from "../store.js";
 import type { RunEventHub } from "./runEventHub.js";
+import type { RunLog } from "./runLog.js";
 import { log } from "../observability/log.js";
 import type { UsageSink } from "../usage/usage.js";
 
@@ -20,6 +21,7 @@ export type CompactionNotice = {
   /** A failed summary left only a bounded tail: this is the one case the user is told. */
   degraded?: boolean;
   droppedMessages?: number;
+  windowId?: string;
 };
 
 /** A Run's own compaction: before its turn, between its tool steps, after a provider overflow. */
@@ -31,7 +33,7 @@ export interface TurnCompaction {
 }
 
 export interface RunCompactions {
-  forRun(run: { run: ConversationRunRecord; conversation: ConversationRecord; state: RunStateMachine; publish: (message: OutboundMessage) => void; signal: AbortSignal; usage?: UsageSink }): TurnCompaction;
+  forRun(run: { run: ConversationRunRecord; conversation: ConversationRecord; state: RunStateMachine; /** The Run's log: its compaction events keep the Run's order. */ log?: Pick<RunLog, "append">; signal: AbortSignal; usage?: UsageSink }): TurnCompaction;
 }
 
 type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "renewCompaction" | "runningCompaction" | "endCompaction" | "commitCompaction">;
@@ -57,8 +59,8 @@ export class ChatCompaction implements RunCompactions {
 
   constructor(private readonly deps: {
     repository: Repository;
-    store: Pick<RuntimeStore, "readConversation" | "readCompactionState" | "lastActivityAt">;
-    hub: RunEventHub;
+    store: Pick<RuntimeStore, "readConversation" | "readCompactionState" | "lastActivityAt" | "append">;
+    hub: Pick<RunEventHub, "advanced">;
     /** Built when a conversation needs it: its policy needs the window of the model that conversation runs on, which the database may change. */
     strategy: (conversationId: string) => Promise<CompactionStrategy<RuntimeCompactionMessage>>;
     executorId: string;
@@ -92,7 +94,7 @@ export class ChatCompaction implements RunCompactions {
 
   async drain(): Promise<void> { await this.background.drain(); }
 
-  forRun({ run, conversation, state, publish, signal, usage }: Parameters<RunCompactions["forRun"]>[0]): TurnCompaction {
+  forRun({ run, conversation, state, log, signal, usage }: Parameters<RunCompactions["forRun"]>[0]): TurnCompaction {
     const { store } = this.deps;
     if (usage) this.sinks.set(conversation.id, usage);
     let overflows = 0;
@@ -107,17 +109,16 @@ export class ChatCompaction implements RunCompactions {
       if (!strategy.wants(messages, strategyRequest)) return undefined;
       const compactionId = newCompactionId();
       await state.compact(request.phase);
-      await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "started" }, { phase: request.phase });
+      await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "started" }, { phase: request.phase, log });
       let checkpoint: CompactionCheckpoint | undefined;
       try {
         const outcome = await strategy.compact(messages, strategyRequest);
         if (outcome.kind === "none") return undefined;
-        checkpoint = await this.commit(conversation.id, run.id, compactionId, request, outcome);
-        if (checkpoint) publish({ type: "session.compacted", run_id: run.id, ...checkpoint } as OutboundMessage);
+        checkpoint = await this.commit(conversation.id, run.id, compactionId, request, outcome, undefined, log);
         return checkpoint;
       } finally {
         // Every `started` ends: `completed` by the commit, otherwise `aborted`.
-        if (!checkpoint) await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "aborted" });
+        if (!checkpoint) await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "aborted" }, { log });
         await state.start();
       }
     };
@@ -141,6 +142,7 @@ export class ChatCompaction implements RunCompactions {
     // compaction is never taken for a dead one and run twice, and a dead one frees the conversation within one lease.
     const leaseMs = strategy.policy.timeoutMs + (this.deps.leaseMarginMs ?? LEASE_MARGIN_MS);
     const claim = await repository.beginCompaction({ id: compactionId, conversationId: run.conversationId, executorId: this.deps.executorId, leaseMs });
+    // A claim that lapsed was closed in the log by beginCompaction itself.
     if (!claim.claimed) return;
     const heartbeat = setInterval(() => void repository.renewCompaction(compactionId, leaseMs).catch((error) => log.error("compaction_renew_failed", { compaction_id: compactionId, error: String(error) })), Math.max(10, Math.floor(leaseMs / 3)));
     let started = false;
@@ -171,7 +173,7 @@ export class ChatCompaction implements RunCompactions {
 
   private async commit(
     conversationId: string, runId: string, compactionId: string, request: Request,
-    outcome: Exclude<CompactionOutcome<RuntimeCompactionMessage>, { kind: "none" }>, basis?: { latestRunId?: string }
+    outcome: Exclude<CompactionOutcome<RuntimeCompactionMessage>, { kind: "none" }>, basis?: { latestRunId?: string }, log?: Pick<RunLog, "append">
   ): Promise<CompactionCheckpoint | undefined> {
     const stage = outcome.kind === "summarized" ? "summary" as const : outcome.kind === "degraded" ? "degraded" as const : "prune" as const;
     const degraded = outcome.kind === "degraded";
@@ -189,19 +191,22 @@ export class ChatCompaction implements RunCompactions {
       journal: { compaction_id: compactionId, phase: request.phase, stage, tokens_before: outcome.tokensBefore, tokens_after: outcome.tokensAfter, ...(degraded ? { degraded: true, dropped_messages: outcome.dropped } : {}) }
     });
     if (!committed) return undefined;
-    await this.announce({ conversationId, runId, compactionId, state: "completed", ...(degraded ? { degraded: true, droppedMessages: outcome.dropped } : {}) });
+    await this.announce({ conversationId, runId, compactionId, state: "completed", windowId: checkpoint.window_id, ...(degraded ? { degraded: true, droppedMessages: outcome.dropped } : {}) }, { log });
     return checkpoint;
   }
 
-  /** Live to observers and listeners; `started` and `aborted` are also durable (`completed` is journaled by the commit), so a channel that was down still sees the id. */
-  private async announce(notice: CompactionNotice, detail: { phase?: CompactionPhase } = {}): Promise<void> {
+  /** In the log for observers, and in the journal for the channels (`completed` is journaled by the commit), so a channel that was down still sees the id. */
+  private async announce(notice: CompactionNotice, detail: { phase?: CompactionPhase; log?: Pick<RunLog, "append"> } = {}): Promise<void> {
+    const { phase, log: runLog } = detail;
     if (notice.state !== "completed") {
-      await this.deps.repository.appendEvent({ conversationId: notice.conversationId, ...(notice.runId ? { runId: notice.runId } : {}), type: `compaction.${notice.state}`, payload: { compaction_id: notice.compactionId, ...detail } });
+      await this.deps.repository.appendEvent({ conversationId: notice.conversationId, ...(notice.runId ? { runId: notice.runId } : {}), type: `compaction.${notice.state}`, payload: { compaction_id: notice.compactionId, ...(phase ? { phase } : {}) } });
     }
-    this.deps.hub.publish(notice.conversationId, {
-      type: `compaction.${notice.state}`, compaction_id: notice.compactionId, ...(notice.runId ? { run_id: notice.runId } : {}),
-      ...(notice.degraded ? { degraded: true, dropped_messages: notice.droppedMessages } : {})
-    });
+    const event = notice.state === "started"
+      ? { type: "compaction.started" as const, conversation_id: notice.conversationId, ...(notice.runId ? { run_id: notice.runId } : {}), compaction_id: notice.compactionId, ...(phase ? { phase } : {}) }
+      : { type: "compaction.ended" as const, conversation_id: notice.conversationId, ...(notice.runId ? { run_id: notice.runId } : {}), compaction_id: notice.compactionId,
+        ...(notice.state === "aborted" ? { aborted: true } : {}), ...(notice.degraded ? { degraded: true } : {}), ...(notice.windowId ? { window_id: notice.windowId } : {}) };
+    if (runLog) await runLog.append(event as StoreEventInput);
+    else this.deps.hub.advanced(notice.conversationId, await this.deps.store.append(event as StoreEventInput));
     // A listener never stops a compaction; its failure is logged, not hidden.
     for (const listener of [...this.listeners]) { try { listener(notice); } catch (error) { log.error("compaction_listener_failed", { compaction_id: notice.compactionId, error: String(error) }); } }
   }

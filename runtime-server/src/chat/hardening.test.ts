@@ -56,7 +56,7 @@ const finishing = (seen: Array<{ input: Turn<object>["input"]; tail: Conversatio
   async run(turn) {
     await turn.state.start();
     seen.push({ input: turn.input, tail: (await store.readConversation(conversationId)).slice(-2) });
-    await turn.state.complete({ message: { role: "assistant", content: "done" }, finishReason: "stop", visibleParts: [] });
+    await turn.state.complete({ message: { role: "assistant", content: "done" }, finishReason: "stop" });
   }
 });
 
@@ -71,7 +71,7 @@ test("a Run whose instance is lost is interrupted, keeps its partial reply, and 
   const first = instance(asker(store, "file_read", "call_1", { path: "a.md" }));
   const run = await startFirst(repository, first);
   await settled(async () => (await repository.getRun(conversationId, run.id))!.status === "waiting_for_tool" && (await repository.listToolCalls(run.id)).length === 1, "first instance waits");
-  await repository.savePartialOutput(run.id, "Let me read a.md");
+  await store.append({ type: "assistant.text", conversation_id: conversationId, run_id: run.id, content: "Let me read a.md" });
 
   const seen: Array<{ input: Turn<object>["input"]; tail: ConversationMessage[] }> = [];
   const second = instance(finishing(seen, store));

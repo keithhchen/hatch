@@ -12,7 +12,6 @@ export function publicRun(run: ConversationRunRecord): Record<string, unknown> {
     ...(run.startedAt ? { started_at: run.startedAt } : {}),
     ...(run.completedAt ? { completed_at: run.completedAt } : {}),
     ...(run.failure ? { failure: run.failure } : {}),
-    steered_messages: run.steeredCount,
-    ...(run.partialOutput ? { partial_output: run.partialOutput } : {})
+    steered_messages: run.steeredCount
   };
 }

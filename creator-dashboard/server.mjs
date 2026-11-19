@@ -1680,7 +1680,7 @@ function decryptOAuthSecret(value, key) {
 }
 
 /** Conversation API: a Product's workers and the Assistant's conversation. Streamed through to Registry as is. */
-const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop|snapshot))?|assistant\/conversation\/(?:messages|events|stop|snapshot|retry|view|timezone|assets(?:\/[^/]+)?))$/;
+const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop|snapshot|log))?|assistant\/conversation\/(?:messages|events|stop|snapshot|log|retry|view|timezone|assets(?:\/[^/]+)?))$/;
 const CONVERSATION_UPLOAD_PATH = /^\/v1\/creator\/assistant\/conversation\/assets$/;
 
 function oauthEndpointScope(request) {

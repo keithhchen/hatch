@@ -35,7 +35,7 @@ export const messageItem = (runId: string, text: string, status: "in_progress" |
   content: [{ type: "output_text", text, annotations: [] }]
 });
 
-const TOOL_STATUS: Record<VisibleConversationToolCall["status"], string> = { requested: "in_progress", completed: "completed", failed: "failed", cancelled: "failed" };
+const TOOL_STATUS: Record<VisibleConversationToolCall["status"], string> = { requested: "in_progress", running: "in_progress", completed: "completed", failed: "failed", cancelled: "failed" };
 const asJson = (value: unknown): string => typeof value === "string" ? value : JSON.stringify(value ?? null);
 
 /** Server tool activity, shown only on request (`include=hatch.tool_calls`). */
@@ -98,7 +98,7 @@ export function statusOf(view: Pick<RunView, "run" | "finishReason" | "approvals
 export function outputOf(view: RunView): Json[] {
   const { run } = view;
   const settled = isTerminal(run.status);
-  const text = view.text || (run.status === "failed" || run.status === "cancelled" || run.status === "interrupted" ? run.partialOutput ?? "" : "");
+  const text = view.text;
   const messageStatus = !settled ? "in_progress" : run.status === "completed" && (view.finishReason ?? "stop") === "stop" ? "completed" : "incomplete";
   return [
     ...(text || (settled && run.status === "completed" && view.finishReason === "content_filter") ? [messageItem(run.id, text, messageStatus)] : []),

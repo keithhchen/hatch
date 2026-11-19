@@ -3,6 +3,7 @@
  * Outside agents see every conversation through this one port and this one message shape.
  */
 import type { RunFailure } from "../factoryAgents/runFailure.js";
+import type { LogQuery, PublicLogEvent } from "../chat/publicLog.js";
 import type { VisibleConversationMessage } from "../store.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 
@@ -38,6 +39,9 @@ export type SendInput = {
   client: ClientAttributes;
 };
 
+/** A page of the conversation's log, the shape every client reads: events oldest first, and the head position they are consistent with. */
+export type LogPage = { events: PublicLogEvent[]; head: number; has_more?: boolean; start?: number; has_more_before?: boolean };
+
 export type ConversationState = "idle" | "running" | "failed";
 /** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. `error` is why the last Run failed. */
 /** `compacting` is set while history is being summarized: inside the running Run, or in the background after a reply. */
@@ -72,6 +76,8 @@ export interface Conversation {
   partial?(): Promise<string>;
   /** The steps the running turn has taken so far, for a page that joins mid-Run. */
   activity?(): Promise<ReplySteps | undefined>;
+  /** The conversation's log: the events after a position, or the latest turns. Nothing for a conversation that keeps none. */
+  log?(query: LogQuery): Promise<LogPage>;
 }
 
 /** An error the API shows as is: status, machine-readable code and a message for people. */

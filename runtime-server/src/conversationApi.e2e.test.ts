@@ -1,3 +1,4 @@
+import { legacyFrames } from "./testSupport.js";
 import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -156,7 +157,7 @@ test("paged history keeps stable complete turns while new messages arrive", asyn
   const page = first.body as { messages: Array<{ id: string; content: string }>; events: unknown[]; has_more: boolean; before_cursor: string };
   assert.equal(page.messages.length, 50);
   assert.equal(page.has_more, true);
-  assert.deepEqual(page.events, []);
+  assert.equal(page.events, undefined, "the page snapshot carries no events: the log is read from /log");
   assert.ok(page.messages.every((message) => message.id));
   await appendTurn(30);
   const older = await json(base, `/v1/conversations/${id}/history?${scope}&before_cursor=${encodeURIComponent(page.before_cursor)}`);
@@ -187,6 +188,54 @@ test("paged history keeps stable complete turns while new messages arrive", asyn
   assert.equal((details.body as { tool: { result: { output: string } } }).tool.result.output.length, 1024 * 1024);
   const deniedTool = await json(base, `/v1/conversations/${foreignId}/tools/run_page_29/large_tool?${scope}`);
   assert.equal(deniedTool.response.status, 404);
+});
+
+test("GET /log pages the conversation's events by position and by turns, bound like history, with the private boundary applied", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-log-http-")));
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const create = async (clientRequestId: string) => (await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { client_request_id: clientRequestId } })).body as { conversation: { id: string } };
+  const id = (await create("log_http")).conversation.id;
+  const durableId = durableConversationId({ creatorId: binding.creator_id, userId: binding.user_id, productId: binding.product_id }, id);
+  for (const turn of [1, 2, 3]) {
+    const run_id = `run_log_${turn}`;
+    await store.append({ type: "conversation.model_message", conversation_id: durableId, run_id, client_message_id: `m-${turn}`, message: { role: "user", content: `question ${turn}` } });
+    await store.append({ type: "assistant.text", conversation_id: durableId, run_id, content: `answer ${turn}`, run_seq: 1 });
+  }
+  await store.append({ type: "tool.call", conversation_id: durableId, run_id: "run_log_3", tool_call_id: "t1", name: "file_read", locality: "server", status: "completed",
+    arguments: { path: "/corpus/secret.md" }, result: { text: "secret" }, run_seq: 2 });
+  await store.append({ type: "skill.activated", conversation_id: durableId, run_id: "run_log_3", name: "review", path: "/corpus/skills/review/SKILL.md", directory: "/corpus/skills/review", content: "private", run_seq: 3 });
+
+  const log = async (query: string) => json(base, `/v1/conversations/${id}/log?${scope}&${query}`);
+  const first = (await log("after=0&limit=3")).body as { events: Array<{ position: number; type: string; id?: string }>; head: number; has_more: boolean };
+  assert.deepEqual(first.events.map((event) => event.type), ["user.message", "assistant.text", "user.message"]);
+  assert.equal(first.has_more, true);
+  assert.equal(first.events[0]!.id, "m-1");
+  const rest = (await log(`after=${first.events.at(-1)!.position}&limit=50`)).body as { events: Array<Record<string, unknown>>; head: number; has_more: boolean };
+  assert.equal(rest.has_more, false);
+  assert.equal(rest.head, first.head);
+  const tool = rest.events.find((event) => event.type === "tool.call")!;
+  assert.deepEqual([tool.arguments, tool.result], [{}, { private_result_redacted: true }], "the corpus's files are not shown to the buyer");
+  const skill = rest.events.find((event) => event.type === "skill.activated")!;
+  assert.match(String(skill.path), /^agent:\/\/.*protected-skill/);
+  assert.equal("content" in skill, false);
+
+  const turns = (await log("turns=2")).body as { events: Array<{ run_id?: string }>; start: number; has_more_before: boolean; head: number };
+  assert.deepEqual([...new Set(turns.events.map((event) => event.run_id))], ["run_log_2", "run_log_3"]);
+  assert.equal(turns.has_more_before, true);
+  const before = (await log(`turns=2&before=${turns.start}`)).body as { events: Array<{ run_id?: string }>; has_more_before: boolean };
+  assert.deepEqual([...new Set(before.events.map((event) => event.run_id))], ["run_log_1"]);
+  assert.equal(before.has_more_before, false);
+
+  assert.equal((await log("turns=0")).response.status, 400);
+  assert.equal((await log("turns=2&after=1")).response.status, 400);
+  assert.equal((await log("limit=9999")).response.status, 400);
+  assert.equal((await log("before=3")).response.status, 400);
+  const foreign = (await create("log_http_other")).conversation.id;
+  assert.equal((await json(base, `/v1/conversations/${foreign}/log?${scope}&after=0`)).response.status, 200, "another conversation of the same account reads only its own log");
+  assert.deepEqual(((await json(base, `/v1/conversations/${foreign}/log?${scope}&after=0`)).body as { events: unknown[] }).events, []);
+  assert.equal((await json(base, `/v1/conversations/conv_unknown/log?${scope}&after=0`)).response.status, 404);
 });
 
 test("Conversation snapshot preserves attachment references and serves only bound assets", async () => {
@@ -519,7 +568,7 @@ test("a restart mid-Run: the swept Run is answered again once, silently; the mod
   assert.deepEqual(visible.map((message) => [message.role, message.content]), [["user", "hello"], ["assistant", "whole answer"]]);
 });
 
-test("the buyer's snapshot in the gap after a restart: the reply is retrying with its partial text once; then the retry's Run is active; with the budget spent nothing is retrying", async () => {
+test("the buyer's page in the gap after a restart: the interrupted reply keeps its partial text once; then the retry's Run is active; with the budget spent no fourth Run starts", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-retrying-snapshot-")));
   const repository = new InMemoryConversationRepository(store.localAuthority);
   await repository.initialize();
@@ -542,22 +591,18 @@ test("the buyer's snapshot in the gap after a restart: the reply is retrying wit
     const record = (await repository.getConversation(conversationId))!;
     return { conversationId, record, prefix: `/v1/conversations/${encodeURIComponent(publicId)}` };
   };
-  const snapshot = async (prefix: string) => (await json(base, `${prefix}/snapshot?${scope}&view=page`)).body as { runs: Array<{ id: string; status: string; retrying?: boolean; partial_output?: string }>; messages: Array<{ role: string; content?: string }> };
+  const snapshot = async (prefix: string) => (await json(base, `${prefix}/snapshot?${scope}&view=page`)).body as { runs: Array<{ id: string; status: string }>; messages: Array<{ role: string; content?: string }> };
   const interrupt = async (c: { conversationId: string; record: Awaited<ReturnType<typeof repository.getConversation>> & object }, runId: string, key: string, retry: boolean) => {
     if (retry) await repository.acceptRetry({ binding: c.record, run: { id: runId, conversationId: c.conversationId, clientMessageId: key, corpusDigest: c.record.corpusDigest, executorId: "executor_gone" } });
     else await repository.acceptSubmission({ binding: c.record, run: { id: runId, conversationId: c.conversationId, clientMessageId: key, inputDigest: "d-1", corpusDigest: c.record.corpusDigest, executorId: "executor_gone" }, canonicalUser: { role: "user", content: "hello" } });
-    await repository.savePartialOutput(runId, "The first half");
+    await store.append({ type: "assistant.text", conversation_id: c.conversationId, run_id: runId, content: "The first half" });
     await repository.endRun(runId, { status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted" } });
   };
 
   // The gap: the Run is ended, its retry has not started.
   const gap = await seed("gap_target");
   await interrupt(gap, "run_gap_1", "m-1", false);
-  await store.append({ type: "conversation.model_message", conversation_id: gap.conversationId, run_id: "run_gap_1", message: { role: "assistant", content: "The first half" } });
   const inGap = await snapshot(gap.prefix);
-  const reported = inGap.runs.find((run) => run.id === "run_gap_1");
-  assert.equal(reported?.retrying, true);
-  assert.equal(reported?.partial_output, undefined, "the partial text is not sent a second time");
   assert.equal(inGap.messages.filter((message) => message.content === "The first half").length, 1);
 
   // The retry starts (held by the gate): its Run is the active one and nothing is retrying.
@@ -565,7 +610,6 @@ test("the buyer's snapshot in the gap after a restart: the reply is retrying wit
   const started = await snapshot(gap.prefix);
   const active = started.runs.find((run) => ["queued", "running"].includes(run.status));
   assert.ok(active && active.id !== "run_gap_1", "the retry's Run is active");
-  assert.ok(started.runs.every((run) => !run.retrying));
   release();
 
   // The budget is spent: two retries were interrupted too. Nothing is retrying and nothing starts.
@@ -575,7 +619,7 @@ test("the buyer's snapshot in the gap after a restart: the reply is retrying wit
   await interrupt(spent, "run_spent_3", "restart-retry:run_spent_2", true);
   await runtime.retryInterrupted();
   const exhausted = await snapshot(spent.prefix);
-  assert.ok(exhausted.runs.every((run) => !run.retrying));
+  assert.ok(exhausted.runs.every((run) => run.status === "interrupted"));
   assert.equal((await repository.listRuns(spent.conversationId)).length, 3, "no fourth Run");
 });
 
@@ -703,7 +747,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
   const base = await listen(runtime.server);
   const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
   const messages: OutboundMessage[] = [];
-  socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
+  socket.on("message", (value) => messages.push(...legacyFrames(String(value))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -724,6 +768,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch." }
   }));
+  const waitUntilTwoAccepted = () => waitForCondition(() => messages.filter((message) => message.type === "message.accepted" && message.run_id === "run_transport_first").length === 2);
   await waitForSocket(messages, (message) => message.type === "tool_call.delta" && message.run_id === "run_transport_first");
   const acceptedIndex = messages.findIndex((message) => message.type === "message.accepted"
     && message.run_id === "run_transport_first" && message.client_message_id === "message_stable_once");
@@ -743,10 +788,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch." }
   }));
-  const replay = await waitForSocket(messages, (message) => (
-    message.type === "turn.state" && message.run_id === "run_transport_first" && message.reason === "Idempotent client message replay"
-  ));
-  assert.equal(replay.type, "turn.state");
+  await waitUntilTwoAccepted();
   assert.ok(!messages.some((message) => message.type === "turn.failed" && message.run_id === "run_transport_retry"));
   assert.ok(!messages.some((message) => message.type === "tool_call.delta" && message.run_id === "run_transport_retry"));
   assert.equal(messages.filter((message) => message.type === "message.accepted"
@@ -958,8 +1000,9 @@ test("a provider overflow is answered by compacting and continuing, once, and th
     await waitForSocket(messages, (message) => message.type === "turn.completed");
     assert.equal(attempts, 2);
     assert.deepEqual(summarized, ["asked"]);
-    const compacted = messages.find((message) => message.type === "session.compacted") as { phase?: string; compaction_id?: string } | undefined;
-    assert.equal(compacted?.phase, "overflow_recovery");
+    const compacted = (messages.find((message) => (message as { event?: { type?: string } }).event?.type === "compaction.started") as unknown as { event: { phase?: string; compaction_id?: string } } | undefined)?.event;
+    assert.ok(compacted, "the compaction is in the log");
+    assert.ok(messages.some((message) => (message as { event?: { type?: string; compaction_id?: string } }).event?.type === "compaction.ended"), "the compaction is closed in the log");
     assert.match(compacted?.compaction_id ?? "", /^cmp_/);
     assert.equal(messages.some((message) => message.type === "turn.failed"), false);
   } finally { socket.close(); }
@@ -986,8 +1029,8 @@ test("Runtime startup ends a Run whose owner's lease lapsed as interrupted, keep
   const reading = await carried("reading");
   const waiting = await carried("waiting");
   // The dead process had streamed part of a reply to the first Run, and asked a local tool in the second.
-  await repository.savePartialOutput(reading.run.id, "partial reading");
   const asked = new RuntimeStore(dataDir);
+  await asked.append({ type: "assistant.text", conversation_id: reading.conversation.id, run_id: reading.run.id, content: "partial reading" });
   await asked.append({ type: "conversation.model_message", conversation_id: waiting.conversation.id, run_id: waiting.run.id,
     message: { role: "assistant", content: null, tool_calls: [{ id: "call_lost", type: "function", function: { name: "file_search", arguments: "{}" } }] } });
   await repository.requestToolCall({ runId: waiting.run.id, toolCallId: "call_lost", name: "file_search", arguments: { query: "x" }, approval: "none",
@@ -1143,7 +1186,7 @@ test("a message sent during a Run joins it, from any client, and is idempotent p
   second.close();
 });
 
-test("WebSocket subscribe: stream false gets durable events only, stream true also the live deltas, same cursors", async () => {
+test("WebSocket subscribe: two observers get the same log events from a position, and resuming from the last one replays nothing", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-subscribe-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   await repository.initialize();
@@ -1162,35 +1205,31 @@ test("WebSocket subscribe: stream false gets durable events only, stream true al
   });
   const base = await listen(runtime.server);
   const starterMessages: OutboundMessage[] = [];
-  const quietMessages: OutboundMessage[] = [];
-  const loudMessages: OutboundMessage[] = [];
+  const firstMessages: OutboundMessage[] = [];
+  const secondMessages: OutboundMessage[] = [];
   const starter = await openRuntimeSocket(base, conversationId, starterMessages);
-  const quiet = await openRuntimeSocket(base, conversationId, quietMessages);
-  const loud = await openRuntimeSocket(base, conversationId, loudMessages);
-  quiet.send(JSON.stringify({ type: "conversation.subscribe", conversation_id: conversationId, stream: false, after_cursor: 0 }));
-  loud.send(JSON.stringify({ type: "conversation.subscribe", conversation_id: conversationId, stream: true, after_cursor: 0 }));
+  const first = await openRuntimeSocket(base, conversationId, firstMessages);
+  const second = await openRuntimeSocket(base, conversationId, secondMessages);
+  first.send(JSON.stringify({ type: "conversation.subscribe", conversation_id: conversationId, after: 0 }));
+  second.send(JSON.stringify({ type: "conversation.subscribe", conversation_id: conversationId, after: 0 }));
   await new Promise((resolve) => setTimeout(resolve, 100));
   starter.send(JSON.stringify({
     type: "client.message", run_id: "run_subscribe", client_message_id: "message_subscribe", conversation_id: conversationId,
     message: { role: "user", content: "Say something." }
   }));
-  const done = (messages: OutboundMessage[]) => messages.some((message) => (message as { journal_type?: string; payload?: { status?: string } }).journal_type === "run.state"
-    && (message as { payload?: { status?: string } }).payload?.status === "completed");
-  await waitForCondition(async () => done(quietMessages) && done(loudMessages));
-  const kinds = (messages: OutboundMessage[]) => messages.map((message) => message.type);
-  assert.ok(!kinds(quietMessages).includes("assistant.delta"));
-  assert.ok(kinds(loudMessages).includes("assistant.delta"));
-  const cursors = (messages: OutboundMessage[]) => messages.flatMap((message) => message.type as string === "journal.event" ? [(message as { cursor?: number }).cursor] : []);
-  assert.deepEqual(cursors(quietMessages), cursors(loudMessages));
-  assert.ok(cursors(quietMessages).length >= 4);
-  // Resuming from the last cursor replays nothing already seen.
-  const last = cursors(quietMessages).at(-1)!;
+  const logged = (messages: OutboundMessage[]) => messages.flatMap((message) => message.type as string === "log.event" ? [(message as unknown as { event: { position: number; type: string; status?: string } }).event] : []);
+  const done = (messages: OutboundMessage[]) => logged(messages).some((event) => event.type === "run.state" && event.status === "completed");
+  await waitForCondition(async () => done(firstMessages) && done(secondMessages));
+  assert.deepEqual(logged(firstMessages), logged(secondMessages));
+  assert.ok(logged(firstMessages).some((event) => event.type === "assistant.text"));
+  const positions = logged(firstMessages).map((event) => event.position);
+  assert.deepEqual(positions, [...new Set(positions)].sort((a, b) => a - b), "in order, once each");
   const resumedMessages: OutboundMessage[] = [];
   const resumed = await openRuntimeSocket(base, conversationId, resumedMessages);
-  resumed.send(JSON.stringify({ type: "conversation.subscribe", conversation_id: conversationId, stream: false, after_cursor: last }));
+  resumed.send(JSON.stringify({ type: "conversation.subscribe", conversation_id: conversationId, after: positions.at(-1)! }));
   await new Promise((resolve) => setTimeout(resolve, 150));
-  assert.deepEqual(cursors(resumedMessages), []);
-  for (const socket of [starter, quiet, loud, resumed]) socket.close();
+  assert.deepEqual(logged(resumedMessages), []);
+  for (const socket of [starter, first, second, resumed]) socket.close();
 });
 
 test("a WebSocket image goes through the shared pipeline: a failed submit leaves no link, a retry reuses the same asset, and HTTP finds it too", async () => {
@@ -1238,7 +1277,7 @@ test("a WebSocket image goes through the shared pipeline: a failed submit leaves
     assert.equal(storedAssets(), 1, "the retry reuses it");
     assert.equal((await chatAssets.attachments(conversation)).length, 1);
     socket.send(JSON.stringify({ ...request, run_id: "image-retry" }));
-    await waitForSocket(messages, (message) => message.type === "turn.state" && message.reason === "Idempotent client message replay");
+    await waitForCondition(() => messages.filter((message) => message.type === "message.accepted").length === 2);
     assert.equal(executions, 1);
     assert.equal(storedAssets(), 1);
     assert.equal((await chatAssets.attachments(conversation)).length, 1);
@@ -1334,8 +1373,7 @@ for (const boundary of ["before", "after"] as const) {
         if (accepted.type !== "message.accepted") throw new Error("Expected acceptance receipt");
         assert.equal(accepted.run_id, boundary === "after" ? "first" : "retry");
         if (boundary === "after") {
-          await waitForSocket(retryMessages, (message) => message.type === "turn.state" && message.reason === "Idempotent client message replay");
-          assert.equal(executions, 1);
+          assert.equal(executions, 1, "the acceptance was replayed; nothing ran again");
         } else {
           await waitForSocket(retryMessages, (message) => message.type === "turn.completed");
           assert.equal(executions, 1);
@@ -1385,7 +1423,7 @@ async function waitForSocket(
 
 async function openRuntimeSocket(base: string, conversationId: string, messages: OutboundMessage[], localTools: string[] = []): Promise<WebSocket> {
   const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
-  socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
+  socket.on("message", (value) => messages.push(...legacyFrames(String(value))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);

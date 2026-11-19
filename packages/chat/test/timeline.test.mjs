@@ -1,158 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ChatTimeline, foldStepOnlyMessages, groupTimelineEntries, PendingSubmission, withoutRepeatedSteps } from "../src/domain/timeline.js";
-
-test("a Run's steps are shown once, on the last assistant message it passed through", () => {
-  const tool = { tool_call_id: "call-1", name: "search_web", status: "completed" };
-  const messages = [
-    { role: "user", run_id: "r", content: "查" },
-    { role: "assistant", run_id: "r", content: "", tool_calls: [tool] },
-    { role: "assistant", run_id: "r", content: "好", tool_calls: [tool], parts: [{ type: "tool_call", tool_call_id: "call-1" }, { type: "text", start: 0, end: 1 }] }
-  ];
-  const pills = withoutRepeatedSteps(messages).filter(message => message.role === "assistant")
-    .flatMap(message => groupTimelineEntries(ChatTimeline.fromHistory(message)).filter(entry => entry.kind === "activity_group"));
-  assert.equal(pills.length, 1);
-  assert.equal(withoutRepeatedSteps(messages)[2].tool_calls.length, 1, "the last one keeps them");
-});
-
-test("live reasoning then text is one thinking step that holds its text, and a reload shows the same", async () => {
-  const { RuntimeEventReducer } = await import("../src/domain/runtime-events.js");
-  const reducer = new RuntimeEventReducer();
-  const live = new ChatTimeline();
-  for (const delta of [{ kind: "thinking_start", contentIndex: 0 }, { kind: "thinking_delta", contentIndex: 0, delta: "先想" }, { kind: "thinking_delta", contentIndex: 0, delta: "一下" }, { kind: "thinking_end", contentIndex: 0, content: "先想一下" }]) {
-    reducer.reduce(live, { type: "assistant.delta", run_id: "run", delta }, "run");
-  }
-  live.appendText("好的");
-  const groups = groupTimelineEntries(live.snapshot());
-  assert.deepEqual(groups.map(entry => entry.kind), ["activity_group", "text"], "one indicator, then the words");
-  assert.deepEqual(groups[0].entries.map(entry => [entry.kind, entry.content, entry.streaming]), [["thinking", "先想一下", false]], "it expands to the text");
-
-  const saved = ChatTimeline.fromHistory({ run_id: "run", content: "好的", parts: [{ type: "thinking", contentIndex: 0, content: "先想一下" }, { type: "text", start: 0, end: 2 }] });
-  assert.deepEqual(groupTimelineEntries(saved).map(entry => entry.kind), ["activity_group", "text"]);
-  assert.equal(groupTimelineEntries(saved)[0].entries[0].content, "先想一下");
-});
-
-test("one run's steps are one pill, live and after the saved reply replaces the live one", () => {
-  const pills = entries => groupTimelineEntries(entries.filter(entry => entry.kind !== "thinking")).filter(entry => entry.kind === "activity_group");
-  const call = { type: "tool_call.delta", run_id: "run", tool_call_id: "call-1", name: "search_web", activity_message: "查资料" };
-
-  const live = new ChatTimeline();
-  live.upsertTool({ ...call, status: "requested" });
-  live.upsertTool({ ...call, status: "failed" });
-  live.appendText("搜索暂时连不上");
-  assert.equal(pills(live.snapshot()).length, 1);
-
-  const saved = ChatTimeline.fromHistory({
-    run_id: "run", content: "搜索暂时连不上",
-    parts: [{ type: "thinking", contentIndex: 0, content: "a" }, { type: "tool_call", tool_call_id: "call-1" }, { type: "thinking", contentIndex: 0, content: "b" }, { type: "text", start: 0, end: 7 }],
-    tool_calls: [{ tool_call_id: "call-1", name: "search_web", status: "failed", activity_message: "查资料" }]
-  });
-  assert.equal(pills(saved).length, 1);
-  assert.deepEqual(saved.filter(entry => entry.kind !== "thinking").map(entry => entry.kind), live.snapshot().map(entry => entry.kind), "a reload shows what the live view showed");
-  assert.equal(groupTimelineEntries([]).length, 0, "no steps, no pill");
-});
-
-test("Web Chat timeline keeps text, thinking, and tool activity in event order", () => {
-  const timeline = new ChatTimeline();
-  timeline.appendText("A");
-  timeline.appendText("B");
-  timeline.updateThinking("正在查找资料");
-  timeline.upsertTool({ type: "tool_call.delta", run_id: "run", tool_call_id: "call", name: "web_search", status: "requested" });
-  timeline.updateThinking("正在整理结果");
-  timeline.appendText("C");
-
-  assert.deepEqual(timeline.snapshot().map(({ kind, content, status }) => ({
-    kind,
-    content: kind === "tool" ? content.name : content,
-    status
-  })), [
-    { kind: "text", content: "AB", status: undefined },
-    { kind: "thinking", content: "正在查找资料", status: undefined },
-    { kind: "tool", content: "web_search", status: "requested" },
-    { kind: "thinking", content: "正在整理结果", status: undefined },
-    { kind: "text", content: "C", status: undefined }
-  ]);
-});
-
-test("Web Chat creates a stable assistant projection before either run type streams", () => {
-  assert.deepEqual(ChatTimeline.streamingAssistantMessage("run-1", "2026-10-03T00:00:00.000Z"), {
-    id: "stream-run-1",
-    renderKey: "run-1-assistant",
-    run_id: "run-1",
-    role: "assistant",
-    content: "",
-    timestamp: "2026-10-03T00:00:00.000Z",
-    transient: true,
-    timeline: []
-  });
-});
-
-test("Web Chat tool updates replace the existing timeline item in place", () => {
-  const timeline = new ChatTimeline();
-  timeline.updateThinking("准备调用");
-  timeline.upsertTool({ type: "tool_call.delta", run_id: "run", tool_call_id: "call", name: "file_search", status: "requested", arguments: { query: "docs" } });
-  timeline.updateThinking("等待结果");
-  timeline.upsertTool({ type: "tool_call.delta", run_id: "run", tool_call_id: "call", name: "file_search", status: "completed", result: { matches: ["a", "b"] } });
-
-  assert.deepEqual(timeline.snapshot().map(entry => entry.kind), ["thinking", "tool", "thinking"]);
-  assert.equal(timeline.snapshot()[1].status, "completed");
-  assert.deepEqual(timeline.snapshot()[1].content.arguments, { query: "docs" });
-  assert.deepEqual(timeline.snapshot()[1].content.result, { matches: ["a", "b"] });
-});
-
-test("Web Chat does not duplicate terminal tool events as thinking entries", () => {
-  const timeline = new ChatTimeline();
-  timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" });
-  timeline.updateRuntimeStatus("Tool web.search completed.");
-
-  assert.deepEqual(timeline.snapshot().map(entry => [entry.kind, entry.status]), [["tool", "completed"]]);
-});
-
-test("Web Chat does not duplicate tool-start events as thinking entries", () => {
-  const timeline = new ChatTimeline();
-  timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "requested" });
-  timeline.updateRuntimeStatus("Calling tool web.search.");
-
-  assert.deepEqual(timeline.snapshot().map(entry => [entry.kind, entry.status]), [["tool", "requested"]]);
-});
-
-test("Web Chat suppresses the compatibility thinking status when typed thinking events are available", () => {
-  const timeline = new ChatTimeline();
-  timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" });
-  timeline.updateRuntimeStatus("Thinking through the product.");
-
-  assert.deepEqual(timeline.snapshot().map(entry => entry.kind), ["tool"]);
-});
-
-test("Web Chat thinking deltas update one indexed block and history restores its final content", () => {
-  const timeline = new ChatTimeline();
-  timeline.startThinking(4);
-  const thinkingId = timeline.snapshot()[0].id;
-  timeline.appendThinking(4, "first ");
-  timeline.appendThinking(4, "second");
-  timeline.finishThinking(4, "first second");
-
-  assert.deepEqual(timeline.snapshot(), [{
-    kind: "thinking",
-    id: thinkingId,
-    contentIndex: 4,
-    title: "thinking",
-    content: "first second",
-    streaming: false
-  }]);
-  assert.deepEqual(ChatTimeline.fromHistory({
-    run_id: "run",
-    role: "assistant",
-    content: "Done",
-    parts: [
-      { type: "thinking", contentIndex: 4, content: "first second" },
-      { type: "text", start: 0, end: 4 }
-    ]
-  }).map(({ kind, contentIndex, content }) => ({ kind, contentIndex, content })), [
-    { kind: "thinking", contentIndex: 4, content: "first second" },
-    { kind: "text", contentIndex: undefined, content: "Done" }
-  ]);
-});
+import { foldStepOnlyMessages, groupTimelineEntries, PendingSubmission, toolEntry } from "../src/domain/timeline.js";
 
 test("Web Chat puts every thinking or tool block in its own activity modal group", () => {
   const thinking = { kind: "thinking", id: "thinking-1", title: "thinking", content: "Reviewing" };
@@ -175,23 +23,12 @@ test("Web Chat puts every thinking or tool block in its own activity modal group
   ]);
 });
 
-test("Web Chat keeps a streamed tool card key when the final snapshot rebuilds its timeline", () => {
-  const timeline = new ChatTimeline();
-  timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "requested" });
-  const streamedToolKey = timeline.snapshot()[0].id;
-  timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" });
-  timeline.updateRuntimeStatus("Tool web.search completed.");
-
-  const canonical = ChatTimeline.fromHistory({
-    run_id: "run",
-    role: "assistant",
-    content: "Done.",
-    parts: [{ type: "tool_call", tool_call_id: "call" }, { type: "text", start: 0, end: 5 }],
-    tool_calls: [{ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" }]
-  });
-
-  assert.equal(streamedToolKey, "tool-call");
-  assert.equal(canonical.find(entry => entry.kind === "tool").id, streamedToolKey);
+test("a tool entry keeps its key and never goes backwards", () => {
+  const started = toolEntry({ run_id: "run", tool_call_id: "call", name: "web.search", status: "requested" });
+  const done = toolEntry({ run_id: "run", tool_call_id: "call", status: "completed", result: { ok: true } }, started);
+  const late = toolEntry({ run_id: "run", tool_call_id: "call", status: "running" }, done);
+  assert.equal(started.id, "tool-call");
+  assert.deepEqual([done.id, done.status, done.content.name, late.status], ["tool-call", "completed", "web.search", "completed"]);
 });
 
 test("Web Chat restores an optimistic submission payload from its submission record", () => {
@@ -205,57 +42,17 @@ test("Web Chat restores an optimistic submission payload from its submission rec
   });
 
   assert.equal(submission.optimisticMessage().content, "hello");
-  assert.equal(submission.optimisticMessage().id, "optimistic-message");
+  assert.equal(submission.optimisticMessage().id, "message");
   assert.equal(submission.optimisticMessage().optimistic, true);
 });
 
-test("Web Chat history preserves the stored text and tool-call order", () => {
-  const timeline = ChatTimeline.fromHistory({
-    run_id: "run",
-    role: "assistant",
-    content: "beforeafter",
-    parts: [
-      { type: "text", start: 0, end: 6 },
-      { type: "tool_call", tool_call_id: "call" },
-      { type: "text", start: 6, end: 11 }
-    ],
-    tool_calls: [{ run_id: "run", tool_call_id: "call", name: "web_search", status: "completed", arguments: {}, result: { matches: [] } }]
-  });
-
-  assert.deepEqual(timeline.map(entry => entry.kind), ["text", "tool", "text"]);
-  assert.equal(timeline[0].content, "before");
-  assert.equal(timeline[2].content, "after");
-});
-
-test("steps no text interrupts are one row across replies: steps then a reply that opens with steps, and text-then-steps then steps", () => {
-  const step = id => ({ role: "assistant", run_id: id, content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
-  const stepsThenText = id => ({ role: "assistant", run_id: id, content: "answer", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }, { type: "text", start: 0, end: 6 }] });
-  const textThenSteps = id => ({ role: "assistant", run_id: id, content: "let me look", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "text", start: 0, end: 11 }, { type: "tool_call", tool_call_id: id }] });
-  const text = { role: "assistant", run_id: "t", content: "hello" };
+test("replies of only steps are one steps row; text and the user break a run", () => {
+  const entry = (kind, id) => ({ kind, id, content: kind === "text" ? "words" : {}, status: "completed" });
+  const reply = (run, ...kinds) => ({ role: "assistant", run_id: run, timeline: kinds.map((kind, index) => entry(kind, `${run}-${index}`)) });
   const user = { role: "user", run_id: "u", content: "hi" };
-  const rows = messages => foldStepOnlyMessages(messages).map(message => groupTimelineEntries([message, ...(message.foldedMessages ?? [])].flatMap(part => ChatTimeline.fromHistory(part))).map(entry => entry.kind));
-  assert.deepEqual(rows([user, step("a"), step("b"), stepsThenText("c")]), [["text"], ["activity_group", "text"]], "one steps row, then the answer");
-  assert.deepEqual(rows([textThenSteps("a"), step("b")]), [["text", "activity_group"]], "the steps after the text and the next reply's steps are one row");
-  assert.deepEqual(rows([text, step("b")]), [["text"], ["activity_group"]], "text ends a stretch: nothing to join");
-  assert.deepEqual(rows([step("a"), user, step("b")]), [["activity_group"], ["text"], ["activity_group"]], "the user breaks it");
-});
-
-test("a live reply that opens with steps joins the saved steps before it; one that opens with text does not", () => {
-  const step = id => ({ role: "assistant", run_id: "r", content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
-  const live = first => ({ role: "assistant", run_id: "r", transient: true, timeline: [first] });
-  const joined = foldStepOnlyMessages([step("a"), live({ id: "t1", kind: "thinking", content: "hmm", streaming: true })]);
-  assert.equal(joined.length, 1);
-  assert.equal(joined[0].liveTail.transient, true);
-  const apart = foldStepOnlyMessages([step("a"), live({ id: "x1", kind: "text", content: "Here is" })]);
-  assert.equal(apart.length, 2, "text after the steps is a new row");
-});
-
-test("consecutive replies of only steps fold into the first; text and the user break a run", () => {
-  const step = id => ({ role: "assistant", run_id: id, content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
-  const text = { role: "assistant", run_id: "t", content: "hello" };
-  const user = { role: "user", run_id: "u", content: "hi" };
-  const folded = foldStepOnlyMessages([user, step("a"), step("b"), step("c"), text, step("d"), user, step("e")]);
-  assert.deepEqual(folded.map(message => message.run_id), ["u", "a", "t", "d", "u", "e"]);
-  assert.equal(folded[1].foldedMessages.length, 2);
-  assert.equal(folded[3].foldedMessages, undefined);
+  const rows = messages => foldStepOnlyMessages(messages).map(message => message.role === "user" ? "user" : groupTimelineEntries(message.timeline).map(item => item.kind).join("+"));
+  assert.deepEqual(rows([user, reply("a", "tool"), reply("b", "tool"), reply("c", "tool", "text")]), ["user", "activity_group+text"], "one steps row, then the answer");
+  assert.deepEqual(rows([reply("a", "text", "tool"), reply("b", "tool")]), ["text+activity_group"], "the steps after the text and the next reply's steps are one row");
+  assert.deepEqual(rows([reply("t", "text"), reply("b", "tool")]), ["text", "activity_group"], "text ends a stretch: nothing to join");
+  assert.deepEqual(rows([reply("a", "tool"), user, reply("b", "tool")]), ["activity_group", "user", "activity_group"], "the user breaks it");
 });

@@ -49,7 +49,7 @@ const binding = { ownerAccountId: "buyer", creatorId: "creator", agentId: "agent
 async function chat(analytics: RecordingAnalytics | typeof throwingAnalytics, owner = "buyer") {
   const repository = new InMemoryConversationRepository(new LocalRuntimeAuthority());
   const { conversation } = await repository.createConversation({ ...binding, ownerAccountId: owner, id: "conv", publicId: "pub" });
-  const hub = new RunEventHub();
+  const hub = new RunEventHub(undefined, async () => 0);
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: () => undefined, executorId: "exec", holdsConversation: () => false, steered: () => undefined },

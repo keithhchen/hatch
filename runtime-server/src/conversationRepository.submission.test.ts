@@ -60,7 +60,7 @@ for (const backend of ["memory", "file"] as const) {
       if (root) {
         const db = new DatabaseSync(path.join(root, "runtime-commits-v2.sqlite"));
         const accept = db.prepare("SELECT payload FROM commits WHERE json_extract(payload, '$.kind') = 'accept'").all();
-        assert.equal(accept.length, 1);
+        assert.equal(accept.length, 2, "the message that started the Run, and the one that joined it");
         const record = JSON.parse(String(accept[0]!.payload));
         assert.equal(record.runs.length, 1);
         assert.equal(record.events.length, 2);
@@ -216,8 +216,10 @@ test("real PG: shared quota race admits one conversation; binding, archives and 
   await repository.updateConversation(id, { status: "archived" });
   await assert.rejects(repository.acceptSubmission(input), { code: "conversation_archived" });
   await repository.updateConversation(id, { status: "active" });
-  await repository.createRun(input.run);
-  await repository.endRun("run", endingOf("interrupted", "historical orphan"));
+  // A Run from before submissions were accepted atomically: a repository without the log store leaves no rows of it.
+  const historical = new PostgresConversationRepository(pool);
+  await historical.createRun(input.run);
+  await historical.endRun("run", endingOf("interrupted", "historical orphan"));
   await assert.rejects(repository.acceptSubmission(input), { code: "submission_not_accepted" });
   assert.equal(await store.readSubmissionReceipt(id, "run"), undefined);
   assert.deepEqual(await store.readEvents(), []);
@@ -325,6 +327,6 @@ test("real PG: concurrent same ID, lost COMMIT acknowledgement and fresh pool re
     assert.equal(new Set(accepts.map((row) => row.run.id)).size, 1);
     assert.equal((await reopened.listRuns(id)).length, 2);
     assert.equal((await reopenedStore.readConversation(id)).length, 2);
-    assert.ok((await pool.query("SELECT event_count FROM hatch_conversation_usage")).rows.every((row) => Number(row.event_count) === 4));
+    assert.ok((await pool.query("SELECT event_count FROM hatch_conversation_usage")).rows.every((row) => Number(row.event_count) === 5), "accepted (2), interrupted (1), accepted again (2)");
   } finally { await reopenedPool.end(); }
 }));

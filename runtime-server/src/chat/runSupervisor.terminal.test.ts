@@ -15,10 +15,11 @@ const message = (n: number, lease?: string): AcceptSubmissionInput => ({
 
 async function setup(executor: RunExecutor) {
   const repository = new InMemoryConversationRepository();
-  const hub = new RunEventHub();
+  let head = 0;
+  const hub = new RunEventHub(undefined, async () => ++head);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "supervisor-terminal" });
-  const heard: Array<Record<string, unknown>> = [];
-  hub.subscribe(conversationId, { push: (event) => { heard.push(event); } });
+  const heard: number[] = [];
+  hub.subscribe(conversationId, (position) => { heard.push(position); });
   const supervisor = (executorId: string) => new RunSupervisor(repository, executor, async () => undefined, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
   return { repository, supervisor, heard };
 }
@@ -36,8 +37,7 @@ test("a sweep that interrupts an orphan writes the journal's terminal and tells 
   await supervisor("a").sweep();
   const terminal = await terminalOf(repository, orphan.run.id);
   assert.deepEqual([terminal?.payload.status, (terminal?.payload.failure as { code: string }).code], ["interrupted", "run_interrupted"]);
-  assert.deepEqual(heard.map((event) => event.type), ["turn.failed", "turn.state"]);
-  assert.equal((heard[1] as { status: string }).status, "interrupted");
+  assert.equal(heard.length, 1, "observers are told once, after the ending committed");
 });
 
 test("an executor that throws ends its Run failed, in the journal and for observers, in the one failure shape", async () => {
@@ -47,8 +47,8 @@ test("an executor that throws ends its Run failed, in the journal and for observ
   await settled(async () => (await repository.getRun(conversationId, started.run.id))!.status === "failed");
   const terminal = await terminalOf(repository, started.run.id);
   assert.equal(terminal?.payload.status, "failed");
-  assert.deepEqual(heard.map((event) => event.type), ["turn.failed", "turn.state"]);
-  const failure = (heard[0] as { error: { code: string; message: string; reference?: string } }).error;
+  assert.equal(heard.length, 1);
+  const failure = terminal?.payload.failure as { code: string; message: string; reference?: string };
   assert.deepEqual([failure.code, failure.message, typeof failure.reference], ["run_failed", "the executor broke", "string"]);
   assert.deepEqual((await repository.getRun(conversationId, started.run.id))!.failure, failure);
 });
@@ -59,6 +59,6 @@ test("an explicit stop tells observers the Run was cancelled, once", async () =>
   const instance = supervisor("dead");
   instance.adopt(started.run);
   assert.equal(await instance.cancel(conversationId, started.run.id, "stop"), true);
-  assert.deepEqual(heard.map((event) => event.type), ["turn.failed", "turn.state"]);
-  assert.equal((heard[0] as { error: { code: string } }).error.code, "run_cancelled");
+  assert.equal(heard.length, 1);
+  assert.equal(((await terminalOf(repository, started.run.id))?.payload.failure as { code: string }).code, "run_cancelled");
 });

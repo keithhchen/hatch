@@ -4,6 +4,7 @@ import { PostgresConversationRepository, ConversationRepositoryError, assertConv
   submissionEvents, type AcceptSubmissionInput, type AcceptedSubmission, type AlsoCommit } from "./conversationRepository.js";
 import type { ConversationMessage, PersistedContextAttachment } from "./protocol.js";
 import { RunFenced, type RunHold } from "./runHold.js";
+import { LOG_PAYLOAD_SQL, LOG_ROW_SQL, type LegacyRunState, type LogRow } from "./chat/publicLog.js";
 import { historyBoundary, historyCursor, historyLimit, historyMessages,
   type ConversationHistoryOptions, type ConversationHistoryPage } from "./conversationHistory.js";
 import {
@@ -11,9 +12,12 @@ import {
   normalizePersistedStoreEvent,
   persistedMessageId,
   RuntimeStore,
+  type RunStatus,
   type SubmissionReceipt,
   type StoreEvent,
+  type StoredFailure,
   type VisibleConversationMessage,
+  type VisibleConversationPart,
   type VisibleConversationSkillEvent,
   type VisibleConversationSkillRun,
   type VisibleConversationToolCall
@@ -39,8 +43,13 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_events (
   run_id TEXT,
   event_type TEXT NOT NULL,
   payload JSONB NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  run_seq INTEGER
 );
+-- The log's idempotency: a Run's writer numbers its events 1, 2, 3.., and a repeated number is the same event.
+ALTER TABLE hatch_conversation_events ADD COLUMN IF NOT EXISTS run_seq INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_conversation_events_run_seq_idx
+  ON hatch_conversation_events (run_id, run_seq) WHERE run_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS hatch_conversation_events_conversation_idx
   ON hatch_conversation_events (conversation_id, id);
 CREATE INDEX IF NOT EXISTS hatch_conversation_events_turn_idx
@@ -112,9 +121,19 @@ const HELD_RUN_SQL = `SELECT 1 AS ok FROM hatch_conversation_runs
   FOR SHARE`;
 /** An unfenced write never touches the Runs table, which a bare store may not have. */
 const NO_HOLD_SQL = "SELECT 1 AS ok WHERE false";
+/**
+ * Order of locks: the Run's row (held), then the conversation's advisory lock, then the usage rows. Every writer of a conversation
+ * takes them in this order, so none deadlocks, and the id is taken (nextval) only once the advisory lock is held until commit:
+ * ids of one conversation are taken and committed in the same order, so a reader that has seen id N has seen every smaller one.
+ * $7 is the event's run_seq: an event already written is not written again and reserves no quota.
+ */
 const insertEventSql = (held: boolean): string => `
 WITH held AS (
   ${held ? HELD_RUN_SQL : NO_HOLD_SQL}
+), locked AS (
+  SELECT pg_advisory_xact_lock(hashtextextended(COALESCE($1::text, ''), 0)) AS acquired FROM (SELECT count(*) FROM held) AS ordered
+), duplicate AS (
+  SELECT id FROM hatch_conversation_events WHERE $7::int IS NOT NULL AND run_id = $2 AND run_seq = $7::int
 ), requested AS (
   SELECT scope_key, event_count, total_bytes, max_events, max_bytes
   FROM jsonb_to_recordset($5::jsonb) AS limits(
@@ -123,8 +142,8 @@ WITH held AS (
     total_bytes BIGINT,
     max_events BIGINT,
     max_bytes BIGINT
-  )
-  WHERE $6::text IS NULL OR EXISTS (SELECT 1 FROM held)
+  ), locked
+  WHERE ($6::text IS NULL OR EXISTS (SELECT 1 FROM held)) AND NOT EXISTS (SELECT 1 FROM duplicate)
 ), reserved AS (
   INSERT INTO hatch_conversation_usage (scope_key, event_count, total_bytes)
   SELECT scope_key, event_count, total_bytes
@@ -148,10 +167,11 @@ WITH held AS (
   FROM reserved
 )
 INSERT INTO hatch_conversation_events
-  (conversation_id, run_id, event_type, payload)
-SELECT $1, $2, $3, $4::jsonb
+  (conversation_id, run_id, event_type, payload, run_seq)
+SELECT $1, $2, $3, $4::jsonb, $7::int
 FROM quota_assertion
-WHERE admitted = 1 AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM held))
+WHERE admitted = 1 AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM held)) AND NOT EXISTS (SELECT 1 FROM duplicate)
+ON CONFLICT (run_id, run_seq) WHERE run_seq IS NOT NULL DO NOTHING
 RETURNING id
 `;
 
@@ -396,7 +416,7 @@ export class PostgresStore extends RuntimeStore {
       await client.query("BEGIN");
       // Lock the immutable binding and active-run/idempotency namespace together.
       await client.query("SELECT id FROM hatch_conversations WHERE id = $1 FOR UPDATE", [input.run.conversationId]);
-      const repository = PostgresConversationRepository.inTransaction(client);
+      const repository = PostgresConversationRepository.inTransaction(client, this);
       const conversation = await repository.getConversation(input.run.conversationId);
       if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
       assertConversationBinding(conversation, input.binding);
@@ -437,7 +457,7 @@ export class PostgresStore extends RuntimeStore {
     }
   }
 
-  async append(event: PostgresStoreEventInput, hold?: RunHold): Promise<void> {
+  async append(event: PostgresStoreEventInput, hold?: RunHold): Promise<number> {
     assertCanonicalPersistedToolNames(event);
     const record = {
       ...event,
@@ -448,21 +468,19 @@ export class PostgresStore extends RuntimeStore {
     const previous = this.appendChains.get(serializationKey) ?? Promise.resolve();
     const write = previous.then(async () => {
       await this.ensureSchema();
-      await this.appendOn({ query: (text, values) => this.query(text, values) }, record, hold);
+      return this.appendOn({ query: (text, values) => this.query(text, values) }, record, hold);
     });
-    const tail = write.catch(() => undefined);
+    const tail = write.then(() => undefined, () => undefined);
     this.appendChains.set(serializationKey, tail);
-    this.pendingAppends.add(write);
-    void write.then(
-      () => this.finishAppend(serializationKey, tail, write),
-      () => this.finishAppend(serializationKey, tail, write)
-    );
-    await write;
+    this.pendingAppends.add(tail);
+    void tail.then(() => this.finishAppend(serializationKey, tail, tail));
+    return write;
   }
 
-  /** Appends on the caller's connection, so an event commits in the caller's transaction. */
-  async appendOn(client: PostgresQueryExecutor, record: StoreEvent, hold?: RunHold): Promise<void> {
+  /** Appends on the caller's connection, so an event commits in the caller's transaction. Returns the event's position, the existing one for a repeated `run_seq`. */
+  async appendOn(client: PostgresQueryExecutor, record: StoreEvent, hold?: RunHold): Promise<number> {
       const conversationId = optionalStringField(record, "conversation_id");
+      const runId = optionalStringField(record, "run_id");
       const payload = JSON.stringify(record);
       const payloadBytes = Buffer.byteLength(payload, "utf8");
       const reservations: QuotaReservation[] = [{
@@ -495,20 +513,89 @@ export class PostgresStore extends RuntimeStore {
       try {
         result = await client.query<QueryResultRow>(insertEventSql(Boolean(hold)), [
           conversationId,
-          optionalStringField(record, "run_id"),
+          runId,
           record.type,
           payload,
           JSON.stringify(reservations),
-          hold?.heldBy ?? null
+          hold?.heldBy ?? null,
+          record.run_seq ?? null
         ]);
       } catch (error) {
         if (isQuotaAssertionFailure(error)) throw storageQuotaError(conversationId);
         throw error;
       }
       if (result.rows.length === 0) {
-        if (hold) throw new RunFenced(optionalStringField(record, "run_id") ?? "unknown");
+        if (record.run_seq !== undefined && runId) {
+          const existing = await client.query<{ id: string }>("SELECT id FROM hatch_conversation_events WHERE run_id = $1 AND run_seq = $2", [runId, record.run_seq]);
+          if (existing.rows[0]) return Number(existing.rows[0].id);
+        }
+        if (hold) throw new RunFenced(runId ?? "unknown");
         throw storageQuotaError(conversationId);
       }
+      return Number((result.rows[0] as { id: string }).id);
+  }
+
+  override async logHead(conversationId: string): Promise<number> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<{ head: string }>("SELECT COALESCE(MAX(id), 0)::text AS head FROM hatch_conversation_events WHERE conversation_id = $1", [conversationId]);
+    return Number(result.rows[0]?.head ?? 0);
+  }
+
+  override async maxRunSeq(runId: string): Promise<number> {
+    await this.ensureSchema();
+    const result = await this.query<{ max: number }>("SELECT COALESCE(MAX(run_seq), 0) AS max FROM hatch_conversation_events WHERE run_id = $1 AND run_seq IS NOT NULL", [runId]);
+    return Number(result.rows[0]?.max ?? 0);
+  }
+
+  override async readRunEvents(conversationId: string, runId: string, types?: ReadonlyArray<StoreEvent["type"]>): Promise<StoreEvent[]> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<PayloadRow>(`${SELECT_PAYLOAD_SQL}WHERE conversation_id = $1 AND run_id = $2
+      AND ($3::text[] IS NULL OR event_type = ANY($3::text[])) ORDER BY id ASC`, [conversationId, runId, types ? [...types] : null]);
+    return result.rows.map((row) => eventFromPayload(row.payload));
+  }
+
+  protected override async logRows(conversationId: string, after: number, upTo: number, limit = Number.POSITIVE_INFINITY): Promise<LogRow[]> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<{ position: string; payload: unknown }>(`
+      SELECT id::text AS position, ${LOG_PAYLOAD_SQL} AS payload FROM hatch_conversation_events
+      WHERE conversation_id = $1 AND id > $2::bigint AND id <= $3::bigint AND ${LOG_ROW_SQL}
+      ORDER BY id ASC LIMIT $4::bigint`, [conversationId, after, upTo, Number.isFinite(limit) ? limit : null]);
+    return result.rows.map((row) => ({ position: Number(row.position), event: eventFromPayload(row.payload) }));
+  }
+
+  protected override async logTurnStart(conversationId: string, turns: number, upTo: number): Promise<{ start: number; hasMoreBefore: boolean }> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<{ first: string }>(`
+      SELECT MIN(id)::text AS first FROM hatch_conversation_events
+      WHERE conversation_id = $1 AND run_id IS NOT NULL AND id <= $2::bigint
+      GROUP BY run_id ORDER BY MIN(id) DESC LIMIT $3`, [conversationId, upTo, turns + 1]);
+    const firsts = result.rows.map((row) => Number(row.first));
+    return firsts.length ? { start: firsts[Math.min(turns, firsts.length) - 1]!, hasMoreBefore: firsts.length > turns } : { start: upTo + 1, hasMoreBefore: false };
+  }
+
+  protected override async logContext(conversationId: string, runIds: string[]): Promise<{ modern: Set<string>; rows: LogRow[]; states: Map<string, LegacyRunState> }> {
+    await this.ensureSchema();
+    if (!runIds.length) return { modern: new Set(), rows: [], states: new Map() };
+    const written = await this.query<{ run_id: string }>("SELECT DISTINCT run_id FROM hatch_conversation_events WHERE run_id = ANY($1::text[]) AND run_seq IS NOT NULL", [runIds]);
+    const modern = new Set(written.rows.map((row) => row.run_id));
+    const older = runIds.filter((id) => !modern.has(id));
+    if (!older.length) return { modern, rows: [], states: new Map() };
+    const rows = await this.query<{ position: string; payload: unknown }>(`
+      SELECT id::text AS position, ${LOG_PAYLOAD_SQL} AS payload FROM hatch_conversation_events
+      WHERE conversation_id = $1 AND run_id = ANY($2::text[]) AND ${LOG_ROW_SQL} ORDER BY id ASC`, [conversationId, older]);
+    const states = new Map<string, LegacyRunState>();
+    try {
+      const runs = await this.query<{ id: string; status: RunStatus; failure: StoredFailure | null }>("SELECT id, status, failure FROM hatch_conversation_runs WHERE id = ANY($1::text[])", [older]);
+      for (const run of runs.rows) states.set(run.id, { status: run.status, ...(run.failure ? { failure: run.failure } : {}) });
+    } catch (error) {
+      // A store without the control plane's tables has no Runs to ask.
+      if ((error as { code?: string }).code !== "42P01") throw error;
+    }
+    return { modern, rows: rows.rows.map((row) => ({ position: Number(row.position), event: eventFromPayload(row.payload) })), states };
   }
 
   async readEvents(conversationId?: string): Promise<StoreEvent[]> {
@@ -614,14 +701,6 @@ export class PostgresStore extends RuntimeStore {
       WHERE conversation_id = $1 AND run_id = $2 AND event_type = 'tool.call'
         AND payload->>'tool_call_id' = $3 ORDER BY id ASC`, [conversationId, runId, toolCallId]);
     return this.projectConversationToolDetail(conversationId, runId, toolCallId, result.rows.map((row) => eventFromPayload(row.payload)));
-  }
-
-  async readRunActivity(conversationId: string, runId: string) {
-    await this.waitForConversationAppends(conversationId);
-    await this.ensureSchema();
-    const result = await this.query<PayloadRow>(`${SELECT_PAYLOAD_SQL}WHERE conversation_id = $1 AND run_id = $2
-      AND event_type IN ('tool.call', 'skill.activated', 'skill.invoked', 'skill.run') ORDER BY id ASC`, [conversationId, runId]);
-    return this.projectRunActivity(conversationId, runId, result.rows.map((row) => eventFromPayload(row.payload)));
   }
 
   async readConversationAssetReference(conversationId: string, assetId: string): Promise<Extract<PersistedContextAttachment, { kind: "asset" }> | undefined> {
@@ -790,9 +869,8 @@ export class PostgresStore extends RuntimeStore {
         }
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;
-          if (event.visible_parts) {
-            message.parts = event.visible_parts;
-          }
+          const parts = (event as { visible_parts?: VisibleConversationPart[] }).visible_parts;
+          if (parts) message.parts = parts;
         }
         if (role === "assistant") {
           const toolCalls = [...(toolCallsByRun.get(event.run_id)?.values() ?? [])]

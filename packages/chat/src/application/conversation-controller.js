@@ -1,25 +1,24 @@
-import { ChatTimeline, PendingSubmission } from "../domain/timeline.js";
-import { RuntimeEventReducer, isRunEvent, toolEventFromApproval } from "../domain/runtime-events.js";
-import { activeSnapshotRun, isPlaceholderMessage, isTerminalRunStatus, mergeConversationPage, runId as idOfRun, validateHistoryPage, ConversationSnapshotError } from "../domain/snapshot.js";
-import { RunText } from "../domain/run-text.js";
-import { createImmediateTextReveal, textRevealBoundary } from "../domain/text-reveal.js";
+import { PendingSubmission } from "../domain/timeline.js";
+import { emptyLog, foldLog, mergeOlderLog, projectLog } from "../domain/chat-log.js";
 import { MemoryDraftStore, MemoryPendingStore } from "../ports/index.js";
-import { ConversationSync } from "./conversation-sync.js";
 import { ChatError } from "./errors.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 
-/** Everything keyed by one Run id, keyed by another. */
-const rekeyRun = (messages, old, runId) => messages.map(message => message.run_id === old
-  ? { ...message, run_id: runId, ...(message.transient ? { id: `stream-${runId}` } : {}) } : message);
-
 const newId = prefix => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
+
+/** How many turns a conversation opens on, and each earlier page brings. */
+export const HISTORY_TURNS = 20;
+/** Events per page when the page reads what a stream did not bring. */
+const TAIL_LIMIT = 200;
 
 export const INITIAL_CHAT_STATE = Object.freeze({
   conversations: [],
   conversationCursor: null,
   conversationId: "",
+  /** The conversation whose log has been read: the page is loaded once it is the open one. */
   snapshotConversationId: null,
   messages: [],
+  /** Position of the oldest event held while there is more before it; null when the whole log is held. */
   historyCursor: null,
   draft: "",
   images: [],
@@ -50,10 +49,10 @@ export const CONNECTION_STATES = Object.freeze(["idle", "connecting", "open"]);
 export const APPROVAL_DECISIONS = Object.freeze(["pending", "allowed", "denied"]);
 
 /**
- * Application service for one Agent's conversations: library, durable
- * snapshot sync, the live Runtime session, submission lifecycle, tool and
- * approval requests. Observable (subscribe/getState) so any view layer can
- * render it; every external effect goes through a port.
+ * Application service for one Agent's conversations: library, the conversation log (read in pages and followed live, one
+ * fold), the live Runtime session, submission lifecycle, tool and approval requests. Observable (subscribe/getState) so any
+ * view layer can render it; every external effect goes through a port. The thread is `projectLog` of the log plus the
+ * messages the log does not carry yet.
  */
 export class ConversationController {
   /**
@@ -62,37 +61,27 @@ export class ConversationController {
    * @param {import("../ports/index.js").AttachmentSource} options.attachments
    * @param {import("../ports/index.js").ToolExecutor} options.tools
    * @param {import("../ports/index.js").DraftStore} [options.drafts]
-   * @param {import("../ports/index.js").PendingStore} [options.pendingStore] sent messages the server has not acknowledged
+   * @param {import("../ports/index.js").PendingStore} [options.pendingStore] sent messages the log does not carry yet
    * @param {string} [options.draftScope]
    * @param {number} [options.ackTimeoutMs] how long a message sent over a socket waits for the server's answer before it goes back to the composer
    * @param {number} [options.stallMs] a session that says nothing for this long is dead without having closed (0: the host sends no heartbeat, so silence means nothing)
    * @param {(error: object) => string} [options.describeError] localized text sent back with tool errors
-   * @param {(options: {onReveal: Function}) => object} [options.textReveal] text pacing policy factory
    */
-  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, ackTimeoutMs = 20_000, stallMs = 0, pollMs = 2000, freeChat = OPEN_FREE_CHAT, pendingStore = new MemoryPendingStore() }) {
+  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), reconnectAttempts = 3, ackTimeoutMs = 20_000, stallMs = 0, pollMs = 2000, freeChat = OPEN_FREE_CHAT, pendingStore = new MemoryPendingStore() }) {
     Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, ackTimeoutMs, stallMs, pollMs, freeChat, pendingStore });
     const draft = drafts.read(draftScope);
     this.state = { ...INITIAL_CHAT_STATE, draft: draft.text, images: draft.files };
     this.listeners = new Set();
-    this.reducer = new RuntimeEventReducer();
-    this.timeline = new ChatTimeline();
-    this.sync = new ConversationSync(transport);
-    this.reveal = textReveal({ onReveal: ({ content }) => this.publishTimeline(timeline => timeline.appendText(content)) });
     this.generation = 0;
     this.attempts = 0;
-    this.run = null;
-    /** Messages sent and not yet acknowledged, by clientMessageId. */
+    /** The conversation's log as folded so far, and what it shows. */
+    this.log = emptyLog();
+    this.projection = projectLog(this.log);
+    /** Messages sent and the log does not carry yet, by clientMessageId. */
     this.pendings = new Map();
-    this.runText = new RunText();
-    this.hasBeenReady = false;
-    /** Messages the Run has ended whose saved copy the page has not read yet: `{ runId, entries, saved }`. */
-    this.settleMarks = [];
+    /** Runs whose failure the page has already told (or the user dismissed). */
+    this.reportedFailures = new Set();
     this.taskStart = null;
-    this.terminalRun = null;
-    /** Runs whose end the stream told: a snapshot read before that cannot bring them back. */
-    this.endedRuns = new Set();
-    /** Runs this page has already read the server for, having heard of them while it held none (another tab's). */
-    this.probedRuns = new Set();
     this.lastFrameAt = 0;
     this.stallTimer = null;
     /** Local tool executions by tool_call_id: one call is executed once, however often the Runtime asks. */
@@ -101,10 +90,9 @@ export class ConversationController {
     this.link = null;
     /** When the live session was lost and has not come back; a status shows only once a send meets a session down this long. */
     this.downSince = null;
-    this.compactionEpoch = 0;
-    this.refreshing = null;
-    this.refreshAgain = false;
+    this.reading = Promise.resolve();
     this.reconnectTimer = null;
+    this.lapseTimer = null;
     this.pollTimer = null;
     this.pollKey = null;
   }
@@ -127,39 +115,6 @@ export class ConversationController {
     this.state = { ...this.state, ...(typeof patch === "function" ? patch(this.state) : patch) };
     this.syncPolling();
     for (const listener of this.listeners) listener();
-  }
-
-  /**
-   * The one place a live row is admitted: a Run whose end was told never gains one, whatever it was learned from. A row it
-   * already shows with words stays until the saved reply takes its place, so the reply is never absent in between.
-   */
-  updateMessages(update) {
-    const next = typeof update === "function" ? update(this.state.messages) : update;
-    const shown = message => this.state.messages.some(entry => entry.id === message.id && entry.timeline?.length);
-    const messages = this.endedRuns.size && next.some(message => message.transient && this.endedRuns.has(message.run_id))
-      ? next.filter(message => !(message.transient && this.endedRuns.has(message.run_id) && !shown(message))) : next;
-    this.setState({ messages });
-    return messages;
-  }
-
-  publishTimeline(apply) {
-    const items = apply(this.timeline);
-    const runId = this.run?.id;
-    this.updateMessages(current => !runId || current.some(message => message.transient && message.run_id === runId)
-      ? current.map(message => message.transient && message.run_id === runId ? { ...message, timeline: items } : message)
-      : [...current, { ...this.liveRow(runId, current), timeline: items }]);
-  }
-
-  /** The row of a Run's reply in progress. A Run with saved replies already has rows of its own, so this one is keyed apart from them. */
-  liveRow(runId, messages) {
-    const saved = messages.filter(message => message.run_id === runId && message.role === "assistant" && !message.transient).length;
-    const row = ChatTimeline.streamingAssistantMessage(runId);
-    return saved ? { ...row, renderKey: `${row.renderKey}-${saved + 1}` } : row;
-  }
-
-  resetTimeline() {
-    this.settleMarks = [];
-    this.timeline.reset();
   }
 
   fail = cause => this.setState({ error: cause });
@@ -207,225 +162,138 @@ export class ConversationController {
     this.closeConnection();
     const generation = ++this.generation;
     this.attempts = 0;
-    this.run = null;
     for (const submission of this.pendings.values()) clearTimeout(submission.ackTimer);
     this.pendings.clear();
-    this.probedRuns.clear();
-    this.runText.reset();
-    this.hasBeenReady = false;
-    this.terminalRun = null;
-    this.endedRuns.clear();
+    this.reportedFailures.clear();
     this.toolRuns.clear();
-    this.sync.reset();
     this.downSince = null;
-    this.refreshing = null;
-    this.refreshAgain = false;
-    this.reveal.discard();
-    this.resetTimeline();
-    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, failedRun: null, runState: null, session: null, connection: "idle", error: null, compacting: false, ...(id ? { status: { key: "loadingConversation" } } : {}) });
+    this.reading = Promise.resolve();
+    this.log = emptyLog();
+    this.projection = projectLog(this.log);
+    clearTimeout(this.lapseTimer);
+    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, failedRun: null, runState: null, session: null, connection: "idle", error: null, compacting: false, compactions: [], ...(id ? { status: { key: "loadingConversation" } } : {}) });
     if (!id) return;
-    void this.refresh(id).catch(cause => {
+    void this.load(id, generation).catch(cause => {
       if (generation === this.generation) this.fail(cause);
     });
   }
 
-  async refresh(id) {
+  /** The latest turns of the log, then the live session from where they end. */
+  async load(id, generation) {
+    const page = await this.transport.log(id, { turns: HISTORY_TURNS });
+    if (generation !== this.generation) return;
+    this.log = this.fold(emptyLog(), page.events, page.head);
+    this.setState({ snapshotConversationId: id, historyCursor: page.has_more_before ? page.start ?? null : null });
+    this.render();
+    this.resumePending(id);
+    this.connect();
+  }
+
+  /** Events into a log, in order; a read that is whole (no more to come) also says how far the log goes, internal rows included. */
+  fold(log, events, head) {
+    const next = events.reduce(foldLog, log);
+    return Number.isFinite(head) && head > next.position ? { ...next, position: head } : next;
+  }
+
+  /** What the log holds that this page has not read, read in pages and folded: a stream that was down, or a transport without one. One read at a time. */
+  refresh(id = this.state.conversationId) {
     const generation = this.generation;
-    const epoch = this.compactionEpoch;
-    const context = {
-      current: () => this.state.messages,
-      // A Run id the page minted for a message the server has not acknowledged is not the server's to know yet.
-      activeRunId: () => this.run && !this.run.provisional && ![...this.pendings.values()].some(entry => entry.runId === this.run.id) ? this.run.id : null,
-      isCurrent: () => generation === this.generation && this.state.conversationId === id
+    const read = async () => {
+      for (;;) {
+        if (generation !== this.generation || this.state.conversationId !== id) return;
+        const after = this.log.position;
+        const page = await this.transport.log(id, { after, limit: TAIL_LIMIT });
+        if (generation !== this.generation) return;
+        this.apply(page.events, page.has_more ? undefined : page.head);
+        if (!page.has_more || this.log.position === after) break;
+      }
+      if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
+      this.readFailure = null;
     };
-    let result;
-    try { result = await this.sync.refresh(id, context); }
-    catch (cause) {
-      if (!(cause instanceof ConversationSnapshotError)) throw cause;
-      // A journal this page cannot follow (its cursor is stale, or the server moved on) is read again from the latest page, once; a second refusal is the error.
-      this.sync.reset();
-      result = await this.sync.refresh(id, context);
-    }
-    if (!result) return { stale: true };
-    const { snapshot } = result;
-    const firstSnapshot = this.state.snapshotConversationId !== id;
-    // What the read says of a compaction holds unless the stream said otherwise while it was in flight.
-    if (typeof snapshot.compacting === "boolean" && epoch === this.compactionEpoch && snapshot.compacting !== this.state.compacting) this.setState({ compacting: snapshot.compacting });
-    const conversation = snapshot.conversation;
+    const task = this.reading.then(read);
+    this.reading = task.catch(() => {});
+    return task;
+  }
+
+  /** Fold events into the page's log and show the result. An event the log already holds changes nothing. */
+  apply(events, head) {
+    const before = this.log;
+    this.log = this.fold(before, events, head);
+    if (this.log !== before) this.render();
+  }
+
+  /** The thread: the log, then what was sent and the log does not carry yet. Also what follows from it: failure, lock, status. */
+  render() {
+    const conversationId = this.state.conversationId;
+    const projection = this.projection = projectLog(this.log);
+    this.settlePending(projection);
+    const pending = [...this.pendings.values()].filter(submission => submission.conversationId === conversationId && !submission.hidden);
+    const leading = pending.find(submission => submission.leadsRun && !projection.activeRun);
+    const messages = [...projection.messages];
+    for (const submission of pending) messages.push(this.rowOf(submission));
+    if (leading) messages.push(this.typingRowOf(leading));
+    const activeRun = projection.activeRun ?? leading?.runId ?? null;
+    const failure = projection.failed && !this.reportedFailures.has(projection.failed.runId) ? projection.failed : null;
+    if (failure) this.reportedFailures.add(failure.runId);
     this.setState(state => ({
-      snapshotConversationId: id,
-      conversations: !conversation ? state.conversations : state.conversations.some(item => item.id === id)
-        ? state.conversations.map(item => item.id === id ? { ...item, ...conversation } : item)
-        : [conversation, ...state.conversations],
-      historyCursor: state.historyCursor ?? snapshot.before_cursor ?? null
+      messages, activeRun, runState: projection.runState, compacting: projection.compacting,
+      compactions: projection.compactions.map(entry => ({ ...entry, conversationId })),
+      status: this.statusOf(state, projection, activeRun, leading),
+      ...(failure ? { failedRun: { id: failure.runId }, error: failure.failure ?? new ChatError("replyFailed") } : {})
     }));
-    const listed = activeSnapshotRun(snapshot);
-    const running = listed && (!this.endedRuns.has(listed.id) || listed.retrying) ? listed : null;
-    this.endRunLostWhileAway(snapshot, running);
-    const held = this.run?.id;
-    // A reply being started again has no Run of its own to hold yet: the retry's Run is adopted when the server names it.
-    if (running && !running.retrying && held !== running.id) this.adoptRun(running.id);
-    // The page's rows were read before the adoption: they are keyed by the Run it held, and move with it.
-    let projected = running && held && held !== running.id ? rekeyRun(result.messages, held, running.id) : result.messages;
-    // A message the live row showed is handed over only once the page holds its saved copy: a read that started before it was saved leaves the words where they are.
-    const handedOver = this.settleSaved(projected, Boolean(running));
-    if (running) {
-      const tail = typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
-      if (tail) this.timeline.appendText(tail);
-      // The steps the Run has taken so far come from the server, so a page that joined mid-Run shows them all.
-      const steps = running.activity ? this.timeline.restoreActivity({ run_id: running.id, ...running.activity }) : null;
-      if (!projected.some(message => message.transient && message.run_id === running.id)) {
-        projected = [...projected, { ...this.liveRow(running.id, projected), timeline: this.timeline.snapshot() }];
-      } else if (tail || steps) {
-        projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
+    // An interrupted Run the server is answering again counts as working until its time lapses; the page shows the lapse when it comes.
+    clearTimeout(this.lapseTimer);
+    this.lapseTimer = undefined;
+    if (projection.retryingUntil) {
+      this.lapseTimer = setTimeout(() => { if (this.state.conversationId === conversationId) this.render(); }, Math.max(0, projection.retryingUntil - Date.now()) + 5);
+      this.lapseTimer.unref?.();
+    }
+  }
+
+  statusOf(state, projection, activeRun, leading) {
+    const key = state.status.key;
+    if (!state.snapshotConversationId || state.snapshotConversationId !== state.conversationId) return state.status;
+    if (key === "reconnecting" && state.connection !== "open") return state.status;
+    if (key === "stopping" && projection.activeRun) return state.status;
+    const next = activeRun ? (leading ? "sending" : "agentReplying") : "connected";
+    return key === next ? state.status : { key: next };
+  }
+
+  rowOf(submission) {
+    const state = submission.queued ? "queued" : "sending";
+    if (submission.row?.state !== state) submission.row = { ...submission.optimisticMessage(), state };
+    return submission.row;
+  }
+
+  typingRowOf(submission) {
+    submission.typing ??= { id: `${submission.runId}-assistant`, renderKey: `${submission.runId}-assistant`, run_id: submission.runId, role: "assistant", content: "", timestamp: new Date().toISOString(), transient: true, timeline: [] };
+    return submission.typing;
+  }
+
+  /** The log is the authority: a message it holds is taken up or queued, and no longer pending. A Run that ended before the server took its message sends the words back. */
+  settlePending(projection) {
+    for (const [id, submission] of [...this.pendings]) {
+      if (projection.known.has(id)) {
+        clearTimeout(submission.ackTimer);
+        this.pendings.delete(id);
+        this.pendingStore.settle(id);
+        if (submission.awaitingUser) this.writeDraft({ draft: "", images: [] });
+      } else if (!this.transport.steerable && !submission.accepted && isEnded(this.log.runs[submission.runId]?.status)) {
+        this.restoreSubmission(submission);
       }
     }
-    if (handedOver && running) projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
-    this.updateMessages(projected);
-    this.followRetry(id, running);
-    const awaited = this.awaitedRunId();
-    const terminal = this.terminalRun;
-    const settled = terminal && projected.some(message => message.run_id === terminal.id && message.role === "assistant" && !message.transient);
-    if (settled || terminal?.failed || terminal?.cancelled) {
-      this.terminalRun = null;
-      if (!settled) this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === terminal.id && message.role === "assistant")));
-      this.resetTimeline();
-      this.setState({ activeRun: running?.id ?? null, status: { key: running ? "agentReplying" : "connected" } });
-    } else if (terminal) {
-      this.setState({ activeRun: terminal.id, status: { key: "syncingReply" } });
-    } else {
-      this.setState({ activeRun: running?.id ?? awaited, status: { key: running ? "agentReplying" : awaited ? "sending" : "connected" } });
-    }
-    if (firstSnapshot) { this.offerAnswerAgain(snapshot, running); this.resumePending(id, projected); this.connect(); }
-    this.reconcilePending(projected);
-    if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
-    this.readFailure = null;
-    return { stale: false };
   }
 
-  /**
-   * While the server is starting an interrupted reply again, the page shows it as working and reads again until the retry's Run
-   * appears (it is then adopted) or the server stops reporting it (the partial reply stays, quietly).
-   */
-  followRetry(id, running) {
-    clearTimeout(this.retryTimer);
-    this.retryTimer = undefined;
-    const retrying = running?.retrying ? running.id : null;
-    if (this.retryingRun && this.retryingRun !== retrying) {
-      const gone = this.retryingRun;
-      this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === gone)));
-      if (!running) this.resetTimeline();
-    }
-    this.retryingRun = retrying;
-    if (retrying) this.retryTimer = setTimeout(() => { if (this.state.conversationId === id) this.requestRefresh(id); }, this.pollMs);
-  }
-
-  /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. A read that fails is tried once more before it is shown. */
-  requestRefresh(conversationId, retry = false) {
-    if (this.refreshing) { this.refreshAgain = true; return; }
-    const done = () => {
-      this.refreshing = null;
-      if (this.refreshAgain && this.state.conversationId === conversationId) { this.refreshAgain = false; this.requestRefresh(conversationId); }
-    };
-    this.refreshing = this.refresh(conversationId).catch(cause => {
-      if (this.state.conversationId !== conversationId) return;
-      if (retry) this.failRead(cause);
-      else setTimeout(() => { if (this.state.conversationId === conversationId) this.requestRefresh(conversationId, true); }, this.pollMs);
-    }).finally(done);
-  }
-
-  /** How many replies of this Run the messages hold as saved. */
-  savedReplies(messages, runId) {
-    return messages.filter(message => message.run_id === runId && message.role === "assistant" && !message.transient).length;
-  }
-
-  /** The Run ended a message: its entries leave the live row when the saved message shows them. */
-  markSettled() {
-    const runId = this.run?.id ?? null;
-    const pending = this.settleMarks.filter(mark => mark.runId === runId).length;
-    this.settleMarks.push({ runId, entries: this.timeline.seal(), saved: runId ? this.savedReplies(this.state.messages, runId) + pending + 1 : 0 });
-  }
-
-  /** Hands the live row's entries over to the saved messages the page now holds. Returns whether it did. */
-  settleSaved(messages, running) {
-    if (!this.settleMarks.length) return false;
-    if (!running) { this.resetTimeline(); return true; }
-    let last = null;
-    while (this.settleMarks.length && (!this.settleMarks[0].runId || this.savedReplies(messages, this.settleMarks[0].runId) >= this.settleMarks[0].saved)) last = this.settleMarks.shift();
-    if (!last) return false;
-    this.timeline.discardThrough(last.entries);
-    return true;
-  }
-
-  /** The text of this Run already in saved messages. */
-  savedText(messages, runId) {
-    return messages.filter(message => message.run_id === runId && message.role === "assistant" && !message.transient).reduce((total, message) => total + (message.content?.length ?? 0), 0);
-  }
-
-  /** The Run a sent message is still waiting to start, while the server has not said it is running. */
-  awaitedRunId() {
-    return this.run && (this.run.provisional || [...this.pendings.values()].some(submission => submission.leadsRun)) ? this.run.id : null;
-  }
-
-  /** A Run that ended while no stream was listening: its terminal event is lost, but its record says how it ended. */
-  endRunLostWhileAway(snapshot, running) {
-    const run = this.run;
-    if (!run || running || run.provisional || this.terminalRun) return;
-    const record = snapshot.runs.find(entry => idOfRun(entry) === run.id);
-    if (!record || !isTerminalRunStatus(record.status)) return;
-    this.run = null;
-    this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
-    this.resetTimeline();
-    // A Run a restart interrupted is answered again by the server: it is no failure to report.
-    if (record.status === "failed") this.failReply(run.id, record.failure);
-  }
-
-  /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
-  offerAnswerAgain(snapshot, running) {
-    const last = snapshot.runs.at(-1);
-    if (running || this.state.failedRun || !last || last.status !== "failed") return;
-    this.failReply(idOfRun(last), last.failure);
-  }
-
-  /** A reply that failed: shown as an error that can be answered again, not as a broken connection. */
-  failReply(runId, error) {
-    this.setState({ failedRun: { id: runId } });
-    this.fail(error ?? new ChatError("replyFailed"));
-  }
-
-  /**
-   * A Run the server named while the client held another id for it (the client's was provisional, or it joined a Run it did
-   * not know): everything the client keyed by the old id moves to the real one.
-   */
-  adoptRun(runId) {
-    const old = this.run?.id;
-    this.run = { id: runId };
-    if (!old || old === runId) return;
-    this.updateMessages(current => rekeyRun(current, old, runId));
-    for (const submission of this.pendings.values()) if (submission.runId === old) submission.runId = runId;
-    if (this.state.activeRun === old) this.setState({ activeRun: runId });
-  }
-
-  /** After a reload: what the server did not acknowledge is sent again, under the same key. */
-  resumePending(conversationId, messages) {
+  /** After a reload: what the log does not carry is sent again, under the same key. */
+  resumePending(conversationId) {
     for (const record of this.pendingStore.load(conversationId)) {
       if (record.kind === "retry" || this.pendings.has(record.clientMessageId)) continue;
-      if (messages.some(message => message.id === record.clientMessageId)) { this.pendingStore.settle(record.clientMessageId); continue; }
-      const submission = PendingSubmission.fromRecord(record, { runId: this.run?.id ?? newId("run"), stableId: this.transport.steerable });
-      submission.leadsRun = !this.run;
+      if (this.projection.known.has(record.clientMessageId)) { this.pendingStore.settle(record.clientMessageId); continue; }
+      const submission = PendingSubmission.fromRecord(record, { runId: this.projection.activeRun ?? newId("run") });
+      submission.leadsRun = !this.projection.activeRun;
       this.pendings.set(submission.clientMessageId, submission);
     }
-  }
-
-  /** The server's page is the authority: a message it holds is acknowledged, queued or taken up, and no longer pending. */
-  reconcilePending(messages) {
-    for (const [id, submission] of this.pendings) {
-      if (!messages.some(message => message.id === id && !isPlaceholderMessage(message))) continue;
-      clearTimeout(submission.ackTimer);
-      this.pendings.delete(id);
-      this.pendingStore.settle(id);
-      if (submission.awaitingUser) this.writeDraft({ draft: "", images: [] });
-    }
+    this.render();
   }
 
   /** Whether the failed reply can be answered again here. */
@@ -443,13 +311,10 @@ export class ConversationController {
     if (!kept) this.pendingStore.save(record);
     this.setState({ error: null });
     try {
-      const { run_id: runId } = await this.transport.retryRun(conversationId, record.clientMessageId);
+      await this.transport.retryRun(conversationId, record.clientMessageId);
       this.pendingStore.settle(record.clientMessageId);
       if (this.state.conversationId !== conversationId) return;
-      this.run = { id: runId };
-      this.resetTimeline();
-      this.updateMessages(current => [...current.filter(message => !message.transient), ChatTimeline.streamingAssistantMessage(runId)]);
-      this.setState({ failedRun: null, activeRun: runId, status: { key: "sending" } });
+      this.setState({ failedRun: null, status: { key: "sending" } });
       await this.refresh(conversationId);
     } catch (cause) {
       // A refusal is the server's answer: the key is spent. Anything else may have reached it, so the key stays.
@@ -458,7 +323,7 @@ export class ConversationController {
     }
   }
 
-  /** Retry whatever failed in the connection: the first snapshot, or the live session. */
+  /** Retry whatever failed in the connection: the first read, or the live session. */
   retry() {
     this.setState({ error: null });
     if (this.snapshotPending) this.open(this.state.conversationId, { force: true });
@@ -469,19 +334,21 @@ export class ConversationController {
     this.setState({ error: null, failedRun: null });
   }
 
+  /** The turns before the ones held. */
   async loadHistory() {
     const { conversationId, historyCursor } = this.state;
     if (!historyCursor) return;
     const generation = this.generation;
-    const page = validateHistoryPage(await this.transport.history(conversationId, { beforeCursor: historyCursor }));
+    const page = await this.transport.log(conversationId, { turns: HISTORY_TURNS, before: historyCursor });
     if (generation !== this.generation) return;
-    if (page.has_more && page.before_cursor === historyCursor) throw new ConversationSnapshotError("History cursor did not advance.");
-    this.updateMessages(current => mergeConversationPage(current, page.messages, { older: true }));
-    this.setState({ historyCursor: page.has_more ? page.before_cursor : null });
+    if (page.has_more_before && !(page.start < historyCursor)) throw new ChatError("historyIdentityMismatch");
+    this.log = mergeOlderLog(this.log, this.fold(emptyLog(), page.events));
+    this.setState({ historyCursor: page.has_more_before ? page.start : null });
+    this.render();
   }
 
   dispose() {
-    clearTimeout(this.retryTimer);
+    clearTimeout(this.lapseTimer);
     this.generation += 1;
     this.closeConnection();
     clearInterval(this.pollTimer);
@@ -498,7 +365,8 @@ export class ConversationController {
     this.reconnectTimer = null;
     const link = { live: true };
     const connection = this.transport.connect(conversationId, {
-      onOpen: () => connection.hello(this.tools.localTools),
+      // The session resumes the log where this page's fold ends: what it missed while it was down comes first, then what is new.
+      onOpen: () => connection.hello(this.tools.localTools, this.log.position),
       onEvent: event => void this.handleEvent(event, connection, link, conversationId).catch(cause => { if (link.live) this.fail(cause); }),
       onClose: () => this.handleClose(connection, link, conversationId)
     });
@@ -529,9 +397,8 @@ export class ConversationController {
     this.stallTimer.unref?.();
   }
 
-  /** Read what was missed, then open a new session; its ready reads again. */
+  /** Open a new session: its hello resumes the log from this page's position. */
   stalled(conversationId) {
-    this.requestRefresh(conversationId);
     this.releaseDispatched(conversationId);
     this.attempts = 0;
     this.reconnect();
@@ -541,7 +408,7 @@ export class ConversationController {
   releaseDispatched(conversationId) {
     if (this.transport.requestsOutliveStream) return;
     for (const submission of this.pendings.values()) {
-      if (submission.conversationId !== conversationId) continue;
+      if (submission.conversationId !== conversationId || submission.accepted) continue;
       clearTimeout(submission.ackTimer);
       submission.dispatched = false;
     }
@@ -581,7 +448,7 @@ export class ConversationController {
   handleClose(connection, link, conversationId) {
     if (!link.live) return;
     // A socket that dies takes an unacknowledged message with it; a request that outlives its stream does not.
-    const mine = [...this.pendings.values()].filter(submission => submission.conversationId === conversationId);
+    const mine = [...this.pendings.values()].filter(submission => submission.conversationId === conversationId && !submission.accepted);
     if (!this.transport.steerable) for (const submission of mine) this.restoreSubmission(submission, true);
     // A message sent over the socket may have died with it: it goes again when the session is back, under the same key.
     else this.releaseDispatched(conversationId);
@@ -609,26 +476,13 @@ export class ConversationController {
   /** Hand every message the server has not acknowledged to the connection, once. */
   dispatchPending(connection, conversationId) {
     for (const submission of [...this.pendings.values()]) {
-      if (submission.conversationId !== conversationId || submission.awaitingUser || (this.transport.steerable && submission.dispatched)) continue;
-      this.showSubmission(submission);
+      if (submission.conversationId !== conversationId || submission.awaitingUser || submission.accepted || (this.transport.steerable && submission.dispatched)) continue;
+      submission.hidden = false;
       this.markDispatched(submission);
       void this.dispatch(connection, { runId: submission.runId, clientMessageId: submission.clientMessageId, content: submission.content, attachments: submission.attachments })
         .catch(cause => this.refuse(submission, cause));
     }
-  }
-
-  /** The message on the page, and, when it starts the Run, the reply that is coming. */
-  showSubmission(submission) {
-    const { runId } = submission;
-    this.updateMessages(current => {
-      const withUser = current.some(entry => entry.id === submission.optimisticMessageId || (!submission.stableId && entry.run_id === runId && entry.role === "user")) ? current : [...current, submission.optimisticMessage()];
-      return !submission.leadsRun || withUser.some(entry => entry.transient && entry.run_id === runId && entry.role === "assistant")
-        ? withUser : [...withUser, ChatTimeline.streamingAssistantMessage(runId)];
-    });
-    if (submission.leadsRun && !this.run) {
-      this.run = { id: runId, provisional: this.transport.steerable };
-      this.setState({ activeRun: runId, status: { key: "sending" } });
-    }
+    this.render();
   }
 
   /** A send that did not go through. An ambiguous failure keeps the key, so sending again is the same message. */
@@ -641,90 +495,38 @@ export class ConversationController {
 
   /** Drop what a retry would have reused: the user changed the draft. */
   discardRetry() {
+    let dropped = false;
     for (const [id, submission] of this.pendings) {
-      if (this.transport.steerable && !submission.awaitingUser) continue;
+      if (submission.accepted || (this.transport.steerable && !submission.awaitingUser)) continue;
       this.pendings.delete(id);
       this.pendingStore.settle(id);
+      dropped = true;
     }
+    if (dropped) this.render();
   }
 
   async handleEvent(event, connection, link, conversationId) {
     if (!link.live) return;
     this.lastFrameAt = Date.now();
-    // The page follows the server's Run, but only one it can tell is its own: the ack of a message it sent names the Run that message joined, and a Run not ended yet is newer than the ones that are. A late event of an earlier Run adopts nothing.
-    const held = this.run;
-    if (held && event.run_id && event.run_id !== held.id && isRunEvent(event)) {
-      const mine = event.type === "message.accepted" && (event.client_message_id
-        ? this.pendings.get(event.client_message_id)?.runId === held.id
-        : this.pendings.size === 1 && [...this.pendings.values()][0].runId === held.id);
-      if (mine || (held.provisional && event.type !== "message.accepted" && !this.endedRuns.has(event.run_id))) this.adoptRun(event.run_id);
-    }
-    this.probeForeignRun(event, conversationId);
-    const boundary = textRevealBoundary(event);
-    if (boundary === "flush") this.reveal.flush(event.run_id);
-    else if (boundary === "discard") this.reveal.discard(event.run_id);
-    // The page only displays the server's state: an event that does not fit what it holds is skipped, and a read puts it right.
-    let outcome;
-    try { outcome = this.reducer.reduce(this.timeline, event, this.run?.id ?? null); }
-    catch { this.requestRefresh(conversationId); return; }
-    const handler = this.outcomes[outcome.kind];
-    if (handler) await handler.call(this, outcome, { event, connection, link, conversationId });
+    const handler = this.frames[event?.type];
+    if (handler) await handler.call(this, event, { connection, link, conversationId });
   }
 
-  /** A Run another client started, heard of while this page holds none: one read adopts it, and its stream and spinner follow. */
-  probeForeignRun(event, conversationId) {
-    if (!this.transport.adoptsForeignRuns || this.run || !event.run_id || !isRunEvent(event) || event.type === "turn.completed" || event.type === "turn.failed") return;
-    if (this.endedRuns.has(event.run_id) || this.probedRuns.has(event.run_id) || this.snapshotPending) return;
-    this.probedRuns.add(event.run_id);
-    this.requestRefresh(conversationId);
-  }
-
-  outcomes = {
-    text(outcome, { event }) {
-      const content = this.runText.take(event.run_id, outcome.content, outcome.offset);
-      if (!content) return;
-      this.reveal.enqueue({ runId: event.run_id, assistantId: event.run_id, content });
-      this.setState({ status: outcome.status });
-    },
-    resync(_outcome, { conversationId }) { this.requestRefresh(conversationId); },
-    changed(outcome, { conversationId }) {
-      // The message this page sent is on the page already; only one it did not send (another tab, a channel) needs a read.
-      if (outcome.committed === "user" && outcome.messageId && this.state.messages.some(message => message.id === outcome.messageId)) return;
-      if (outcome.committed === "assistant") this.markSettled();
-      this.requestRefresh(conversationId);
-    },
-    timeline(outcome) {
-      this.publishTimeline(timeline => timeline.snapshot());
-      if (outcome.status) this.setState({ status: outcome.status });
-    },
-    async tool_request(outcome, { connection }) {
-      const request = outcome.request;
-      this.publishTimeline(timeline => timeline.upsertTool({ ...request, locality: "client", status: "requested" }));
+  frames = {
+    // The log, one event at a time, as the HTTP pages carry it.
+    "log.event"(frame) { this.apply([frame.event]); },
+    // A session that cannot resume the log from a position (a build workbench) says so: the latest turns are read again.
+    "log.reset"(_frame, { conversationId }) { this.open(conversationId, { force: true }); },
+    "tool_call.request": async function (request, { connection }) {
       // A Runtime that replays an unanswered request (after a reconnect) gets the one execution's result, never a second execution.
       if (!this.toolRuns.has(request.tool_call_id)) this.toolRuns.set(request.tool_call_id, Promise.resolve(this.tools.execute(request)));
       await this.reportToolResult(request, connection, await this.toolRuns.get(request.tool_call_id));
     },
-    async approval_request(outcome, { connection }) {
-      const request = outcome.request;
-      this.publishTimeline(timeline => timeline.snapshot());
+    "approval.request": async function (request, { connection }) {
       const decision = await this.tools.requestApproval(request);
-      if (!decision.approved) await this.reportToolResult(request, connection, { status: "error", error: decision.error ?? { code: "approval_denied" } }, toolEventFromApproval(request));
+      if (!decision.approved) await this.reportToolResult(request, connection, { status: "error", error: decision.error ?? { code: "approval_denied" } });
     },
-    turn_state(outcome) {
-      this.setState({ runState: outcome.state });
-    },
-    compaction(outcome) {
-      this.compactionEpoch += 1;
-      this.setState({ compacting: outcome.active });
-    },
-    compacted(outcome, { conversationId }) {
-      const { run_id: runId, window_id: windowId } = outcome.compaction;
-      const id = `compaction-${runId}-${windowId}`;
-      this.setState(state => state.compactions.some(entry => entry.id === id) ? {}
-        : { compactions: [...state.compactions, { id, conversationId, runId }] });
-    },
-    ready(outcome, { connection, conversationId }) {
-      const session = outcome.session;
+    "session.ready"(session, { connection, conversationId }) {
       if (session.conversation_id !== conversationId) {
         connection.close();
         this.fail(new ChatError("conversationIdentityMismatch"));
@@ -734,77 +536,38 @@ export class ConversationController {
       this.downSince = null;
       this.setState(state => ({ session, connection: "open", ...(state.status.key === "reconnecting" ? { status: { key: "connected" } } : {}) }));
       this.dispatchPending(connection, conversationId);
-      // Whatever happened while the session was down was not heard: read it.
-      if (this.hasBeenReady) this.requestRefresh(conversationId);
-      this.hasBeenReady = true;
       if (this.taskStart === conversationId) {
         this.taskStart = null;
-        const runId = newId("run");
-        this.run = { id: runId };
-        this.resetTimeline();
-        this.updateMessages(current => [...current, ChatTimeline.streamingAssistantMessage(runId)]);
-        this.setState({ activeRun: runId, status: { key: "sending" } });
-        void this.dispatch(connection, { runId, clientMessageId: newId("message"), taskStart: true }).catch(cause => {
-          this.run = null;
+        void this.dispatch(connection, { runId: newId("run"), clientMessageId: newId("message"), taskStart: true }).catch(cause => {
           this.taskStart = conversationId;
-          this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === runId)));
-          this.setState({ activeRun: null });
           this.fail(cause);
         });
       }
     },
-    accepted(outcome) {
+    "message.accepted"(receipt) {
       this.freeChat.record();
-      const receipt = outcome.receipt;
-      // The server named the Run this page minted the id of: it is the server's Run now, and a snapshot may end it.
-      if (this.run?.provisional && receipt.run_id === this.run.id) this.run = { id: this.run.id };
       const submission = this.pendings.get(receipt.client_message_id) ?? (receipt.client_message_id || this.pendings.size !== 1 ? undefined : [...this.pendings.values()][0]);
       if (!submission) return;
       clearTimeout(submission.ackTimer);
-      // The server has it now, and says whether it started a Run or joined the running one (queued until it takes it up).
-      this.pendings.delete(submission.clientMessageId);
+      // The server has it now: a reload does not send it again, and the log shows it, queued when it joined a running Run, until then.
+      submission.accepted = true;
+      submission.queued = receipt.outcome === "steered";
       this.pendingStore.settle(submission.clientMessageId);
-      this.updateMessages(current => current.map(entry => {
-        if (entry.id !== submission.optimisticMessageId) return entry;
-        const { state: _sending, ...rest } = entry;
-        return { ...rest, optimistic: false, provisional: true, ...(receipt.outcome === "steered" ? { state: "queued" } : {}) };
-      }));
       // Only the copy of the message restored into the composer is cleared: a draft typed since is the user's.
       if (this.state.draft === submission.content) this.writeDraft({ draft: "", images: [] });
-    },
-    async terminal(outcome, { event, conversationId, link }) {
-      await new Promise(resolve => this.reveal.complete(event.run_id, resolve));
-      if (!link.live) return;
-      this.endedRuns.add(event.run_id);
-      if (this.run?.id !== event.run_id && ![...this.pendings.values()].some(submission => submission.runId === event.run_id)) {
-        // Not the Run this page holds (never adopted, or another adopted since): its row goes and the saved reply is read.
-        this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === event.run_id)));
-        if (outcome.failed) this.failReply(event.run_id, outcome.error);
-        await this.refresh(conversationId).catch(this.failRead);
-        return;
-      }
-      // A Run that ended before the server took the message that started it sends the words back; a server that steers keeps them.
-      const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === event.run_id);
-      if (unaccepted) this.restoreSubmission(unaccepted);
-      else this.terminalRun = { id: event.run_id, failed: outcome.failed, cancelled: outcome.cancelled === true };
-      this.run = null;
-      this.setState({ runState: null });
-      if (outcome.failed) this.failReply(event.run_id, outcome.error);
-      if (!unaccepted) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
-      // A read that fails here is taken back by the polling that the reply still syncing starts.
-      await this.refresh(conversationId).catch(this.failRead);
+      this.render();
     },
     // The server refused one message: its words go back to the composer, and a Run it did not start goes on as it was.
-    message_rejected(outcome) {
-      const submission = this.pendings.get(outcome.clientMessageId);
+    "message.rejected"(frame) {
+      const submission = this.pendings.get(frame.client_message_id);
       if (!submission) return;
       this.restoreSubmission(submission);
-      this.fail(outcome.error ?? new ChatError("connectionFailed"));
+      this.fail(frame.error ?? new ChatError("connectionFailed"));
     },
-    session_error(outcome) {
-      const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === this.run?.id);
+    "session.error"(frame) {
+      const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.leadsRun && !submission.accepted);
       if (unaccepted) this.restoreSubmission(unaccepted);
-      this.fail(outcome.error ?? new ChatError("connectionFailed"));
+      this.fail(frame.error ?? new ChatError("connectionFailed"));
     }
   };
 
@@ -819,13 +582,10 @@ export class ConversationController {
     this.setState(state => ({ approvals: { ...state.approvals, [toolCallId]: decision } }));
   }
 
-  async reportToolResult(request, connection, result, base = request) {
+  /** The answer to a Runtime request goes back on the session; the log carries what it did to the step. */
+  async reportToolResult(request, connection, result) {
     const failed = result.status === "error";
     const error = failed ? { ...result.error, message: this.describeError(result.error) } : undefined;
-    this.publishTimeline(timeline => timeline.upsertTool({
-      ...base, locality: "client", status: failed ? "failed" : "completed",
-      ...(failed ? { error: result.error } : { result: result.result })
-    }));
     connection.toolResult(request.run_id, request.tool_call_id, failed ? { status: "error", error } : result);
   }
 
@@ -857,27 +617,23 @@ export class ConversationController {
 
   restoreSubmission(submission, preservePending = false) {
     if (!submission) return;
-    this.updateMessages(current => current.filter(message => message.id !== submission.optimisticMessageId
-      && !(submission.leadsRun && message.transient && message.run_id === submission.runId && message.role === "assistant")));
     this.writeDraft({ draft: submission.content, images: submission.files });
-    if (submission.leadsRun && this.run?.id === submission.runId) {
-      this.run = null;
-      this.resetTimeline();
-      this.setState({ activeRun: null });
-    }
     submission.dispatched = false;
+    // Its words are back in the composer; a kept key is for a resend, and the thread shows the message again when it goes out.
+    submission.hidden = true;
     clearTimeout(submission.ackTimer);
     if (!preservePending) {
       this.pendings.delete(submission.clientMessageId);
       this.pendingStore.settle(submission.clientMessageId);
     }
+    this.render();
   }
 
   async send() {
     const { conversationId, activeRun, draft, images } = this.state;
     if (conversationId && (draft.trim() || images.length)) this.setState({ failedRun: null });
-    const steering = this.transport.steerable && Boolean(this.run);
-    // A page still reading its first snapshot takes the message too: it shows at once and is sent when the session is up.
+    const steering = this.transport.steerable && Boolean(activeRun);
+    // A page still reading its first page takes the message too: it shows at once and is sent when the session is up.
     if (!conversationId || (activeRun && !this.transport.steerable) || (!draft.trim() && images.length === 0)) return;
     const connection = this.connection;
     // Only a send that meets a session down for a while says so; until then the retries are silent.
@@ -885,22 +641,22 @@ export class ConversationController {
     this.setState({ error: null });
     let submission = null;
     try {
-      const retry = [...this.pendings.values()].find(entry => entry.conversationId === conversationId && (!this.transport.steerable || entry.awaitingUser));
+      const retry = [...this.pendings.values()].find(entry => entry.conversationId === conversationId && !entry.accepted && (!this.transport.steerable || entry.awaitingUser));
       // The message's id is minted here, when the user sends, and a retry of the same message keeps it.
       const clientMessageId = retry?.clientMessageId ?? newId("message");
       const files = retry?.files ?? [...images];
       const attachments = retry ? retry.attachments : await this.attachments.prepareAll(files);
       submission = retry ?? new PendingSubmission({
-        conversationId, runId: steering ? this.run.id : newId("run"), clientMessageId, content: draft, attachments, files, stableId: this.transport.steerable
+        conversationId, runId: steering ? activeRun : newId("run"), clientMessageId, content: draft, attachments, files
       });
       submission.leadsRun = !steering;
       submission.awaitingUser = false;
+      submission.hidden = false;
       const { runId, content } = submission;
       this.pendings.set(clientMessageId, submission);
       this.pendingStore.save(submission.record());
-      if (submission.leadsRun) { this.run = null; this.resetTimeline(); }
-      this.showSubmission(submission);
       this.writeDraft({ draft: "", images: [] });
+      this.render();
       // Only a session the server has answered with session.ready takes run messages; a socket that is merely open is still saying hello.
       if (connection?.ready && this.state.connection === "open") {
         this.markDispatched(submission);
@@ -917,19 +673,19 @@ export class ConversationController {
   }
 
   cancel() {
-    if (!this.run || !this.connection?.ready) return;
-    this.connection.cancel(this.run.id);
-    this.tools.cancel(this.run.id);
+    const runId = this.projection.activeRun;
+    if (!runId || !this.connection?.ready) return;
+    this.connection.cancel(runId);
+    this.tools.cancel(runId);
     this.setState({ status: { key: "stopping" } });
   }
 
-  // Polling while a reply settles without a live stream ------------------
+  // Polling while there is no live stream ---------------------------------
 
   syncPolling() {
-    const { activeRun, conversationId } = this.state;
-    // Polling is for a Run the page has no stream for: one it is not holding, or one whose session is gone and out of retries (an outage that outlasted them). The key follows that, so polling starts the moment either becomes true.
-    const streamless = this.run?.id !== activeRun || this.state.connection !== "open";
-    const key = conversationId && this.state.snapshotConversationId === conversationId && ((activeRun && streamless) || this.state.compacting) ? `${conversationId}:${activeRun ?? ""}:${this.state.compacting}` : null;
+    const { activeRun, conversationId, compacting, connection, snapshotConversationId } = this.state;
+    // A session that is not open (an outage that outlasted the retries) brings nothing: while something is going on, the log is read instead.
+    const key = conversationId && snapshotConversationId === conversationId && connection !== "open" && (activeRun || compacting) ? `${conversationId}:${activeRun ?? ""}:${compacting}` : null;
     if (key === this.pollKey) return;
     this.pollKey = key;
     clearInterval(this.pollTimer);
@@ -938,3 +694,5 @@ export class ConversationController {
     this.pollTimer = setInterval(() => void this.refresh(conversationId).catch(this.failRead), this.pollMs);
   }
 }
+
+const isEnded = status => ["completed", "failed", "cancelled", "interrupted"].includes(status);

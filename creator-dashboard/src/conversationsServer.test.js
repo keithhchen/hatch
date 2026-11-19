@@ -36,6 +36,8 @@ test('worker and Assistant conversation paths reach Registry for bearer and cook
     ['GET', `${workers}/research/events`],
     ['POST', `${workers}/research/stop`, {}],
     ['GET', '/v1/creator/assistant/conversation/messages'],
+    ['GET', '/v1/creator/assistant/conversation/log?after=12&limit=200'],
+    ['GET', '/v1/creator/assistant/conversation/log?turns=20&before=7'],
     ['POST', '/v1/creator/assistant/conversation/messages?wait=60', { content: 'hi' }]
   ];
   try {

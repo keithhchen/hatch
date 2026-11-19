@@ -221,9 +221,6 @@ const update = (id: number, text: string) => ({ update_id: id, message: { messag
 test("A burst of Telegram messages steers one Run: every message is in it, and one reply is owed", async () => {
   const env = await setup({ model: (turn, call) => call === 1 ? { delayMs: 200, text: turn2 => `看到${turn2.said.length}条` } : { text: "不该再有一轮" } });
   try {
-    // What the Run says as it goes is live and not recorded; what it did is the journal's.
-    const live: string[] = [];
-    env.log.live(assistantFeedKey(ACCOUNT), event => { live.push(String(event.type)); });
     const first = await env.telegramUpdate(update(1, "第一条"));
     await sleep(60);
     const burst = [...await env.telegramUpdate(update(2, "第二条")), ...await env.telegramUpdate(update(3, "第三条")), ...await env.telegramUpdate(update(3, "第三条"))];
@@ -237,7 +234,7 @@ test("A burst of Telegram messages steers one Run: every message is in it, and o
     assert.deepEqual(lines.filter(line => line.role === "user").map(line => line.text), ["第一条", "第二条", "第三条"], "the repeated update was one message");
     const recorded = await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000);
     const kinds = recorded.map(entry => entry.event.type);
-    assert.ok(live.includes("delta") && kinds.includes("message_end") && kinds.includes("run_end"), "Studio observers see the Run like a worker's");
+    assert.ok(kinds.includes("message_end") && kinds.includes("run_end"), "Studio observers see the Run like a worker's");
     assert.ok(recorded.every(entry => typeof entry.event.run_id === "string"), "every event names its Run");
     assert.equal(recorded.filter(entry => entry.event.type === "message").length, 3, "each message is an event, and names itself");
     assert.ok(recorded.filter(entry => entry.event.type === "message" || entry.event.type === "message_end").every(entry => typeof entry.event.message_id === "string"));

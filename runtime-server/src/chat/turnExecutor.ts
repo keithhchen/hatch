@@ -1,10 +1,10 @@
 import { ClientToolBroker } from "../clientBroker.js";
 import { type ConversationRecord, type ConversationRepository, type ConversationRunRecord } from "../conversationRepository.js";
-import { type BoundRunStart, type ConversationMessage, type OutboundMessage } from "../protocol.js";
+import { type BoundRunStart, type ConversationMessage } from "../protocol.js";
 import { RunStateMachine } from "../runState.js";
 import type { RuntimeStore } from "../store.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
-import { withPartialOutput } from "./partialOutput.js";
+import { RunLog, throughLog } from "./runLog.js";
 import type { RunRegistry } from "./chatService.js";
 import type { RunCompactions, TurnCompaction } from "./chatCompaction.js";
 import type { RunEventHub } from "./runEventHub.js";
@@ -27,7 +27,10 @@ export type Turn<Scope> = {
   persistedUser: ConversationMessage;
   state: RunStateMachine;
   broker: ClientToolBroker;
-  publish: (message: OutboundMessage) => void;
+  /** Where this Run writes the conversation's log: text and thinking are joined before they are written. */
+  log: RunLog;
+  /** The store this Run appends through: its events keep the Run's order and `run_seq`. */
+  store: RuntimeStore;
   signal: AbortSignal;
   /** The client of the latest message: it decides which tools may run and what the reminder says. */
   clientOf: () => ClientAttributes;
@@ -61,10 +64,10 @@ export class RunClientMissing extends Error {
 
 export class TurnExecutor<Scope> implements RunExecutor {
   constructor(private readonly deps: {
-    repository: Pick<ConversationRepository, "getConversation" | "transitionRun" | "claimSteeredMessages" | "savePartialOutput" | "requestToolCall">;
+    repository: Pick<ConversationRepository, "getConversation" | "transitionRun" | "claimSteeredMessages" | "requestToolCall">;
     /** Ends the Run only while this executor holds it: the executor's way out, the same one a stop or a sweep takes. */
     terminator: Pick<RunTerminator, "end">;
-    store: Pick<RuntimeStore, "append" | "readConversation">;
+    store: Pick<RuntimeStore, "append" | "readConversation" | "maxRunSeq">;
     hub: RunEventHub;
     registry: RunRegistry<Scope>;
     scopes: ScopeResolver<Scope>;
@@ -79,26 +82,31 @@ export class TurnExecutor<Scope> implements RunExecutor {
     const conversation = await repository.getConversation(run.conversationId);
     if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);
     const scope = registry.scopeOf(run.id) ?? await this.deps.scopes.resolve(conversation, control.signal);
+    const runLog = await RunLog.open({ store, hub, conversationId: conversation.id, runId: run.id });
+    const runStore = throughLog(store as RuntimeStore, runLog, run.id);
     // The repository appends each claimed message to the transcript in the claim's own transaction.
     const claimSteered = async (): Promise<ConversationMessage[]> => {
       const claimed = (await repository.claimSteeredMessages(run.id)).map(({ message }) => message);
       // A queued message is part of the Run now: every client of the conversation reads it in place of the queued row.
-      if (claimed.length) hub.publish(conversation.id, { type: "conversation.changed", committed: "claimed" });
+      if (claimed.length) await hub.advancedToHead(conversation.id);
       return claimed;
     };
-    const partial = withPartialOutput(
-      (message) => hub.publish(conversation.id, message),
-      (text) => repository.savePartialOutput(run.id, text)
-    );
-    const publish = (message: OutboundMessage): void => partial.publish(message as unknown as Record<string, unknown>);
-    const state = new RunStateMachine(run.id, conversation.id, store as RuntimeStore, async (ending) => {
+    const state = new RunStateMachine(run.id, conversation.id, runStore, async (ending) => {
       const { run: ended, ended: did } = await this.deps.terminator.end(run.id, ending);
       return { ended: did, status: ended.status };
     }, async (status, reason) => {
+      // The repository wrote the `turn.state` row with the status change.
       await repository.transitionRun(run.id, status, reason);
-      publish({ type: "turn.state", run_id: run.id, status, ...(reason ? { reason } : {}) });
+      await hub.advancedToHead(conversation.id);
     }, run.status);
-    const broker = new ClientToolBroker(async (message) => publish(message), store as RuntimeStore, this.deps.toolTimeoutMs, { request: (call) => repository.requestToolCall(call) });
+    // Client tool calls are in the log; a client that must answer one is told by the connection that serves it.
+    const broker = new ClientToolBroker(async () => undefined, runStore, this.deps.toolTimeoutMs, { request: (call) => repository.requestToolCall(call) });
+    // Before the Run ends, what it showed is in the log: the calls still waiting are recorded as cancelled (a Run that has ended can no longer write), and the text
+    // is flushed, because the ending keeps it as the reply of a Run that does not complete. A log that cannot be written does not keep the Run from ending.
+    state.beforeEnd(async () => {
+      await broker.cancelAll("The Run stopped").catch((error) => log.error("run_tool_cancel_unrecorded", { run_id: run.id, error }));
+      await runLog.flush().catch((error) => log.error("run_log_flush_failed", { run_id: run.id, error }));
+    });
     control.toolSession({
       handleResult: (result) => broker.handleResult(result),
       pendingRequests: () => broker.pendingRequests(),
@@ -127,16 +135,16 @@ export class TurnExecutor<Scope> implements RunExecutor {
       const recording = this.deps.usage;
       const usage = recording ? usageSink(recording.recorder, recording.attribute(scope, run), log) : undefined;
       await this.deps.runner.run({
-        run, conversation, scope, input, persistedUser: last, state, broker, publish, signal: control.signal,
+        run, conversation, scope, input, persistedUser: last, state, broker, log: runLog, store: runStore, signal: control.signal,
         clientOf: () => registry.clientOf(conversation.id) ?? (() => { throw new RunClientMissing(conversation.id); })(),
         claimSteered,
         onSteer: control.onSteer,
-        compaction: this.deps.compactions.forRun({ run, conversation, state, publish, signal: control.signal, usage }),
+        compaction: this.deps.compactions.forRun({ run, conversation, state, signal: control.signal, usage }),
         usage
       });
     } finally {
       control.signal.removeEventListener("abort", releaseTools);
-      await partial.flush();
+      await runLog.flush().catch((error) => log.error("run_log_flush_failed", { run_id: run.id, error }));
     }
   }
 }

@@ -95,24 +95,10 @@ export class WebConversationTransport extends ConversationTransport {
     }).then(created => { if (this.creating?.id === id) this.creating = null; return created; });
   }
 
-  snapshot(conversationId) {
-    return this.request(this.conversationUrl(conversationId, "/snapshot", { view: "page" }));
-  }
-
-  history(conversationId, { beforeCursor }) {
-    return this.request(this.conversationUrl(conversationId, "/history", { before_cursor: beforeCursor }));
-  }
-
-  events(conversationId, { afterCursor, throughCursor }) {
-    return this.request(this.conversationUrl(conversationId, "/events", {
-      view: "page", after_cursor: String(afterCursor ?? 0), limit: "100",
-      ...(throughCursor != null ? { through_cursor: String(throughCursor) } : {})
-    }));
-  }
-
-  async run(conversationId, runId) {
-    const payload = await this.request(this.conversationUrl(conversationId, `/runs/${encodeURIComponent(runId)}`));
-    return payload.run;
+  /** A page of the conversation's log: events after a position, or the latest turns (before a position). */
+  log(conversationId, { after, limit, turns, before }) {
+    const parameters = { ...(after != null ? { after: String(after) } : {}), ...(limit != null ? { limit: String(limit) } : {}), ...(turns != null ? { turns: String(turns) } : {}), ...(before != null ? { before: String(before) } : {}) };
+    return this.request(this.conversationUrl(conversationId, "/log", parameters));
   }
 
   toolDetail(conversationId, { run_id: runId, tool_call_id: toolCallId }) {
@@ -139,8 +125,9 @@ export class BrowserRuntimeConnection extends RuntimeConnection {
     this.socket.onclose = onClose;
   }
 
-  hello(localTools) {
-    this.frame({ type: "client.hello", protocol_version: "0.8", conversation_id: this.conversationId, ...this.scope, client_version: "hatch-web", local_tools: localTools, time_zone: browserTimeZone() });
+  /** `after`: the log position this page holds; the server sends every event after it, then follows the log. */
+  hello(localTools, after) {
+    this.frame({ type: "client.hello", protocol_version: "0.8", conversation_id: this.conversationId, ...this.scope, client_version: "hatch-web", local_tools: localTools, time_zone: browserTimeZone(), ...(after != null ? { after } : {}) });
   }
 
   send({ runId, clientMessageId, content = "", attachments = [], taskStart = false, localTools }) {

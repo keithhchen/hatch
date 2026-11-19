@@ -1,3 +1,4 @@
+import { legacyFrames } from "./testSupport.js";
 import { FileConversationRepository } from "./conversationRepository.js";
 import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -333,7 +334,7 @@ test("runtime server exposes visible conversation history for client hydration",
       { type: "tool_call", tool_call_id: "call_file_read" },
       { type: "text", start: beforeTool.length, end: beforeTool.length + afterTool.length }
     ]
-  });
+  } as never);
 
   const response = await fetch(`${serverUrl}/v1/conversations/${conversationId}/history?${scope}`);
   assert.equal(response.status, 200);
@@ -431,7 +432,7 @@ test("task_start persists a model turn, assembles it, and hides it only from vis
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
-  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  socket.on("message", (data) => messages.push(...legacyFrames(String(data))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -529,7 +530,7 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
-  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  socket.on("message", (data) => messages.push(...legacyFrames(String(data))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -553,18 +554,13 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
     message.type === "turn.completed" && message.run_id === "run_ordered_history"
   ));
 
-  const visible = await store.readVisibleConversation("ordered-history");
-  const assistant = visible.find((message) => message.role === "assistant");
-  assert.equal(assistant?.content, `${beforeTool}${afterTool}`);
-  assert.deepEqual(assistant?.parts, [
-    { type: "text", start: 0, end: firstBoundary },
-    { type: "tool_call", tool_call_id: "call_interleave" },
-    {
-      type: "text",
-      start: firstBoundary,
-      end: beforeTool.length + afterTool.length
-    }
-  ]);
+  const [conversation] = [...new Set((await store.readEvents()).map((event) => "conversation_id" in event ? event.conversation_id : undefined))].filter(Boolean) as string[];
+  const { events } = await store.readLogPage(conversation!, { after: 0, limit: 100 });
+  // The log keeps text and the step in the order they happened; the paragraphs are the fold's to join.
+  assert.deepEqual(
+    events.filter((event) => event.type === "assistant.text" || event.type === "tool.call").map((event) => event.type === "assistant.text" ? ["text", String(event.content)] : ["tool", String(event.tool_call_id)]),
+    [["text", beforeTool], ["tool", "call_interleave"], ["tool", "call_interleave"], ["text", afterTool]]
+  );
   socket.close();
 });
 }
@@ -606,7 +602,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
-  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  socket.on("message", (data) => messages.push(...legacyFrames(String(data))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -710,7 +706,7 @@ test("thinking deltas stream with Pi indexes and persist the same ordered snapsh
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
-  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  socket.on("message", (data) => messages.push(...legacyFrames(String(data))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -746,12 +742,12 @@ test("thinking deltas stream with Pi indexes and persist the same ordered snapsh
       { kind: "text", content: "Done.", offset: 0 }
     ]
   );
-  const visible = await store.readVisibleConversation("thinking-conversation");
-  assert.deepEqual(visible.at(-1)?.parts, [
-    { type: "thinking", contentIndex: 3, content: "considering the request" },
-    { type: "text", start: 0, end: 5 }
-  ]);
-  assert.equal(visible.at(-1)?.content, "Done.");
+  const [conversation] = [...new Set((await store.readEvents()).map((event) => "conversation_id" in event ? event.conversation_id : undefined))].filter(Boolean) as string[];
+  const { events } = await store.readLogPage(conversation!, { after: 0, limit: 100 });
+  const thinking = events.filter((event) => event.type === "assistant.thinking");
+  assert.deepEqual(thinking.map((event) => [event.index, event.phase]).filter(([, phase]) => phase !== "delta"), [[3, "start"], [3, "end"]]);
+  assert.equal(thinking.at(-1)?.content, "considering the request");
+  assert.equal(events.filter((event) => event.type === "assistant.text").map((event) => event.content).join(""), "Done.");
   socket.close();
 });
 
@@ -782,7 +778,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
-  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  socket.on("message", (data) => messages.push(...legacyFrames(String(data))));
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -2218,7 +2214,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
   socket.on("message", (data) => {
-    messages.push(JSON.parse(String(data)) as OutboundMessage);
+    messages.push(...legacyFrames(String(data)));
   });
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
@@ -2253,7 +2249,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
   const currentSocket = new WebSocket(serverUrl);
   const currentMessages: OutboundMessage[] = [];
   currentSocket.on("message", (data) => {
-    currentMessages.push(JSON.parse(String(data)) as OutboundMessage);
+    currentMessages.push(...legacyFrames(String(data)));
   });
   await new Promise<void>((resolve, reject) => {
     currentSocket.once("open", resolve);
@@ -2297,7 +2293,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
   socket.on("message", (data) => {
-    messages.push(JSON.parse(String(data)) as OutboundMessage);
+    messages.push(...legacyFrames(String(data)));
   });
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
@@ -2342,7 +2338,7 @@ test("server requires client hello before tool results", async () => {
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
   socket.on("message", (data) => {
-    messages.push(JSON.parse(String(data)) as OutboundMessage);
+    messages.push(...legacyFrames(String(data)));
   });
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
@@ -2417,7 +2413,7 @@ test("a refused message that asked for reject_by_message is message.rejected, na
 async function openConversationSocket(serverUrl: string, conversationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
   const socket = new WebSocket(serverUrl);
   socket.on("message", (data) => {
-    messages.push(JSON.parse(String(data)) as OutboundMessage);
+    messages.push(...legacyFrames(String(data)));
   });
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
@@ -2536,8 +2532,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
   socket.on("message", (data) => {
-    const message = JSON.parse(String(data)) as OutboundMessage;
-    messages.push(message);
+    messages.push(...legacyFrames(String(data)));
   });
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);

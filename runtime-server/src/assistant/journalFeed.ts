@@ -9,12 +9,12 @@ import { conversationOfFeedKey, studioVocabulary } from "./studioVocabulary.js";
  * The Assistant's events for Studio observers, read from Chat's own record: the conversation's journal, in Studio's
  * words. The cursor is the journal's cursor, so a client resumes by it after any break and finds every event once.
  * Nothing is copied into a second log; a feed that is asked to append refuses, because the Run's journal is the record.
- * What is said live and not recorded (token deltas, steps) comes from the hub, with no cursor of its own.
+ * Text, thinking and steps are rows of the conversation's event log, which the Studio page reads by position; this feed only wakes it.
  */
 export class JournalFeed implements EventLog {
   constructor(private readonly deps: {
     repository: Pick<ConversationRepository, "journalPage" | "journalHead">;
-    hub: Pick<RunEventHub, "subscribe" | "catchUp">;
+    hub: Pick<RunEventHub, "subscribe">;
   }) {}
 
   private conversation(key: string): string {
@@ -39,15 +39,6 @@ export class JournalFeed implements EventLog {
   consistent<T>(key: string, read: (head: EventCursor) => Promise<T>): Promise<T> { return this.head(key).then(read); }
 
   onAppend(key: string, wake: () => void): Unsubscribe {
-    return this.deps.hub.subscribe(this.conversation(key), { push: () => wake() });
-  }
-
-  /** What has been said of the running turn so far, then what is said from now on. */
-  live(key: string, push: (event: ConversationEvent) => void): Unsubscribe {
-    const conversation = this.conversation(key);
-    const unsubscribe = this.deps.hub.subscribe(conversation, { push: event => { for (const shown of studioVocabulary({ hub: event })) push(shown); } });
-    const soFar = this.deps.hub.catchUp(conversation);
-    if (soFar) for (const shown of studioVocabulary({ hub: soFar })) push(shown);
-    return unsubscribe;
+    return this.deps.hub.subscribe(this.conversation(key), () => wake());
   }
 }

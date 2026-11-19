@@ -22,20 +22,18 @@ const message = (n: number): AcceptSubmissionInput => ({
   canonicalUser: { role: "user", content: `question ${n}` }
 });
 
-type Harness = { repository: ConversationRepository; store: RuntimeStore | PostgresStore; service: ChatService<object>; adopted: string[]; heard: Array<Record<string, unknown>> };
+type Harness = { repository: ConversationRepository; store: RuntimeStore | PostgresStore; service: ChatService<object>; adopted: string[] };
 const databaseUrl = process.env.HATCH_TEST_DATABASE_URL;
 
 function harness(repository: ConversationRepository, store: Harness["store"]): Harness {
-  const hub = new RunEventHub();
-  const heard: Array<Record<string, unknown>> = [];
-  hub.subscribe(id, { push: (event) => { heard.push(event); } });
+  const hub = new RunEventHub(undefined, async () => 0);
   const adopted: string[] = [];
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: (run: ConversationRunRecord) => { adopted.push(run.id); }, executorId: "exec-a", holdsConversation: () => false, steered: () => undefined },
     hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>()
   });
-  return { repository, store, service, adopted, heard };
+  return { repository, store, service, adopted };
 }
 
 async function withBackend(name: "memory" | "postgres", body: (h: Harness) => Promise<void>): Promise<void> {
@@ -76,6 +74,7 @@ const retrier = (h: Harness, options: { skip?: boolean; windowMs?: number } = {}
   repository: h.repository,
   skip: async () => options.skip === true,
   windowMs: options.windowMs,
+  announce: async (run, until) => { await h.store.append({ type: "run.retrying", conversation_id: run.conversationId, run_id: run.id, until: until.toISOString() }); },
   start: async (run, key, runId) => h.service.retry({
     principal: { kind: "account", accountId: "owner" } as never, conversation: (await h.repository.getConversation(run.conversationId))!, scope: {},
     client: { client: "web" }, key, runId, corpusDigest: "corpus", requiresLocalTools: false
@@ -83,7 +82,7 @@ const retrier = (h: Harness, options: { skip?: boolean; windowMs?: number } = {}
 });
 const interrupt = async (h: Harness, n: number) => {
   const { run } = await h.repository.acceptSubmission(message(n));
-  await h.repository.savePartialOutput(run.id, "The first half");
+  await h.store.append({ type: "assistant.text", conversation_id: id, run_id: run.id, content: "The first half" });
   return (await h.repository.endRun(run.id, endingOf("interrupted", "The Runtime restarted"))).run;
 };
 const runs = async (h: Harness) => h.repository.listRuns(id);
@@ -150,7 +149,7 @@ for (const backend of ["memory", "postgres"] as const) {
       } else assert.equal(all.length, MAX_RESTART_RETRIES + 1, "no third retry");
     }
     assert.equal((await h.repository.getRun(id, latest.id))!.status, "interrupted");
-    assert.equal(h.heard.filter((event) => event.type === "turn.failed").length, 0, "no notice is sent by the retrier");
+    assert.equal((await h.store.readLogPage(id, { after: 0, limit: 200 })).events.filter((event) => event.type === "run.state" && (event as unknown as { status: string }).status === "failed").length, 0, "no notice is sent by the retrier");
   }));
 
   test(`${backend}: RESILIENT: a crash between ending the Run and starting its retry is made up by the next scan; an old interruption and a plain failure are left alone`, options, () => withBackend(backend, async (h) => {
@@ -185,6 +184,7 @@ test("RESILIENT: a database error in the scan is logged and the next scan works;
       restartInterruptedRuns: async () => { if (fail) throw new Error("db down"); return [run]; },
       listRuns: async () => [run]
     },
+    announce: async () => undefined,
     start: async (_run, key) => { started.push(key); throw new Error("principal is gone"); }
   });
   await subject.tick();

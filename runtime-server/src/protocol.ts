@@ -94,6 +94,8 @@ export const ClientHelloSchema = z.object({
   client_version: z.string().max(MAX_PROTOCOL_ID_CHARS).optional(),
   local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length),
   time_zone: TimeZoneSchema.optional(),
+  /** The position of the last log event the client holds; the server sends what follows. Absent: from where the log stands now. */
+  after: z.number().int().min(0).optional(),
   ...ClientAttributeFields
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
@@ -310,15 +312,11 @@ export const TurnCancelSchema = z.object({
   reason: z.string().max(4096).optional()
 }).strict();
 
-/**
- * Observe the conversation from a cursor. `stream: true` adds the live deltas of the
- * Run to its durable events; `stream: false` delivers durable events only.
- */
+/** Observe the conversation's log from a position (absent: from where it stands now), replacing any earlier observation of this connection. */
 export const ConversationSubscribeSchema = z.object({
   type: z.literal("conversation.subscribe"),
   conversation_id: ProtocolIdSchema,
-  stream: z.boolean(),
-  after_cursor: z.number().int().min(0).optional()
+  after: z.number().int().min(0).optional()
 }).strict();
 
 export const InboundMessageSchema = z.discriminatedUnion("type", [

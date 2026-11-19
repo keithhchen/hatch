@@ -1,78 +1,58 @@
-import { RESYNC_EVENT, type EventRelay } from "./eventRelay.js";
-import { TERMINAL_STATUSES } from "./runResult.js";
+import { reported } from "../observability/reported.js";
+import type { EventRelay } from "./eventRelay.js";
 
-/** A Run's text longer than this keeps only its tail in memory; the snapshot holds all of it. */
-const MAX_LIVE_TEXT = 1024 * 1024;
-
-/** The text of a conversation's current Run seen so far, from `base`: what a late observer needs to catch up. */
-type LiveText = { runId: unknown; base: number; text: string };
-
-/** Receives an event without waiting. A sink that cannot keep up throws and is dropped; it reconnects by cursor. */
+/** Receives an event without waiting. A sink that cannot keep up throws and is dropped; it reconnects by position. */
 export interface EventSink {
   push(event: Record<string, unknown>): void;
 }
 
+export type AdvancedListener = (position: number) => void;
+
 /**
- * Live events of the Runs, wherever they execute. Publishing never awaits a consumer, so a slow client can
- * fall behind or be dropped but cannot slow a Run. With a relay, other instances' events arrive here too.
+ * Tells observers a conversation's log advanced, wherever the Run executes. It carries no events: whoever appends to the
+ * log calls `advanced` after the append commits, and observers read the log by position. Never awaits a listener.
+ * With a relay, other instances' news arrives here too.
  */
 export class RunEventHub {
-  private readonly sinks = new Map<string, Set<EventSink>>();
-  private readonly live = new Map<string, LiveText>();
+  private readonly listeners = new Map<string, Set<AdvancedListener>>();
 
-  constructor(private readonly relay?: EventRelay) {}
+  /** `head` is where a conversation's log stands now; it serves whoever advanced the log without knowing its position. */
+  constructor(private readonly relay?: EventRelay, private readonly head?: (conversationId: string) => Promise<number>) {}
 
   /** Starts hearing the other instances; resolves to the way to stop. */
   listen(): Promise<() => Promise<void>> {
-    return this.relay?.subscribe((conversationId, event) => this.deliver(conversationId, event), () => this.resyncAll()) ?? Promise.resolve(async () => undefined);
+    return this.relay?.subscribe((conversationId, position) => this.deliver(conversationId, position)) ?? Promise.resolve(async () => undefined);
   }
 
-  subscribe(conversationId: string, sink: EventSink): () => void {
-    const group = this.sinks.get(conversationId) ?? new Set<EventSink>();
-    group.add(sink);
-    this.sinks.set(conversationId, group);
+  subscribe(conversationId: string, listener: AdvancedListener): () => void {
+    const group = this.listeners.get(conversationId) ?? new Set<AdvancedListener>();
+    group.add(listener);
+    this.listeners.set(conversationId, group);
     return () => {
-      group.delete(sink);
-      if (group.size === 0 && this.sinks.get(conversationId) === group) this.sinks.delete(conversationId);
+      group.delete(listener);
+      if (group.size === 0 && this.listeners.get(conversationId) === group) this.listeners.delete(conversationId);
     };
   }
 
-  publish(conversationId: string, event: Record<string, unknown>): void {
-    this.deliver(conversationId, event);
-    this.relay?.publish(conversationId, event);
+  /** The log of `conversationId` holds events up to `position`, committed. */
+  advanced(conversationId: string, position: number): void {
+    this.deliver(conversationId, position);
+    this.relay?.publish(conversationId, position);
   }
 
-  /** The Run's text so far as one delta; a client that already holds part of it skips that part by offset. */
-  catchUp(conversationId: string): Record<string, unknown> | undefined {
-    const live = this.live.get(conversationId);
-    return live && { type: "assistant.delta", run_id: live.runId, delta: { kind: "text", content: live.text, offset: live.base } };
-  }
-
-  private track(conversationId: string, event: Record<string, unknown>): void {
-    if (event.type === "turn.state" && TERMINAL_STATUSES.has(String(event.status))) { this.live.delete(conversationId); return; }
-    const delta = event.type === "assistant.delta" ? event.delta as { kind?: string; content?: string; offset?: number } : undefined;
-    if (delta?.kind !== "text" || typeof delta.content !== "string" || typeof delta.offset !== "number") return;
-    let live = this.live.get(conversationId);
-    // A new Run, or an event the relay dropped, starts the text again from where this delta is.
-    if (!live || live.runId !== event.run_id || live.base + live.text.length !== delta.offset) live = { runId: event.run_id, base: delta.offset, text: "" };
-    live.text += delta.content;
-    if (live.text.length > MAX_LIVE_TEXT) { const cut = live.text.length - MAX_LIVE_TEXT; live.text = live.text.slice(cut); live.base += cut; }
-    this.live.set(conversationId, live);
-  }
-
-  /** Events may have been missed on every conversation: each observer is told to read again. */
-  private resyncAll(): void {
-    this.live.clear();
-    for (const conversationId of [...this.sinks.keys()]) this.deliver(conversationId, RESYNC_EVENT);
+  /** For whoever wrote to the log through the repository and so knows no position: tells observers where the log stands now. */
+  async advancedToHead(conversationId: string): Promise<void> {
+    if (!this.head) throw new Error("This hub was built without a way to read the log head");
+    // What was written is written: a head that cannot be read costs observers a delay (their safety poll), never the writer.
+    try { this.advanced(conversationId, await this.head(conversationId)); } catch (error) { reported("log_advance_failed", { conversation_id: conversationId })(error); }
   }
 
   /** To this instance's observers only. */
-  private deliver(conversationId: string, event: Record<string, unknown>): void {
-    this.track(conversationId, event);
-    const group = this.sinks.get(conversationId);
+  private deliver(conversationId: string, position: number): void {
+    const group = this.listeners.get(conversationId);
     if (!group) return;
-    for (const sink of [...group]) {
-      try { sink.push(event); } catch { group.delete(sink); }
+    for (const listener of [...group]) {
+      try { listener(position); } catch { group.delete(listener); }
     }
   }
 }

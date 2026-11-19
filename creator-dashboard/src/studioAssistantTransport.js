@@ -6,58 +6,14 @@ const ROOT = "/v1/creator/assistant/conversation";
 /** The Assistant is one conversation per Expert; the page names it, the server knows it by the account. */
 export const ASSISTANT_CONVERSATION = "assistant";
 
-const RUN_END_ERRORS = {
-  failed: { code: "run_failed", message: "The reply failed. Send the message again." },
-  cancelled: { code: "run_cancelled", message: "The reply was stopped." },
-  interrupted: { code: "run_interrupted", message: "The reply was interrupted. Answer again." }
-};
-
-/** What the Assistant page's event stream says, as the Runtime's wire events the shared reducer already understands. */
-export function wireEventsOf(event) {
-  const run = event.run_id ? { run_id: event.run_id } : {};
-  switch (event.type) {
-    case "delta": return [{ type: "assistant.delta", ...run, delta: { kind: "text", content: event.text, ...(typeof event.offset === "number" ? { offset: event.offset } : {}) } }];
-    case "thinking": return [{ type: "assistant.delta", ...run, delta: { kind: "thinking_start", contentIndex: event.contentIndex } }];
-    case "thinking_delta": return [{ type: "assistant.delta", ...run, delta: { kind: "thinking_delta", contentIndex: event.contentIndex, delta: event.delta } }];
-    case "thinking_end": return [{ type: "assistant.delta", ...run, delta: { kind: "thinking_end", contentIndex: event.contentIndex, content: event.content } }];
-    case "tool":
-    case "tool_end": return [{
-      type: "tool_call.delta", ...run, tool_call_id: event.id, name: event.name, activity_message: event.activity, locality: "server",
-      status: event.type === "tool" ? "requested" : event.cancelled ? "cancelled" : event.isError ? "failed" : "completed"
-    }];
-    case "message": return [{ type: "conversation.changed", committed: "user", ...(event.message_id ? { message_id: event.message_id } : {}) }];
-    case "message_end": return [{ type: "conversation.changed", committed: "assistant" }];
-    // A queued message was taken up, a Run changed stage, or something no Run shows changed (a chat was linked).
-    case "state": return [{ type: "conversation.changed", committed: "claimed" }];
-    case "compacting": return [{ type: "turn.state", ...run, status: "compacting" }];
-    // The history is being summarized, in a Run or after a reply: the page waits for the end.
-    case "compaction_start": return [{ type: "conversation.compaction", active: true }];
-    case "compaction_end": return [{ type: "conversation.compaction", active: false }];
-    // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a terminal the page settles quietly
-    // (an interrupted one is answered again by the server, which the next read says).
-    case "run_end": return event.status === "completed"
-      ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
-      : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
-    default: return [];
-  }
-}
-
 const isImage = mediaType => String(mediaType ?? "").startsWith("image/");
 
-/** A message of the conversation API, as the shared chat reads a message. The id of a reply is `<run_id>:<n>`. */
-function messageOf(line) {
-  const attachments = (line.attachments ?? []).map(file => ({
-    attachment_id: file.asset_id ?? file.name, asset_id: file.asset_id, display_name: file.name,
-    media_type: file.type === "image" ? "image/jpeg" : "application/octet-stream", ...(file.bytes ? { source_bytes: file.bytes } : {})
-  }));
-  return {
-    id: line.id, role: line.role, content: line.text, timestamp: line.created_at,
-    ...(line.role === "assistant" ? { run_id: line.id.split(":")[0] } : {}),
-    ...(line.state ? { state: line.state } : {}),
-    ...(attachments.length ? { attachments } : {}),
-    ...(line.steps ? { parts: line.steps.parts, tool_calls: line.steps.tool_calls } : {})
-  };
-}
+/** A file of a message as the shared chat reads it (the Assistant names files by `name`, `type` and `bytes`). */
+const fileOf = file => file.display_name ? file : {
+  attachment_id: file.asset_id ?? file.name, asset_id: file.asset_id, display_name: file.name,
+  media_type: file.media_type ?? (file.type === "image" ? "image/jpeg" : "application/octet-stream"), ...(file.bytes ? { source_bytes: file.bytes } : {})
+};
+const publicEvent = event => event.attachments?.length ? { ...event, attachments: event.attachments.map(fileOf) } : event;
 
 /** What a message says to the API: its text, then each file by the id the upload returned. */
 const contentOf = (content, attachments) => attachments.length
@@ -65,9 +21,10 @@ const contentOf = (content, attachments) => attachments.length
   : content;
 
 /**
- * The Studio Assistant as a Conversation, over the conversation API: the page's view (with the journal cursor and the running
- * turn's partial text), older pages, the event stream resumed by cursor, and a send that carries the message's key as its Idempotency-Key.
- * `view` is what the page shows beside the chat (tasks, channels); it changes with every snapshot.
+ * The Studio Assistant as a Conversation, over the conversation API: its log (the same events and pages as Product Chat:
+ * `<ROOT>/log` by position, or by turns), its event stream, and a send that carries the message's key as its Idempotency-Key.
+ * `view` is what the page shows beside the chat (tasks, channels); it is read with the first page and when something it
+ * shows may have changed.
  */
 export class StudioAssistantTransport extends ConversationTransport {
   /** @param {(path: string, init?: object) => Promise<any>} request @param {{stream?: (url: string) => EventSource, timeZone?: string}} [options] */
@@ -76,13 +33,11 @@ export class StudioAssistantTransport extends ConversationTransport {
     this.request = request;
     this.openStream = stream;
     this.timeZone = timeZone;
-    this.cursor = 0;
     this.view = null;
     this.listeners = new Set();
   }
 
   get steerable() { return true; }
-  get journal() { return false; }
   get retriesRun() { return true; }
 
   /** Answers the Assistant again after a failed Run; the key is the Idempotency-Key, so a repeat is the same Run. */
@@ -93,43 +48,25 @@ export class StudioAssistantTransport extends ConversationTransport {
   subscribe = listener => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getView = () => this.view;
 
-  /** The journal cursor this client has heard to: the snapshot's, or a later one the stream delivered. */
-  advance(cursor) {
-    const next = Number(cursor);
-    if (Number.isSafeInteger(next) && next > this.cursor) this.cursor = next;
-  }
-
   /** The Expert's timezone, told once per page and never by reading. A refusal is not the page's problem. */
   announceTimeZone() {
     this.timeZoneSent ??= this.request(`${ROOT}/timezone`, { method: "PUT", body: JSON.stringify({ timezone: this.timeZone }) }).catch(() => undefined);
   }
 
-  async snapshot() {
-    this.announceTimeZone();
-    const view = await this.request(`${ROOT}/view`);
-    this.view = view;
-    this.advance(view.cursor);
+  /** The tasks and channels beside the chat. */
+  async loadView() {
+    this.view = await this.request(`${ROOT}/view`);
     for (const listener of this.listeners) listener();
-    const failed = view.status?.state === "failed" && view.status.runId;
-    return {
-      conversation: { id: ASSISTANT_CONVERSATION },
-      messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
-      compacting: view.status?.compacting === true, has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
-      // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
-      runs: view.status?.state === "running" && view.status.retrying ? [{ id: view.run_id, status: "running", retrying: true }]
-        : view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}), ...(view.activity ? { activity: { tool_calls: view.activity.tool_calls.map(call => ({ ...call, locality: "server" })), skill_events: [], skill_runs: [] } } : {}) }]
-        : failed ? [{ id: view.status.runId, status: "failed", failure: view.status.error }] : []
-    };
+    return this.view;
   }
 
-  async history(_conversationId, { beforeCursor }) {
-    const page = await this.request(`${ROOT}/messages?before=${encodeURIComponent(beforeCursor)}`);
-    return { messages: page.messages.map(messageOf), has_more: page.has_more, ...(page.before_cursor ? { before_cursor: page.before_cursor } : {}) };
-  }
-
-  run(_conversationId, runId) {
-    const failure = this.view?.status?.state === "failed" ? this.view.status.error : undefined;
-    return Promise.resolve({ id: runId, status: failure ? "failed" : "completed", ...(failure ? { failure } : {}) });
+  /** A page of the log: events after a position, or the latest turns (before a position). The first page also brings the view. */
+  async log(_conversationId, { after, limit, turns, before }) {
+    const query = new URLSearchParams({ ...(after != null ? { after: String(after) } : {}), ...(limit != null ? { limit: String(limit) } : {}), ...(turns != null ? { turns: String(turns) } : {}), ...(before != null ? { before: String(before) } : {}) });
+    const first = turns != null && before == null;
+    if (first) this.announceTimeZone();
+    const [page] = await Promise.all([this.request(`${ROOT}/log?${query}`), first ? this.loadView() : undefined]);
+    return { ...page, events: page.events.map(publicEvent) };
   }
 
   assetUrl(_conversationId, assetId) { return `${ROOT}/assets/${encodeURIComponent(assetId)}`; }
@@ -137,25 +74,62 @@ export class StudioAssistantTransport extends ConversationTransport {
   connect(conversationId, handlers) { return new StudioConnection(this, conversationId, handlers); }
 }
 
-/** One event stream, resumed from the cursor; a send is a request whose answer says whether it started the Run or joined it. */
+/**
+ * The live session: the event stream says when the log has moved, and the log is read from the position the page holds
+ * (so nothing is missed or told twice); a send is a request whose answer says whether it started the Run or joined it.
+ */
 export class StudioConnection extends RuntimeConnection {
   constructor(transport, conversationId, { onOpen, onEvent, onClose }) {
     super();
-    Object.assign(this, { transport, conversationId, onEvent, opened: false, closed: false });
-    this.source = transport.openStream(`${ROOT}/events?after_cursor=${transport.cursor}`);
+    Object.assign(this, { transport, conversationId, onEvent, onClose, opened: false, closed: false, cursor: null, pulling: false, again: false });
+    this.source = transport.openStream(`${ROOT}/events`);
     this.source.onopen = () => { this.opened = true; onOpen(); };
     this.source.onmessage = message => {
-      transport.advance(message.lastEventId);
-      for (const event of wireEventsOf(JSON.parse(message.data))) onEvent(event);
+      this.pull();
+      // The tasks and channels beside the chat change with the Assistant's own state.
+      try { if (JSON.parse(message.data)?.type === "state") transport.loadView().catch(() => undefined); } catch { /* an event that is not JSON only moved the log */ }
     };
-    this.source.onerror = () => {
-      if (this.closed) return;
-      this.close();
-      onClose();
-    };
+    this.source.onerror = () => this.lose();
   }
 
-  hello() { this.onEvent({ type: "session.ready", conversation_id: this.conversationId }); }
+  lose() {
+    if (this.closed) return;
+    this.close();
+    this.onClose();
+  }
+
+  /** The server's side of a hello is this client's own read: the session is ready, then the log after the position held. */
+  hello(_localTools, after) {
+    this.cursor = after ?? 0;
+    this.onEvent({ type: "session.ready", conversation_id: this.conversationId });
+    this.pull();
+  }
+
+  /** Read what the log holds past the cursor, one read at a time and one more when the stream said so meanwhile. */
+  pull() {
+    if (this.cursor === null || this.closed) return;
+    if (this.pulling) { this.again = true; return; }
+    this.pulling = true;
+    void (async () => {
+      try {
+        do {
+          this.again = false;
+          for (let more = true; more && !this.closed;) {
+            const page = await this.transport.request(`${ROOT}/log?after=${this.cursor}&limit=200`);
+            if (this.closed) return;
+            for (const event of page.events) {
+              this.cursor = Math.max(this.cursor, event.position);
+              this.onEvent({ type: "log.event", event: publicEvent(event) });
+              if (event.type === "run.state" && ["completed", "failed", "cancelled", "interrupted"].includes(event.status)) this.transport.loadView().catch(() => undefined);
+            }
+            if (!page.has_more) this.cursor = Math.max(this.cursor, page.head ?? 0);
+            more = page.has_more === true && page.events.length > 0;
+          }
+        } while (this.again && !this.closed);
+      } catch { this.lose(); }
+      finally { this.pulling = false; }
+    })();
+  }
 
   async send({ runId, clientMessageId, content = "", attachments = [] }) {
     const receipt = await this.transport.request(`${ROOT}/messages`, {
@@ -163,10 +137,11 @@ export class StudioConnection extends RuntimeConnection {
     });
     // A message that joined the running turn is queued until the turn takes it up.
     this.onEvent({ type: "message.accepted", conversation_id: this.conversationId, run_id: receipt.run_id ?? runId, client_message_id: clientMessageId, outcome: receipt.queued ? "steered" : "started" });
+    this.pull();
   }
 
   toolResult() {}
-  /** Asks the server to stop the Run; the stream then says how it ended. */
+  /** Asks the server to stop the Run; the log then says how it ended. */
   cancel() {
     this.transport.request(`${ROOT}/stop`, { method: "POST", body: "{}" }).catch(() => undefined);
   }

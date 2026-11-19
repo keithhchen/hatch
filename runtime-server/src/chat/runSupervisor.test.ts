@@ -17,7 +17,7 @@ const message = (n: number, lease?: string): AcceptSubmissionInput => ({
 
 async function setup(executor: RunExecutor) {
   const repository = new InMemoryConversationRepository();
-  const hub = new RunEventHub();
+  const hub = new RunEventHub(undefined, async () => 0);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "supervisor" });
   const supervisor = (executorId: string) => new RunSupervisor(repository, executor, async () => undefined, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
   return { repository, supervisor, hub };
@@ -178,6 +178,6 @@ test("a message that joins on another instance wakes the instance that executes 
 test("a storage failure while recording a tool result is an error for the caller, not an unknown tool call", async () => {
   const { repository } = await setup({ execute: async () => undefined });
   const failing = Object.assign(Object.create(repository), { answerToolCall: async () => { throw new Error("database down"); } }) as typeof repository;
-  const instance = new RunSupervisor(failing, { execute: async () => undefined }, async () => undefined, { executorId: "a", leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, new RunEventHub(), "a"));
+  const instance = new RunSupervisor(failing, { execute: async () => undefined }, async () => undefined, { executorId: "a", leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, new RunEventHub(undefined, async () => 0), "a"));
   await assert.rejects(instance.deliverToolResult(conversationId, "run-0", { type: "tool_call.result", run_id: "run-0", tool_call_id: "t1", status: "ok", result: {} } as never), /database down/);
 });

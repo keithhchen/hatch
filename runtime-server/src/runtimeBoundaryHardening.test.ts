@@ -1,3 +1,4 @@
+import { legacyFrames } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -938,7 +939,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
   try {
     first = await connectEntitledSocket(port, entitlement, "session-one", "shared-conversation");
     const firstMessages: Array<Record<string, unknown>> = [];
-    first.on("message", (data) => firstMessages.push(JSON.parse(String(data)) as Record<string, unknown>));
+    first.on("message", (data) => firstMessages.push(...legacyFrames(String(data)) as unknown as Array<Record<string, unknown>>));
     first.send(JSON.stringify(clientMessage("run-pending-cancel", "shared-conversation")));
     await pendingStarted;
 
@@ -1334,18 +1335,17 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
   const conversationId = `disconnect-conversation-${attemptId}`;
   let storeClosed = false;
   const authority = new LocalRuntimeAuthority();
-  const store = {
-    localAuthority: authority,
-    append: async (event: { type: string; status?: string; to?: string }) => {
+  const base = new RuntimeStore(authority);
+  const store = Object.assign(Object.create(base) as RuntimeStore, {
+    append: async (event: Parameters<RuntimeStore["append"]>[0] & { status?: string; to?: string }, hold?: Parameters<RuntimeStore["append"]>[1]) => {
       if ((event.type === "tool.call" && event.status === "cancelled")
         || (event.type === "turn.state" && event.to === "cancelled")) {
         throw new Error("cancellation persistence unavailable");
       }
+      return base.append(event, hold);
     },
-    // A Run restarts from the last user message of the transcript, so the stub reads what was accepted.
-    readConversation: async (id: string) => new RuntimeStore(authority).readConversation(id),
     close: async () => { storeClosed = true; }
-  } as unknown as RuntimeStore;
+  });
   const agentRuntime: AgentRuntime = {
     async *run(input, context) {
       await context.clientBroker.execute(
@@ -1721,10 +1721,12 @@ function waitForMessage(
       reject(new Error("Timed out waiting for Runtime WebSocket message"));
     }, 2_000);
     const onMessage = (data: WebSocket.RawData) => {
-      const message = JSON.parse(String(data)) as Record<string, unknown>;
-      if (!predicate(message)) return;
-      cleanup();
-      resolve(message);
+      for (const message of legacyFrames(String(data)) as unknown as Array<Record<string, unknown>>) {
+        if (!predicate(message)) continue;
+        cleanup();
+        resolve(message);
+        return;
+      }
     };
     const onError = (error: Error) => {
       cleanup();

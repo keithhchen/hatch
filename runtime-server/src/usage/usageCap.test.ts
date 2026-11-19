@@ -113,7 +113,7 @@ const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent
 async function chat(cap: (scope: { creatorId: string }) => Promise<void>) {
   const repository = new InMemoryConversationRepository(new LocalRuntimeAuthority());
   const { conversation } = await repository.createConversation({ ...binding, id: `scope:${"c".repeat(24)}:cap`, publicId: "cap" });
-  const hub = new RunEventHub();
+  const hub = new RunEventHub(undefined, async () => 0);
   const adopted: string[] = [];
   const service = new ChatService<{ creatorId: string }>({
     repository, terminator: new RunTerminator(repository, hub), hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry(), cap,

@@ -21,20 +21,18 @@ const message = (n: number): AcceptSubmissionInput => ({
   canonicalUser: { role: "user", content: `question ${n}` }
 });
 
-type Harness = { repository: ConversationRepository; store: RuntimeStore | PostgresStore; service: ChatService<object>; adopted: string[]; heard: Array<Record<string, unknown>> };
+type Harness = { repository: ConversationRepository; store: RuntimeStore | PostgresStore; service: ChatService<object>; adopted: string[] };
 const databaseUrl = process.env.HATCH_TEST_DATABASE_URL;
 
 function harness(repository: ConversationRepository, store: Harness["store"]): Harness {
-  const hub = new RunEventHub();
-  const heard: Array<Record<string, unknown>> = [];
-  hub.subscribe(id, { push: (event) => { heard.push(event); } });
+  const hub = new RunEventHub(undefined, async () => 0);
   const adopted: string[] = [];
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
     supervisor: { adopt: (run: ConversationRunRecord) => { adopted.push(run.id); }, executorId: "exec-a", holdsConversation: () => false, steered: () => undefined },
     hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>()
   });
-  return { repository, store, service, adopted, heard };
+  return { repository, store, service, adopted };
 }
 
 async function withBackend(name: "memory" | "postgres", body: (h: Harness) => Promise<void>): Promise<void> {
@@ -76,7 +74,7 @@ for (const backend of ["memory", "postgres"] as const) {
 
   test(`${backend}: a failed Run is answered again by one new Run over the same transcript, after the reply it kept`, options, () => withBackend(backend, async (h) => {
     const { run } = await h.repository.acceptSubmission(message(1));
-    await h.repository.savePartialOutput(run.id, "The first half of an answer");
+    await h.store.append({ type: "assistant.text", conversation_id: id, run_id: run.id, content: "The first half of an answer" });
     await h.repository.endRun(run.id, endingOf("failed", "fetch failed"));
     const before = (await h.store.readConversation(id)).map((entry) => [entry.role, entry.content]);
 
@@ -84,7 +82,7 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.equal(retried.outcome, "started");
     assert.equal(retried.run.status, "queued");
     assert.deepEqual(h.adopted, ["run-for-retry-1"]);
-    assert.deepEqual(h.heard.filter((event) => event.run_id === retried.run.id), [{ type: "turn.state", run_id: retried.run.id, status: "queued" }]);
+    assert.deepEqual((await h.store.readLogPage(id, { after: 0, limit: 200 })).events.filter((event) => event.run_id === retried.run.id && event.type === "run.state").map((event) => (event as unknown as { status: string }).status), ["queued"]);
     // No new user message: the transcript is what the failed Run left, partial reply included.
     assert.deepEqual((await h.store.readConversation(id)).map((entry) => [entry.role, entry.content]), before);
     assert.deepEqual(before, [["user", "question 1"], ["assistant", "The first half of an answer"]]);

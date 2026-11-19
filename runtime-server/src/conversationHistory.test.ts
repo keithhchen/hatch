@@ -43,7 +43,7 @@ async function verifyHistory(store: RuntimeStore): Promise<void> {
     }
     await store.append({ type: "conversation.model_message", conversation_id: "history", run_id,
       message: { role: "assistant", content: `answer-${i}` }, finish_reason: "stop",
-      visible_parts: [{ type: "text", start: 0, end: `answer-${i}`.length }], timestamp });
+      visible_parts: [{ type: "text", start: 0, end: `answer-${i}`.length }], timestamp } as never);
   }
   await store.append({ type: "turn.state", conversation_id: "history", run_id: "invisible-run", to: "running", timestamp });
   await store.append({ type: "conversation.model_message", conversation_id: "history", run_id: "task-only",
@@ -117,20 +117,18 @@ test("real PostgreSQL history pages without replay caps or full-history payload 
   }
 });
 
-test("a Run in progress tells its steps so far, so a page that joins mid-Run shows them", async () => {
+test("the log of a Run in progress tells its steps so far, so a page that joins mid-Run shows them", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-activity-"));
   try {
     const store = new RuntimeStore(directory);
-    const timestamp = "2026-11-18T00:00:00.000Z";
-    const call = (run_id: string, tool_call_id: string, status: "requested" | "completed") =>
-      store.append({ type: "tool.call", conversation_id: "c", run_id, tool_call_id, name: "box.bash", arguments: {}, status, locality: "server", approval: "none", timestamp } as never);
-    await call("run_a", "t1", "requested");
-    await call("run_a", "t1", "completed");
-    await call("run_a", "t2", "requested");
-    await call("run_b", "other", "completed");
-    const activity = await store.readRunActivity("c", "run_a");
-    assert.deepEqual(activity.tool_calls?.map((tool) => [tool.tool_call_id, tool.status]), [["t1", "completed"], ["t2", "requested"]]);
-    assert.deepEqual((await store.readRunActivity("c", "run_none")).tool_calls ?? [], []);
+    const call = (run_id: string, tool_call_id: string, status: "requested" | "completed", run_seq: number) =>
+      store.append({ type: "tool.call", conversation_id: "c", run_id, tool_call_id, name: "box.bash", arguments: {}, status, locality: "server", approval: "none", run_seq });
+    await call("run_a", "t1", "requested", 1);
+    await call("run_a", "t1", "completed", 2);
+    await call("run_a", "t2", "requested", 3);
+    await call("run_b", "other", "completed", 1);
+    const { events } = await store.readLogPage("c", { after: 0, limit: 10 });
+    assert.deepEqual(events.filter((event) => event.run_id === "run_a").map((event) => [event.type, event.tool_call_id, event.status]), [["tool.call", "t1", "requested"], ["tool.call", "t1", "completed"], ["tool.call", "t2", "requested"]]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

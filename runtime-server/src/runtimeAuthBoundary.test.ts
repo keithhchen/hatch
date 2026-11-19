@@ -1,3 +1,4 @@
+import { legacyFrames } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
@@ -677,10 +678,12 @@ function waitForSocketMessage(
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const onMessage = (data: WebSocket.RawData) => {
-      const message = JSON.parse(String(data)) as Record<string, unknown>;
-      if (!predicate(message)) return;
-      cleanup();
-      resolve(message);
+      for (const message of legacyFrames(String(data)) as unknown as Array<Record<string, unknown>>) {
+        if (!predicate(message)) continue;
+        cleanup();
+        resolve(message);
+        return;
+      }
     };
     const onError = (error: Error) => {
       cleanup();

@@ -25,9 +25,7 @@ test("a failed Run tells its observers one upstream failure, keeps the messages 
   const first = await repository.acceptSubmission(submission(1));
   await repository.acceptSubmission(submission(2));
   await repository.acceptSubmission(submission(3));
-  const hub = new RunEventHub();
-  const heard: Array<Record<string, unknown>> = [];
-  hub.subscribe(id, { push: (event) => { heard.push(event); } });
+  const hub = new RunEventHub(undefined, async () => 0);
   const terminator = new RunTerminator(repository, hub);
   let failedWith: PublicFailure | undefined;
 
@@ -36,7 +34,7 @@ test("a failed Run tells its observers one upstream failure, keeps the messages 
     state: { fail: async (failure: PublicFailure) => { failedWith = failure; await terminator.end(first.run.id, { status: "failed", failure }); } } as never
   }, new UpstreamError("transient", "moonshot", undefined, "kimi-k3.1-pro stream timed out"));
 
-  const failure = (heard.find((event) => event.type === "turn.failed") as { error: PublicFailure }).error;
+  const failure = (await store.readLogPage(id, { after: 0, limit: 100 })).events.map((event) => event as unknown as { type: string; status?: string; failure?: PublicFailure }).find((event) => event.type === "run.state" && event.status === "failed")!.failure!;
   assert.equal(failure.code, "upstream_error");
   assert.match(failure.reference ?? "", /^err_/);
   assert.match(failedWith?.message ?? "", /Reference: err_/);

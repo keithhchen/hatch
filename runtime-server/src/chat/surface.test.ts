@@ -10,7 +10,6 @@ import { toolRegistry } from "../tools.js";
 import { ChatError, principalKey } from "./principal.js";
 import { ContactBinder, SentMessageLimits } from "./contactBinding.js";
 import { checkUpgrade, sessionTokenFromCookie } from "./originPolicy.js";
-import { throttled, withPartialOutput } from "./partialOutput.js";
 import { CLIENT_TOOL_NAMES, assertProductUsable, authorizeLocalToolCall, productRequiresLocalTools } from "./toolSurface.js";
 
 test("the tool list is fixed, ordered, and names where each local tool runs", () => {
@@ -59,24 +58,6 @@ test("a session cookie needs an allowed Origin and an API key is never accepted 
   const inUrl = checkUpgrade({ url: "/runtime?api_key=hk_secret" }, allowed);
   assert.equal(inUrl.ok === false && inUrl.code, "credential_in_url");
   assert.equal(sessionTokenFromCookie("a=1; hatch_session=tok%3D; b=2"), "tok=");
-});
-
-test("partial output is saved at most once per interval and flushed at the end", async () => {
-  let now = 0;
-  const saved: string[] = [];
-  const saver = throttled<string>(1000, async (text) => { saved.push(text); }, () => now);
-  saver.push("a"); now = 100; saver.push("ab"); now = 200; saver.push("abc");
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(saved, ["a"]);
-  await saver.flush();
-  assert.deepEqual(saved, ["a", "abc"]);
-  const published: unknown[] = [];
-  const wrapped = withPartialOutput((message) => published.push(message), async (text) => { saved.push(text); }, 0);
-  wrapped.publish({ type: "assistant.delta", delta: { kind: "text", content: "hi" } });
-  wrapped.publish({ type: "assistant.delta", delta: { kind: "status", content: "thinking" } });
-  await wrapped.flush();
-  assert.equal(published.length, 2);
-  assert.equal(saved.at(-1), "hi");
 });
 
 const productId = "11111111-1111-4111-8111-111111111111";

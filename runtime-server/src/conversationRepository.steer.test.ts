@@ -190,10 +190,13 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.ok(runs.every((run) => run.status === "completed" || run.consumedCount <= run.steeredCount));
   }));
 
-  test(`${backend}: partial output is persisted on the Run for a snapshot`, options, async () => withBackend(backend, async ({ repository }) => {
+  test(`${backend}: a Run that ends without a reply keeps the text it streamed, as its reply in the transcript`, options, async () => withBackend(backend, async ({ repository, store }) => {
     const start = await repository.acceptSubmission(message(0));
-    await repository.savePartialOutput(start.run.id, "Hello wor");
-    assert.equal((await repository.snapshot(id)).runs[0]!.partialOutput, "Hello wor");
+    await store.append({ type: "assistant.text", conversation_id: id, run_id: start.run.id, content: "Hello wor", run_seq: 1 });
+    await store.append({ type: "tool.call", conversation_id: id, run_id: start.run.id, tool_call_id: "c1", name: "file_read", arguments: {}, status: "completed", run_seq: 2 });
+    await store.append({ type: "assistant.text", conversation_id: id, run_id: start.run.id, content: "ld", run_seq: 3 });
+    await repository.endRun(start.run.id, { status: "interrupted", failure: { code: "run_interrupted", message: "restart" } });
+    assert.deepEqual((await store.readConversation(id)).map((row) => [row.role, row.content]), [["user", "question 0"], ["assistant", "Hello wor\n\nld"]]);
   }));
 
   test(`${backend}: an orphaned Run is taken over by exactly one instance, and a live lease is not`, options, async () => withBackend(backend, async ({ repository }) => {

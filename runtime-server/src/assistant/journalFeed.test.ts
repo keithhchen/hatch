@@ -26,14 +26,14 @@ const message = (n: number): AcceptSubmissionInput => ({
   run: { id: `run-${n}`, conversationId: id, clientMessageId: `m-${n}`, inputDigest: `d-${n}`, corpusDigest: "assistant", executorId: "exec" },
   canonicalUser: { role: "user", content: `question ${n}` }
 });
-const reply = (content: string) => ({ status: "completed" as const, reply: { message: { role: "assistant" as const, content }, finishReason: "stop" as const, visibleParts: [] } });
+const reply = (content: string) => ({ status: "completed" as const, reply: { message: { role: "assistant" as const, content }, finishReason: "stop" as const } });
 
 type Harness = { repository: ConversationRepository; hub: RunEventHub; feed: JournalFeed; terminator: RunTerminator };
 const databaseUrl = process.env.HATCH_TEST_DATABASE_URL;
 
 async function withBackend(name: "memory" | "postgres", body: (harness: Harness) => Promise<void>): Promise<void> {
   const make = (repository: ConversationRepository): Harness => {
-    const hub = new RunEventHub();
+    const hub = new RunEventHub(undefined, async () => 0);
     return { repository, hub, feed: new JournalFeed({ repository, hub }), terminator: new RunTerminator(repository, hub) };
   };
   if (name === "memory") {
@@ -124,30 +124,23 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.ok(hub);
   }));
 
-  test(`${backend}: what a Run says live reaches a follower before the recorded event it led to, and is never recorded`, options, async () => withBackend(backend, async ({ repository, hub, feed, terminator }) => {
+  test(`${backend}: a follower is woken when the log advances and reads the recorded events`, options, async () => withBackend(backend, async ({ repository, hub, feed, terminator }) => {
     const first = await repository.acceptSubmission(message(0));
     const heard: string[] = [];
     const stop = new AbortController();
-    void follow(feed, key, await feed.head(key), entry => { heard.push(`${entry.event.type}${entry.event.type === "delta" ? `:${entry.event.text}` : ""}`); }, { signal: stop.signal, pollMs: 10 });
+    void follow(feed, key, await feed.head(key), entry => { heard.push(entry.event.type); }, { signal: stop.signal, pollMs: 60_000 });
     await new Promise(resolve => setTimeout(resolve, 30));
-    hub.publish(id, { type: "assistant.delta", run_id: first.run.id, delta: { kind: "text", content: "你", offset: 0 } });
-    hub.publish(id, { type: "assistant.delta", run_id: first.run.id, delta: { kind: "text", content: "好", offset: 1 } });
     await terminator.end(first.run.id, reply("你好"));
+    hub.advanced(id, 1);
     for (let i = 0; i < 100 && !heard.includes("run_end"); i++) await new Promise(resolve => setTimeout(resolve, 10));
     stop.abort();
-    assert.deepEqual(heard, ["delta:你", "delta:好", "message_end", "run_end"]);
-    assert.ok(!(await feed.after(key, "0")).some(entry => entry.event.type === "delta"), "deltas are not in the record");
-    // A reader that joins mid-turn is given what was said so far, with its offset.
-    const late: Array<Record<string, unknown>> = [];
-    const second = await repository.acceptSubmission(message(1));
-    hub.publish(id, { type: "assistant.delta", run_id: second.run.id, delta: { kind: "text", content: "再", offset: 0 } });
-    feed.live(key, event => { late.push(event); })();
-    assert.deepEqual(late, [{ type: "delta", text: "再", offset: 0, run_id: "run-1" }]);
+    assert.deepEqual(heard, ["message_end", "run_end"]);
+    assert.ok(!heard.includes("delta"), "text is in the event log, not in this feed");
   }));
 }
 
 test("a feed refuses to append: the Run's journal is the record", async () => {
-  const feed = new JournalFeed({ repository: new InMemoryConversationRepository(new LocalRuntimeAuthority()), hub: new RunEventHub() });
+  const feed = new JournalFeed({ repository: new InMemoryConversationRepository(new LocalRuntimeAuthority()), hub: new RunEventHub(undefined, async () => 0) });
   await assert.rejects(feed.append(), /nothing appends/);
   await assert.rejects(feed.head("research:1"), /not a feed of the Assistant/);
   assert.ok(new RuntimeStore(new LocalRuntimeAuthority()));

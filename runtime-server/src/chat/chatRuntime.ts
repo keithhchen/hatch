@@ -10,11 +10,12 @@ import type { ConversationRepository, ConversationRunRecord } from "../conversat
 import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
 import type { ClientGroup } from "../surfaces/contract.js";
 import { DEFAULT_RUN_LEASE_MS } from "../conversationRepository.js";
-import type { RuntimeStore } from "../store.js";
+import type { RuntimeStore, StoreEventInput } from "../store.js";
 import { ChatCompaction } from "./chatCompaction.js";
 import type { Library } from "./library.js";
 import { ChatService, RunRegistry, type PrincipalLimits, type RunAdmission } from "./chatService.js";
 import { ConversationFeed } from "./conversationFeed.js";
+import { LogTail } from "./logTail.js";
 import type { EventRelay } from "./eventRelay.js";
 import { fenced } from "./runFence.js";
 import type { StopRelay } from "./stopRelay.js";
@@ -77,6 +78,8 @@ export class ChatRuntime<Scope> {
   readonly hub: RunEventHub;
   readonly registry = new RunRegistry<Scope>();
   readonly feed: ConversationFeed;
+  /** Follows a conversation's log for one observer. */
+  readonly tail: LogTail;
   readonly supervisor: RunSupervisor;
   readonly service: ChatService<Scope>;
   readonly compaction: ChatCompaction;
@@ -85,8 +88,9 @@ export class ChatRuntime<Scope> {
   constructor(private readonly options: ChatRuntimeOptions<Scope>) {
     const { repository, store } = options;
     const executorId = `executor_${randomUUID().replaceAll("-", "")}`;
-    this.hub = options.hub ?? new RunEventHub(options.relay);
-    this.feed = new ConversationFeed(repository, this.hub, options.feedPollMs);
+    this.hub = options.hub ?? new RunEventHub(options.relay, (conversationId) => store.logHead(conversationId));
+    this.feed = new ConversationFeed(repository, this.hub, options.feedPollMs, store);
+    this.tail = new LogTail({ source: store, hub: this.hub });
     const { compactionStrategy, compactionProfile } = options;
     if (!compactionStrategy && !compactionProfile) throw new Error("ChatRuntime needs compactionStrategy or compactionProfile");
     this.compaction = new ChatCompaction({
@@ -102,7 +106,7 @@ export class ChatRuntime<Scope> {
       new TurnExecutor({
         // The executor writes through the fence: once its Run is stopped or taken over it can write nothing more.
         // The index is where each write takes its hold, which the write itself checks.
-        repository: fenced(repository, executorId, { transitionRun: 3, savePartialOutput: 2, claimSteeredMessages: 1, requestToolCall: 1 }),
+        repository: fenced(repository, executorId, { transitionRun: 3, claimSteeredMessages: 1, requestToolCall: 1 }),
         store: fenced(store, executorId, { append: 1 }),
         terminator: terminators.executing,
         hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner,
@@ -129,6 +133,12 @@ export class ChatRuntime<Scope> {
     await this.supervisor.stop();
     await this.compaction.drain();
     await this.stopListening();
+  }
+
+  /** An interrupted Run is owed a retry: its reply shows as being worked on until `until`, even though the retry has not started. */
+  async announceRetrying(run: ConversationRunRecord, until: Date): Promise<void> {
+    const position = await this.options.store.append({ type: "run.retrying", conversation_id: run.conversationId, run_id: run.id, until: until.toISOString() } as StoreEventInput);
+    this.hub.advanced(run.conversationId, position as unknown as number);
   }
 
   /** An explicit stop: the only thing that ends a Run early. */

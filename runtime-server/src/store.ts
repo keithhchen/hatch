@@ -16,6 +16,8 @@ import {
 } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
 import { RunFenced, type RunHold } from "./runHold.js";
+import { isLogRow, publicLogEvents, type LegacyRunState, type LogRow, type PublicLogEvent } from "./chat/publicLog.js";
+export type { PublicLogEvent } from "./chat/publicLog.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -77,7 +79,7 @@ export type VisibleConversationToolCall = {
   tool_call_id: string;
   name: string;
   arguments: Record<string, unknown>;
-  status: "requested" | "completed" | "failed" | "cancelled";
+  status: "requested" | "running" | "completed" | "failed" | "cancelled";
   activity_message?: string;
   locality?: "server" | "client";
   approval?: "none" | "auto" | "ask";
@@ -108,7 +110,30 @@ export type VisibleConversationSkillEvent = {
   timestamp: string;
 };
 
-export type StoreEvent =
+/** Why a Run did not complete, as every client sees it. */
+export type StoredFailure = { code: string; message: string; reference?: string };
+
+/** A message as a client may read it: its words and attachment metadata, never raw attachment text or pixels. */
+export type PublicQueuedMessage = { content: string; attachments?: Array<Omit<ContextAttachment, "text">> };
+
+/** One entry of the conversation's event log: what the rows say, written by whoever made the fact. */
+export type StoreEvent = StoreEventBody & {
+  /** 1, 2, 3.. within a Run's own writer: a repeated (run_id, run_seq) is the same event and is written once. */
+  run_seq?: number;
+};
+
+type CompactionNotice = {
+  conversation_id: string;
+  run_id?: string;
+  compaction_id: string;
+  phase?: CompactionPhase;
+  degraded?: boolean;
+  aborted?: boolean;
+  window_id?: string;
+  timestamp: string;
+};
+
+type StoreEventBody =
   | {
       type: "session.started";
       creator_id?: string;
@@ -139,7 +164,6 @@ export type StoreEvent =
       message_id?: string;
       message: ConversationMessage;
       finish_reason?: OutputFinishReason;
-      visible_parts?: VisibleConversationPart[];
       timestamp: string;
     }
   | {
@@ -149,8 +173,35 @@ export type StoreEvent =
       from?: RunStatus;
       to: RunStatus;
       reason?: string;
+      failure?: StoredFailure;
+      finish_reason?: OutputFinishReason;
+      client_message_id?: string;
       timestamp: string;
     }
+  | { type: "assistant.text"; conversation_id: string; run_id: string; content: string; timestamp: string }
+  | {
+      type: "assistant.thinking";
+      conversation_id: string;
+      run_id: string;
+      index: number;
+      phase: "start" | "delta" | "end";
+      delta?: string;
+      content?: string;
+      timestamp: string;
+    }
+  | { type: "reply.blocked"; conversation_id: string; run_id: string; timestamp: string }
+  | {
+      type: "message.queued";
+      conversation_id: string;
+      run_id: string;
+      client_message_id: string;
+      message: PublicQueuedMessage;
+      timestamp: string;
+    }
+  | (CompactionNotice & { type: "compaction.started" })
+  | (CompactionNotice & { type: "compaction.ended" })
+  | { type: "run.retrying"; conversation_id: string; run_id: string; until: string; timestamp: string }
+  | { type: "run.superseded"; conversation_id: string; run_id: string; by: string; timestamp: string }
   | {
       type: "runtime.event";
       conversation_id?: string;
@@ -165,12 +216,13 @@ export type StoreEvent =
       tool_call_id: string;
       name: string;
       arguments: Record<string, unknown>;
-      status: "requested" | "completed" | "failed" | "cancelled";
+      status: "requested" | "running" | "completed" | "failed" | "cancelled";
       activity_message?: string;
       locality?: "server" | "client";
       approval?: "none" | "auto" | "ask";
       scope?: "main" | "skill_run";
       skill_run_id?: string;
+      /** A bounded summary (see boundToolValue); the full detail is the tool-detail endpoint's. */
       result?: unknown;
       error?: unknown;
       timestamp: string;
@@ -300,6 +352,9 @@ export class LocalRuntimeAuthority {
   compactions = new Map<string, CompactionClaim>();
   journal: ConversationJournalEvent[] = [];
   events: StoreEvent[] = [];
+  /** Position of a Run's event by `${runId}\n${run_seq}`, and the largest run_seq of each Run: what makes a repeated write a no-op. */
+  runSeqPosition = new Map<string, number>();
+  maxRunSeq = new Map<string, number>();
   private usage = new Map<string, { count: number; bytes: number }>();
   private chain: Promise<void> = Promise.resolve();
   private opening?: Promise<void>;
@@ -368,6 +423,10 @@ export class LocalRuntimeAuthority {
     for (const event of commit.journal ?? []) this.journal.push(event);
     for (const event of commit.events ?? []) {
       this.events.push(event);
+      if (event.run_seq !== undefined && "run_id" in event && event.run_id) {
+        this.runSeqPosition.set(`${event.run_id}\n${event.run_seq}`, this.events.length);
+        this.maxRunSeq.set(event.run_id, Math.max(this.maxRunSeq.get(event.run_id) ?? 0, event.run_seq));
+      }
       for (const key of eventQuotaKeys(event)) {
         const previous = this.usage.get(key) ?? { count: 0, bytes: 0 };
         this.usage.set(key, { count: previous.count + 1, bytes: previous.bytes + Buffer.byteLength(JSON.stringify(event)) });
@@ -470,21 +529,114 @@ export class RuntimeStore {
     return this.root;
   }
 
-  /** With `hold`, the append is refused, in the same commit that would make it, unless that executor still holds the event's Run. */
-  async append(event: StoreEventInput, hold?: RunHold): Promise<void> {
+  /**
+   * Appends one event to the conversation's log and returns its position. With `hold`, the append is refused, in the same
+   * commit that would make it, unless that executor still holds the event's Run. An event with a `run_seq` that was already
+   * written is the same event: nothing is written and its position is returned.
+   */
+  async append(event: StoreEventInput, hold?: RunHold): Promise<number> {
     assertCanonicalPersistedToolNames(event);
     const record: StoreEvent = {
       timestamp: new Date().toISOString(),
       ...event
     };
-    await this.localAuthority.transact(async () => {
+    return this.localAuthority.transact(async () => {
       if (hold) {
         const runId = "run_id" in record ? record.run_id : undefined;
         const run = runId ? this.localAuthority.runs.get(runId) : undefined;
         if (!run || run.executorId !== hold.heldBy || !["queued", "running", "waiting_for_tool", "compacting"].includes(run.status)) throw new RunFenced(runId ?? "unknown");
       }
-      return { result: undefined, commit: { kind: "event", events: [record] } };
+      const runId = "run_id" in record ? record.run_id : undefined;
+      const existing = record.run_seq !== undefined && runId ? this.localAuthority.runSeqPosition.get(`${runId}\n${record.run_seq}`) : undefined;
+      if (existing !== undefined) return { result: existing };
+      return { result: this.localAuthority.events.length + 1, commit: { kind: "event", events: [record] } };
     });
+  }
+
+  /** The position of the conversation's newest row; 0 when it has none. */
+  async logHead(conversationId: string): Promise<number> {
+    await this.localAuthority.ready();
+    const events = this.localAuthority.events;
+    for (let index = events.length - 1; index >= 0; index--) {
+      const event = events[index]!;
+      if ("conversation_id" in event && event.conversation_id === conversationId) return index + 1;
+    }
+    return 0;
+  }
+
+  /** The largest `run_seq` a Run has written; a Run another instance takes over continues after it. */
+  async maxRunSeq(runId: string): Promise<number> {
+    await this.localAuthority.ready();
+    return this.localAuthority.maxRunSeq.get(runId) ?? 0;
+  }
+
+  /** The events strictly after `after`, oldest first, as clients read them. Unfinished at `has_more`: continue from the last event's position. */
+  async readLogPage(conversationId: string, { after, limit }: { after: number; limit: number }): Promise<{ events: PublicLogEvent[]; head: number; has_more: boolean }> {
+    // The head first: a row committed while this reads is then after `head`, never skipped by a client that continues from it.
+    const head = await this.logHead(conversationId);
+    const rows = await this.logRows(conversationId, after, head, limit + 1);
+    const page = rows.slice(0, limit);
+    const events = page.length ? await this.projectLog(conversationId, page, after + 1, page.at(-1)!.position) : [];
+    return { events, head, has_more: rows.length > limit };
+  }
+
+  /** The latest `turns` turns (a Run's rows with its user message), up to `head` or just before `before`. `start` is the first position included. */
+  async readLogTurns(conversationId: string, { turns, before }: { turns: number; before?: number }): Promise<{ events: PublicLogEvent[]; head: number; start: number; has_more_before: boolean }> {
+    const head = await this.logHead(conversationId);
+    const upTo = before === undefined ? head : Math.min(before - 1, head);
+    const { start, hasMoreBefore } = await this.logTurnStart(conversationId, turns, upTo);
+    const rows = start <= upTo ? await this.logRows(conversationId, start - 1, upTo) : [];
+    return { events: rows.length ? await this.projectLog(conversationId, rows, start, upTo) : [], head, start, has_more_before: hasMoreBefore };
+  }
+
+  /** What a Run has written of its own text, in order: for the model's kept partial and for callers that want the words so far. */
+  async readRunEvents(conversationId: string, runId: string, types?: ReadonlyArray<StoreEvent["type"]>): Promise<StoreEvent[]> {
+    return (await this.readEvents(conversationId)).filter((event) => "run_id" in event && event.run_id === runId && (!types || types.includes(event.type)));
+  }
+
+  protected async logRows(conversationId: string, after: number, upTo: number, limit = Number.POSITIVE_INFINITY): Promise<LogRow[]> {
+    await this.localAuthority.ready();
+    const events = this.localAuthority.events;
+    const rows: LogRow[] = [];
+    for (let index = after; index < Math.min(upTo, events.length) && rows.length < limit; index++) {
+      const event = events[index]!;
+      if ("conversation_id" in event && event.conversation_id === conversationId && isLogRow(event)) rows.push({ position: index + 1, event: structuredClone(event) });
+    }
+    return rows;
+  }
+
+  protected async logTurnStart(conversationId: string, turns: number, upTo: number): Promise<{ start: number; hasMoreBefore: boolean }> {
+    await this.localAuthority.ready();
+    const first = new Map<string, number>();
+    this.localAuthority.events.slice(0, upTo).forEach((event, index) => {
+      if ("conversation_id" in event && event.conversation_id === conversationId && "run_id" in event && event.run_id && !first.has(event.run_id)) first.set(event.run_id, index + 1);
+    });
+    const starts = [...first.values()].sort((a, b) => a - b);
+    return starts.length ? { start: starts[Math.max(0, starts.length - turns)]!, hasMoreBefore: starts.length > turns } : { start: upTo + 1, hasMoreBefore: false };
+  }
+
+  /** What reading a window needs beyond it: which of its Runs wrote their steps as events, and what an older Run kept elsewhere. */
+  protected async logContext(conversationId: string, runIds: string[]): Promise<{ modern: Set<string>; rows: LogRow[]; states: Map<string, LegacyRunState> }> {
+    await this.localAuthority.ready();
+    const { events, maxRunSeq, runs } = this.localAuthority;
+    const modern = new Set(runIds.filter((id) => maxRunSeq.has(id)));
+    const older = new Set(runIds.filter((id) => !modern.has(id)));
+    const rows: LogRow[] = [];
+    events.forEach((event, index) => {
+      if (older.has(("run_id" in event && event.run_id) || "") && "conversation_id" in event && event.conversation_id === conversationId && isLogRow(event)) rows.push({ position: index + 1, event: structuredClone(event) });
+    });
+    const states = new Map<string, LegacyRunState>();
+    for (const id of older) {
+      const run = runs.get(id);
+      if (run) states.set(id, { status: run.status, ...(run.failure ? { failure: run.failure } : {}) });
+    }
+    return { modern, rows, states };
+  }
+
+  private async projectLog(conversationId: string, window: LogRow[], from: number, to: number): Promise<PublicLogEvent[]> {
+    const context = await this.logContext(conversationId, [...new Set(window.flatMap(({ event }) => "run_id" in event && event.run_id ? [event.run_id] : []))]);
+    const byPosition = new Map([...context.rows, ...window].map((row) => [row.position, row]));
+    return publicLogEvents([...byPosition.values()].sort((a, b) => a.position - b.position), { from, to, modernRuns: context.modern, runStates: context.states });
   }
 
   async close(): Promise<void> {
@@ -601,20 +753,6 @@ export class RuntimeStore {
 
   async readConversationToolDetail(conversationId: string, runId: string, toolCallId: string): Promise<VisibleConversationToolCall | undefined> {
     return this.projectConversationToolDetail(conversationId, runId, toolCallId, await this.readEvents());
-  }
-
-  /** What an active Run has shown so far besides its text: its tool calls and skills, for a page that joins mid-Run. */
-  async readRunActivity(conversationId: string, runId: string): Promise<Pick<VisibleConversationMessage, "tool_calls" | "skill_events" | "skill_runs">> {
-    const events = (await this.readEvents(conversationId)).filter((event) => event.type === "tool.call" || event.type === "skill.activated" || event.type === "skill.invoked" || event.type === "skill.run");
-    return this.projectRunActivity(conversationId, runId, events);
-  }
-
-  protected async projectRunActivity(conversationId: string, runId: string, events: StoreEvent[]): Promise<Pick<VisibleConversationMessage, "tool_calls" | "skill_events" | "skill_runs">> {
-    const mine = events.filter((event) => "run_id" in event && event.run_id === runId);
-    const [projected] = await RuntimeStore.prototype.readVisibleConversation.call(this, conversationId, [...mine, {
-      type: "message.created", conversation_id: conversationId, run_id: runId, role: "assistant", content: "", timestamp: ""
-    }]);
-    return { tool_calls: projected?.tool_calls, skill_events: projected?.skill_events, skill_runs: projected?.skill_runs };
   }
 
   protected async projectConversationToolDetail(conversationId: string, runId: string, toolCallId: string, events: StoreEvent[]): Promise<VisibleConversationToolCall | undefined> {
@@ -768,9 +906,9 @@ export class RuntimeStore {
         }
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;
-          if (event.visible_parts) {
-            message.parts = event.visible_parts;
-          }
+          // Only a reply written before the event log carries its parts; newer ones are in the log.
+          const parts = (event as { visible_parts?: VisibleConversationPart[] }).visible_parts;
+          if (parts) message.parts = parts;
         }
         if (role === "assistant") {
           const toolCalls = [...(toolCallsByRun.get(event.run_id)?.values() ?? [])]

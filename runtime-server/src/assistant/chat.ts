@@ -16,6 +16,7 @@ import type { ProductAnalytics } from "../analytics/port.js";
 import { safely } from "../analytics/safe.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
+import { runText, withoutToolDetail, type LogQuery } from "../chat/publicLog.js";
 import { RestartRetrier, restartRetryKey, retryPending } from "../chat/restartRetry.js";
 import type { Retried } from "../chat/chatService.js";
 import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway.js";
@@ -127,6 +128,7 @@ export class AssistantChat implements AssistantHost {
   constructor(private readonly deps: AssistantChatDeps) {
     this.retrier = new RestartRetrier({
       repository: deps.repository,
+      announce: (run, until) => this.runtime.announceRetrying(run, until),
       start: async run => {
         const accountId = accountOfConversation(run.conversationId);
         if (accountId) await this.retry(accountId, { id: restartRetryKey(run.id), client: { client: "web" } });
@@ -212,7 +214,7 @@ export class AssistantChat implements AssistantHost {
           turn.input, turn.persistedUser, NO_SKILLS, turn.scope, turn.broker, serverTools,
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
           this.agentRuntime(),
-          deps.store, deps.repository, deps.assetStore, turn.state, async message => turn.publish(message), deps.outputGuard ?? new PassThroughOutputGuard(),
+          turn.store, deps.repository, deps.assetStore, turn.state, turn.log, deps.outputGuard ?? new PassThroughOutputGuard(),
           turn.signal, turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
           {
             agent: { systemPrompt: await this.systemPrompt(), localTools: [], externalTools: studioToolNames(deps.tools), externalToolDefinitions: [] },
@@ -380,21 +382,38 @@ export class AssistantChat implements AssistantHost {
   assets(): AssetDesk { return this.deps.chatAssets.studioDesk(); }
 
   /** Tells Studio observers the Assistant changed in a way no Run shows, such as a chat being linked. */
-  async touch(accountId: string): Promise<void> { this.runtime.hub.publish(assistantConversationId(accountId), { type: "studio.touched" }); }
+  async touch(accountId: string): Promise<void> { await this.runtime.hub.advancedToHead(assistantConversationId(accountId)); }
 
-  /** What the running turn has said so far: from the live text when this process has it, else from what the Run last saved. */
+  /** What the running turn has said so far: its text rows in the log. */
   async partial(accountId: string): Promise<string> {
     const conversation = await this.conversation(accountId);
-    const live = this.runtime.hub.catchUp(conversation.id)?.delta as { content?: string } | undefined;
-    return live?.content ?? (await this.deps.repository.getActiveRun(conversation.id))?.partialOutput ?? "";
+    const run = await this.deps.repository.getActiveRun(conversation.id);
+    return run ? runText(await this.deps.store.readRunEvents(conversation.id, run.id, ["assistant.text", "assistant.thinking", "reply.blocked", "tool.call", "skill.activated", "skill.invoked", "skill.run"]), run.id) : "";
   }
 
   /** The steps the running turn has taken so far (never a tool's arguments or result), as a reply keeps them; nothing when no Run is active. */
   async activity(accountId: string): Promise<ReplySteps | undefined> {
     const run = await this.activeRun(accountId);
     if (!run) return undefined;
-    const { tool_calls = [] } = await this.deps.store.readRunActivity(run.conversationId, run.id);
-    return { tool_calls: tool_calls.map(({ tool_call_id, name, status, activity_message }) => ({ tool_call_id, name, status, activity_message })) };
+    const calls = new Map<string, { tool_call_id: string; name: string; status: string; activity_message?: string }>();
+    for (const event of await this.deps.store.readRunEvents(run.conversationId, run.id, ["tool.call"])) {
+      if (event.type !== "tool.call") continue;
+      const before = calls.get(event.tool_call_id);
+      calls.set(event.tool_call_id, { tool_call_id: event.tool_call_id, name: event.name, status: event.status, ...((event.activity_message ?? before?.activity_message) !== undefined ? { activity_message: event.activity_message ?? before?.activity_message } : {}) });
+    }
+    return { tool_calls: [...calls.values()] };
+  }
+
+  /**
+   * The conversation's log as Studio's page reads it: the same public events as a Product's chat, with a tool's arguments and
+   * result never shown. Either the events after `after`, or the latest `turns` turns (before `before`).
+   */
+  async log(accountId: string, query: LogQuery) {
+    const conversation = await this.conversation(accountId);
+    const page = "turns" in query ? await this.deps.store.readLogTurns(conversation.id, query) : await this.deps.store.readLogPage(conversation.id, query);
+    // The Assistant's own messages to itself are not part of the chat.
+    const shown = page.events.filter(event => !((event.type === "user.message" || event.type === "message.queued") && isSystemMessageId(String(event.id))));
+    return { ...page, events: withoutToolDetail(shown) };
   }
 
   accountOf(conversationId: string): string | undefined { return accountOfConversation(conversationId); }

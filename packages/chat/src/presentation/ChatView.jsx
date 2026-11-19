@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { ArrowUp, ChevronDown, ChevronUp, CircleAlert, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
-import { ACTIVITY_KINDS, ChatTimeline, foldStepOnlyMessages, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
+import { ACTIVITY_KINDS, foldStepOnlyMessages, groupTimelineEntries } from "../domain/timeline.js";
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { createClickThrottle } from "../domain/click-throttle.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
@@ -128,10 +128,6 @@ const REPLY_STATUSES = ["sending", "agentReplying", "syncingReply", "stopping", 
 
 function ChatMessage({ message, continued, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
-  const saved = () => [message, ...(message.foldedMessages ?? [])].flatMap(part => ChatTimeline.fromHistory(part));
-  // Saved steps the live reply continues: one row, live, until the Run's saved copy replaces it.
-  // A step the live row still holds after its saved copy arrived is the same step: the live one, the latest, is kept.
-  if (message.liveTail) message = { ...message.liveTail, timeline: [...new Map([...saved(), ...(message.liveTail.timeline ?? [])].map(entry => [entry.id, entry])).values()] };
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
   const timelineProps = { activityKinds, t, errorText, loadToolDetail, approvals };
   return <article className={`web-chat__message web-chat__message--${message.role}${message.state ? ` web-chat__message--${message.state}` : ""}`}>
@@ -142,7 +138,7 @@ function ChatMessage({ message, continued, identity, typingText, compacting, att
           ? live
             ? <><TimelineEntries timeline={message.timeline} live {...timelineProps} />{compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : null}</>
             : compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span>{typingText ? <span>{typingText}</span> : null}</div>
-          : <TimelineEntries timeline={[message, ...(message.foldedMessages ?? [])].flatMap(part => ChatTimeline.fromHistory(part))} live={false} {...timelineProps} />
+          : <TimelineEntries timeline={message.timeline} live={false} {...timelineProps} />
         : message.content ? <div className="web-chat__bubble web-chat__content"><MessageResponse>{message.content}</MessageResponse></div> : null}
       {files.length ? <div className="web-chat__attachments">{files.map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}{item.source_bytes ? ` · ${sizeOf(item.source_bytes)}` : ""}</span>)}</div> : null}
       {pictures.length ? <div className="web-chat__pictures">{pictures.map(item => <AssetPicture key={item.attachment_id} assetId={item.asset_id} name={item.display_name} Viewer={Viewer} assetSource={assetSource} t={t} />)}</div> : null}
@@ -330,12 +326,11 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: agentName })}</p>
         </section> : null}
-        {!snapshotPending || messages.length ? (mergeSteps ? foldStepOnlyMessages(withoutRepeatedSteps(messages), activityKinds) : withoutRepeatedSteps(messages)).map((message, index, shown) => {
+        {!snapshotPending || messages.length ? (mergeSteps ? foldStepOnlyMessages(messages, activityKinds) : messages).map((message, index, shown) => {
           const key = message.renderKey ?? `${message.run_id}-${message.role}`;
-          const liveRun = message.liveTail ?? message;
-          const compacting = Boolean(liveRun.transient && activeRun && liveRun.run_id === activeRun && state.runState === "compacting");
+          const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
           return <React.Fragment key={key}>
-            {message.role === "assistant" && compactedRuns.has(message.run_id) ? <CompactionDivider t={t} /> : null}
+            {message.role === "assistant" && !message.segment && compactedRuns.has(message.run_id) ? <CompactionDivider t={t} /> : null}
             <ChatMessage message={message} continued={message.role === "assistant" && shown[index - 1]?.role === "assistant"} compacting={compacting} {...messageProps} />
           </React.Fragment>;
         }) : null}

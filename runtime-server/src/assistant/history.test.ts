@@ -24,7 +24,7 @@ test("A crash in the middle of the history import loses nothing: the re-run appe
     const real = new RuntimeStore(path.join(root, "chat"));
     let appends = 0;
     let crashAfter = 2;
-    const store = { readEvents: () => real.readEvents(), append: async (event: Parameters<RuntimeStore["append"]>[0]) => { if (appends++ >= crashAfter) throw new Error("crash"); await real.append(event); } };
+    const store = { readEvents: () => real.readEvents(), append: async (event: Parameters<RuntimeStore["append"]>[0]) => { if (appends++ >= crashAfter) throw new Error("crash"); return real.append(event); } };
     const state = { expertSpoke: async () => {} } as unknown as AssistantStateRepository;
     const history = new LegacyAssistantHistory({ backend: () => legacy, state, store });
 

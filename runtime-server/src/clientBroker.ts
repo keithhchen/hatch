@@ -157,6 +157,14 @@ export class ClientToolBroker {
     const key = pendingKey(pending.runId, pending.toolCallId);
     await state?.waitForTool();
     if (!this.isPending(key, pending)) return;
+    const requestedAt = Date.now();
+    await this.ledger?.request({
+      runId: pending.runId, toolCallId: pending.toolCallId, name: pending.name, arguments: parsedArgs, approval,
+      ...(options.scope ? { scope: options.scope } : {}), ...(options.skillRunId ? { skillRunId: options.skillRunId } : {}),
+      requestedAt: new Date(requestedAt).toISOString(), expiresAt: new Date(requestedAt + this.timeoutMs).toISOString()
+    });
+    if (!this.isPending(key, pending)) return;
+    // The call is recorded for whoever answers it before the log shows it: a client told by the log can answer at once.
     await this.store.append({
       type: "tool.call",
       conversation_id: state?.conversationId,
@@ -169,13 +177,6 @@ export class ClientToolBroker {
       approval,
       ...(options.scope ? { scope: options.scope } : {}),
       ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
-    });
-    if (!this.isPending(key, pending)) return;
-    const requestedAt = Date.now();
-    await this.ledger?.request({
-      runId: pending.runId, toolCallId: pending.toolCallId, name: pending.name, arguments: parsedArgs, approval,
-      ...(options.scope ? { scope: options.scope } : {}), ...(options.skillRunId ? { skillRunId: options.skillRunId } : {}),
-      requestedAt: new Date(requestedAt).toISOString(), expiresAt: new Date(requestedAt + this.timeoutMs).toISOString()
     });
     if (!this.isPending(key, pending)) return;
     if (approval === "ask") {
@@ -337,7 +338,7 @@ export class ClientToolBroker {
         approval: pending.approval,
         ...(pending.scope ? { scope: pending.scope } : {}),
         ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-        error: { message: reason }
+        error: { code: "tool_cancelled", message: reason }
       })),
       observe(() => this.emit({
         type: "tool_call.delta",

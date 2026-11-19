@@ -49,7 +49,7 @@ async function world(script: Behavior[]) {
         const report = (await reports.get(turn.conversation.id))!;
         await reports.ready(turn.conversation.id, report.attempt, "summary", { summaryHtml: "a", summaryPdf: "b", summaryPng: "c" }, clock.now);
       }
-      await turn.state.complete({ message: { role: "assistant", content: "done" }, finishReason: "stop", visibleParts: [] });
+      await turn.state.complete({ message: { role: "assistant", content: "done" }, finishReason: "stop" });
     } }
   });
   await chat.start();

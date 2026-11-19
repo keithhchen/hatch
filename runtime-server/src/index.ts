@@ -478,8 +478,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         await runModelTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
-          createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
-          async (message) => turn.publish(message), outputGuard, turn.signal,
+          createRuntime(), turn.store, conversationRepository, assetStore, turn.state,
+          turn.log, outputGuard, turn.signal,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
           { usage: turn.usage, ...productTools.length ? { extraTools: productTools } : {}, ...box ? { toolCallLimit: BOX_TOOL_CALL_LIMIT } : {}, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
@@ -518,6 +518,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     pollMs: options.restartRetryPollMs,
     repository: conversationRepository,
     skip: async (conversationId) => Boolean(await artifact?.reports.get(conversationId)),
+    announce: (run, until) => chat.announceRetrying(run, until),
     start: async (run, key, runId) => {
       const conversation = await conversationRepository.getConversation(run.conversationId);
       if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);

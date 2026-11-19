@@ -5,7 +5,6 @@ import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai"
 import type { ClientToolBroker } from "../clientBroker.js";
 import type { RuntimeCompactionMessage } from "../compaction.js";
 import type { AgentRuntime, RunContext, RuntimeSessionSkills } from "../agentRuntime.js";
-import { ThinkingPartJournal } from "../thinkingPartJournal.js";
 import {
   TASK_START_MESSAGE_CONTENT,
   type BoundRunStart,
@@ -17,8 +16,9 @@ import {
 import type { RunStateMachine } from "../runState.js";
 import { failures } from "../errors/failures.js";
 import type { ServerToolExecutor } from "../serverTools.js";
-import type { RuntimeStore, VisibleConversationPart } from "../store.js";
-import type { ConversationRepository, RunReply } from "../conversationRepository.js";
+import type { RuntimeStore } from "../store.js";
+import type { RunLog } from "./runLog.js";
+import type { ConversationRepository } from "../conversationRepository.js";
 import { RunFenced } from "../runHold.js";
 import type { ToolBridge } from "../toolBridge.js";
 import { materializeAgentCorpus, type MaterializedAgentCorpus } from "../agentCorpusMaterialization.js";
@@ -108,7 +108,7 @@ async function runModelTurnInternal(
   conversationRepository: ConversationRepository,
   assetStore: RuntimeAssetStore,
   state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>,
+  runLog: RunLog,
   outputGuard: OutputGuard,
   abortSignal: AbortSignal,
   clientOf: () => ClientAttributes,
@@ -117,11 +117,6 @@ async function runModelTurnInternal(
   compaction: TurnCompaction,
   profile?: TurnProfile
 ): Promise<void> {
-  const turnStarted = performance.now();
-  let setupCompleted = turnStarted;
-  let modelFirstText: number | undefined;
-  let firstSafeSegment: number | undefined;
-  const guardTiming: Array<import("../outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
   try {
     abortSignal.throwIfAborted();
     await state.start();
@@ -150,135 +145,32 @@ async function runModelTurnInternal(
         abortSignal
       )
       : undefined);
-    const guardedOutput = new GuardedAssistantOutput(
-      outputGuard,
-      input.run_id,
-      undefined,
-      undefined,
-      undefined,
-      (timing) => guardTiming.push({
-        ...timing,
-        started_ms: timing.started_ms - turnStarted
-      })
-    );
+    const guardedOutput = new GuardedAssistantOutput(outputGuard, input.run_id);
     let approvedAssistantText = "";
-    const visibleParts: VisibleConversationPart[] = [];
-    const thinkingPartJournal = new ThinkingPartJournal(visibleParts);
-    // A Run that fails or is stopped keeps what it already showed: the released text and the steps, as its reply.
-    state.keepsReplyFrom(() => approvedAssistantText || visibleParts.length
-      ? { message: { role: "assistant", content: approvedAssistantText }, finishReason: "stop", visibleParts: structuredClone(visibleParts) }
-      : undefined);
-    const visibleActivityKeys = new Set<string>();
-    const recordVisiblePart = (message: OutboundMessage): void => {
-      if (!("run_id" in message) || message.run_id !== input.run_id) return;
-      if (message.type === "assistant.delta" && message.delta.kind === "text") {
-        const end = approvedAssistantText.length;
-        const start = end - message.delta.content.length;
-        if (start < 0) return;
-        const last = visibleParts.at(-1);
-        if (last?.type === "text" && last.end === start) {
-          last.end = end;
-        } else {
-          visibleParts.push({ type: "text", start, end });
-        }
-        return;
-      }
-      if (
-        message.type === "assistant.delta"
-        && (message.delta.kind === "thinking_start"
-          || message.delta.kind === "thinking_delta"
-          || message.delta.kind === "thinking_end")
-      ) {
-        thinkingPartJournal.accept(message.delta);
-        return;
-      }
-      if (message.type === "tool_call.delta") {
-        const key = `tool:${message.tool_call_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "tool_call", tool_call_id: message.tool_call_id });
-        }
-        return;
-      }
-      if (message.type === "skill.invoked" || message.type === "skill.activated") {
-        const key = [
-          "skill",
-          message.status,
-          message.name,
-          message.reason,
-          "source_tool_call_id" in message ? message.source_tool_call_id : ""
-        ].join(":");
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({
-            type: "skill_event",
-            name: message.name,
-            status: message.status,
-            reason: message.reason,
-            ...(message.type === "skill.invoked" ? { source_tool_call_id: message.source_tool_call_id } : {})
-          });
-        }
-        return;
-      }
-      if (message.type === "skill.run") {
-        const key = `skill-run:${message.skill_run_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "skill_run", skill_run_id: message.skill_run_id });
-        }
-      }
-    };
-    const emit = async (message: OutboundMessage): Promise<void> => {
-      await send(message);
-      recordVisiblePart(message);
-    };
-    const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
+    // Text the guard released goes to the log; the Run's other events (steps, skills) were written as they happened.
+    const emitReleased = (result: GuardedOutputResult): void => {
       for (const content of result.released) {
         approvedAssistantText += content;
-        const releasedAt = performance.now();
-        firstSafeSegment ??= releasedAt;
-        await emit({
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "text", content }
-        });
-        const timing = guardTiming.find((entry) => entry.outcome === "pass" && entry.released_ms === undefined);
-        if (timing) timing.released_ms = releasedAt - turnStarted;
+        runLog.text(content);
       }
     };
     const commitTerminal = async (finishReason: OutputFinishReason): Promise<void> => {
       // The reply is written by the Run's ending, in the same transaction as its status: a crash cannot leave a reply on a Run that was not ended.
-      const reply: RunReply = {
+      if (finishReason === "content_filter") await runLog.append({ type: "reply.blocked", conversation_id: input.conversation_id, run_id: input.run_id });
+      await state.complete({
         message: { role: "assistant", content: finishReason === "content_filter" ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE : approvedAssistantText },
-        finishReason,
-        visibleParts: finishReason === "content_filter"
-          ? visibleParts.filter((part) => part.type === "thinking")
-          : visibleParts
-      };
-      const completedAt = performance.now();
-      await emit({
-        type: "turn.completed",
-        run_id: input.run_id,
-        finish_reason: finishReason,
-        timing: {
-          total_ms: completedAt - turnStarted,
-          setup_ms: setupCompleted - turnStarted,
-          ...(modelFirstText === undefined ? {} : { model_first_text_ms: modelFirstText - turnStarted }),
-          ...(firstSafeSegment === undefined ? {} : { first_safe_segment_ms: firstSafeSegment - turnStarted }),
-          guard: guardTiming
-        }
+        finishReason
       });
-      await state.complete(reply);
     };
     const sendFixedAssistant = async (content: string): Promise<void> => {
       const pushed = await guardedOutput.push(content);
-      await emitReleased(pushed);
+      emitReleased(pushed);
       if (pushed.blocked) {
         await commitTerminal("content_filter");
         return;
       }
       const final = await guardedOutput.finish();
-      await emitReleased(final);
+      emitReleased(final);
       await commitTerminal(final.blocked ? "content_filter" : "stop");
     };
     if (input.message.content.trim() === "/compact") {
@@ -293,7 +185,6 @@ async function runModelTurnInternal(
       runtimeMessages = preTurnCompaction.replacement_history;
     }
 
-    setupCompleted = performance.now();
     // Older images beyond the byte budget leave the model's view; the path labels in the text stay.
     const messages = withinImageBudget(runtimeMessages);
 
@@ -315,7 +206,7 @@ async function runModelTurnInternal(
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
       usage: profile?.usage,
       persistModelMessage: async (message) => {
-        await store.append({
+        await runLog.append({
           type: "conversation.model_message",
           conversation_id: input.conversation_id,
           run_id: input.run_id,
@@ -362,27 +253,31 @@ async function runModelTurnInternal(
       if (state.status === "cancelled" || state.status === "interrupted") {
         break;
       }
-      await persistServerToolCallEvent(event, input, store);
-      await persistSkillEvent(event, input, store);
+      await persistServerToolCallEvent(event, input, runLog);
+      await persistSkillEvent(event, input, runLog);
       if (event.type === "assistant.delta" && event.delta.kind === "text") {
-        modelFirstText ??= performance.now();
         const result = await guardedOutput.push(event.delta.content);
-        await emitReleased(result);
+        emitReleased(result);
         if (result.blocked) {
           await commitTerminal("content_filter");
           return;
         }
         continue;
       }
+      if (event.type === "assistant.delta") {
+        const { delta } = event;
+        if (delta.kind === "thinking_start" || delta.kind === "thinking_delta" || delta.kind === "thinking_end") await runLog.thinking(delta);
+        continue;
+      }
       if (event.type === "turn.completed") {
         const final = await guardedOutput.finish();
-        await emitReleased(final);
+        emitReleased(final);
         const latest = await conversationRepository.getRun(input.conversation_id, input.run_id);
         if (latest && latest.consumedCount < latest.steeredCount && !final.blocked) {
           // A message joined after the last claim: keep this answer, leave the Run open, and
           // the supervisor runs it again from that message.
           // The ending keeps the reply and, because a message is unclaimed, leaves the Run open.
-          await state.complete({ message: { role: "assistant", content: approvedAssistantText }, finishReason: "stop", visibleParts });
+          await state.complete({ message: { role: "assistant", content: approvedAssistantText }, finishReason: "stop" });
           return;
         }
         await commitTerminal(
@@ -390,7 +285,6 @@ async function runModelTurnInternal(
         );
         return;
       }
-      await emit(event);
     }
   } catch (error) {
     if (state.status === "cancelled" || state.status === "interrupted") {
@@ -405,10 +299,10 @@ async function runModelTurnInternal(
 async function persistSkillEvent(
   event: OutboundMessage,
   input: RunStart,
-  store: RuntimeStore
+  runLog: RunLog
 ): Promise<void> {
   if (event.type === "skill.activated") {
-    await store.append({
+    await runLog.append({
       type: "skill.activated",
       conversation_id: input.conversation_id,
       run_id: input.run_id,
@@ -430,7 +324,7 @@ async function persistSkillEvent(
   if (event.type !== "skill.invoked") {
     return;
   }
-  await store.append({
+  await runLog.append({
     type: "skill.invoked",
     conversation_id: input.conversation_id,
     run_id: input.run_id,
@@ -447,12 +341,12 @@ async function persistSkillEvent(
 async function persistServerToolCallEvent(
   event: OutboundMessage,
   input: RunStart,
-  store: RuntimeStore
+  runLog: RunLog
 ): Promise<void> {
   if (event.type !== "tool_call.delta" || event.locality !== "server") {
     return;
   }
-  await store.append({
+  await runLog.append({
     type: "tool.call",
     conversation_id: input.conversation_id,
     run_id: input.run_id,

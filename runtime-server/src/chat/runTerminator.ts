@@ -10,7 +10,7 @@ import { fenced } from "./runFence.js";
 export class RunTerminator {
   constructor(
     private readonly repository: Pick<ConversationRepository, "endRun">,
-    private readonly hub: Pick<RunEventHub, "publish">,
+    private readonly hub: Pick<RunEventHub, "advancedToHead">,
     /** Told of every ending that happened (not of one that found the Run already over). */
     private readonly onEnded?: (ended: EndedRun, ending: RunEnding) => void
   ) {}
@@ -18,16 +18,9 @@ export class RunTerminator {
   async end(runId: string, ending: RunEnding): Promise<EndedRun> {
     const ended = await this.repository.endRun(runId, ending);
     if (ended.ended) try { this.onEnded?.(ended, ending); } catch { /* an observer never changes how a Run ends */ }
-    // A reply that was written is told even when the Run stays open for a message that joined it.
-    if (ended.messageId) this.hub.publish(ended.run.conversationId, { type: "assistant.message", run_id: runId, message_id: ended.messageId });
-    if (ended.ended) this.announce(ended.run.conversationId, runId, ending);
+    // The ending's rows (the reply, the `turn.state`) were written by the repository: observers are told where the log stands now, after it committed.
+    await this.hub.advancedToHead(ended.run.conversationId);
     return ended;
-  }
-
-  /** What every transport carries of an end: the failure when there is one, then the terminal state. */
-  private announce(conversationId: string, runId: string, ending: RunEnding): void {
-    if ("failure" in ending) this.hub.publish(conversationId, { type: "turn.failed", run_id: runId, error: ending.failure });
-    this.hub.publish(conversationId, { type: "turn.state", run_id: runId, status: ending.status, ...("failure" in ending ? { reason: ending.failure.message } : {}) });
   }
 }
 
@@ -36,7 +29,7 @@ export type RunTerminators = { external: RunTerminator; executing: RunTerminator
 
 export const runTerminators = (
   repository: Pick<ConversationRepository, "endRun">,
-  hub: Pick<RunEventHub, "publish">,
+  hub: Pick<RunEventHub, "advancedToHead">,
   executorId: string,
   onEnded?: (ended: EndedRun, ending: RunEnding) => void
 ): RunTerminators => ({

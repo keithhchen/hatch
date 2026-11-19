@@ -1,8 +1,6 @@
 /**
- * Library-agnostic assistant turn timeline. One ordered list of entries:
- * text, thinking, status, tool (incl. approval state), skill and skill_run.
- * Live wire events and durable history both project into the same entries,
- * so a streamed card keeps its key when the canonical snapshot replaces it.
+ * Entries of an assistant reply: text, thinking, tool (incl. approval state), skill and skill_run. The reply's entries are
+ * built by the one fold over the conversation log (chat-log.js); these are the shapes and the pure helpers it uses.
  */
 export const ACTIVITY_KINDS = Object.freeze(["thinking", "tool", "skill", "skill_run"]);
 const activityKinds = new Set(ACTIVITY_KINDS);
@@ -17,250 +15,47 @@ export function skillRunEntryId(event) {
   return ["skill-run", event.run_id, event.skill_run_id].join(":");
 }
 
-const toolEvent = (tool, runId) => ({
-  type: "tool_call.delta",
-  run_id: tool.run_id ?? runId,
-  tool_call_id: tool.tool_call_id,
-  name: tool.name,
-  activity_message: tool.activity_message,
-  arguments: tool.arguments,
-  locality: tool.locality,
-  approval: tool.approval,
-  status: tool.status,
-  result: tool.result,
-  error: tool.error,
-  detail_ref: tool.detail_ref
-});
-
-/** A step never goes backwards: an answer older than what the page already heard (a read overtaken by the stream) leaves a finished step finished. */
+/** A step never goes backwards: an answer older than what the page already heard leaves a finished step finished. */
 const STATUS_ORDER = { requested: 0, running: 1, completed: 2, failed: 2, cancelled: 2 };
-const laterStatus = (previous, next) => {
+export const laterStatus = (previous, next) => {
   if (!next) return previous ?? "requested";
   return previous && (STATUS_ORDER[previous] ?? 0) > (STATUS_ORDER[next] ?? 0) ? previous : next;
 };
 
-export class ChatTimeline {
-  constructor() {
-    this.entries = [];
-    this.sequence = 0;
-    this.activeThinking = new Map();
-    /** The entry each content index last finished: an end heard twice (a replay) updates it, never adds another. */
-    this.finishedThinking = new Map();
-    /** Entries below `sealed` belong to a message the Run has ended: later words start an entry of their own. */
-    this.sealed = 0;
-    /** How many leading entries were handed over to saved messages. */
-    this.dropped = 0;
-  }
-
-  reset() {
-    this.entries = [];
-    this.sequence = 0;
-    this.sealed = 0;
-    this.dropped = 0;
-    this.activeThinking.clear();
-    this.finishedThinking.clear();
-    return this.entries;
-  }
-
-  /** Entries ever held, counting those already handed over to saved messages. */
-  get length() { return this.dropped + this.entries.length; }
-
-  /** What is shown so far is one message; the next words are another. Returns the position to hand over to the saved message. */
-  seal() {
-    this.sealed = this.entries.length;
-    return this.length;
-  }
-
-  /** The saved message holds everything up to `position` (as `seal` returned it): those entries leave the live row, the rest stay. */
-  discardThrough(position) {
-    const count = Math.min(this.entries.length, Math.max(0, position - this.dropped));
-    if (!count) return this.entries;
-    const gone = new Set(this.entries.slice(0, count).map(entry => entry.id));
-    for (const [index, id] of this.activeThinking) if (gone.has(id)) this.activeThinking.delete(index);
-    for (const [index, id] of this.finishedThinking) if (gone.has(id)) this.finishedThinking.delete(index);
-    this.entries = this.entries.slice(count);
-    this.dropped += count;
-    this.sealed = Math.max(0, this.sealed - count);
-    return this.entries;
-  }
-
-  snapshot() {
-    return this.entries;
-  }
-
-  appendText(content) {
-    if (!content) return this.entries;
-    const current = this.entries.length > this.sealed ? this.entries.at(-1) : undefined;
-    if (current?.kind === "text") {
-      this.entries = [...this.entries.slice(0, -1), { ...current, content: current.content + content }];
-    } else {
-      this.entries = [...this.entries, { kind: "text", id: `text-${++this.sequence}`, content }];
-    }
-    return this.entries;
-  }
-
-  startThinking(contentIndex) {
-    // A start heard twice (a replay) begins the step again; the one it replaces stops streaming, so none is left running for good.
-    const open = this.activeThinking.get(contentIndex);
-    if (open) this.patch(open, entry => ({ ...entry, streaming: false }));
-    this.activeThinking.delete(contentIndex);
-    this.finishedThinking.delete(contentIndex);
-    const entry = { kind: "thinking", id: "thinking-" + contentIndex + "-" + ++this.sequence, contentIndex, title: "thinking", content: "", streaming: true };
-    this.entries = [...this.entries, entry];
-    this.activeThinking.set(contentIndex, entry.id);
-    return this.entries;
-  }
-
-  appendThinking(contentIndex, delta) {
-    // A page that joined mid-thinking (a reload) never saw the start: the step begins at the first event it hears.
-    if (!this.activeThinking.has(contentIndex)) this.startThinking(contentIndex);
-    const id = this.activeThinking.get(contentIndex);
-    if (!delta) return this.entries;
-    return this.patch(id, entry => ({ ...entry, content: entry.content + delta }));
-  }
-
-  finishThinking(contentIndex, content) {
-    // An end heard twice is the same step finished again.
-    const done = this.finishedThinking.get(contentIndex);
-    if (!this.activeThinking.has(contentIndex) && done && this.entries.some(entry => entry.id === done)) return this.patch(done, entry => ({ ...entry, content }));
-    if (!this.activeThinking.has(contentIndex)) this.startThinking(contentIndex);
-    const id = this.activeThinking.get(contentIndex);
-    this.activeThinking.delete(contentIndex);
-    this.finishedThinking.set(contentIndex, id);
-    return this.patch(id, entry => ({ ...entry, content, streaming: false }));
-  }
-
-  restoreThinking(contentIndex, content) {
-    this.entries = [...this.entries, { kind: "thinking", id: "thinking-" + contentIndex + "-" + ++this.sequence, contentIndex, title: "thinking", content, streaming: false }];
-    return this.entries;
-  }
-
-  updateThinking(content) {
-    if (!content) return this.entries;
-    const current = this.entries.at(-1);
-    if (current?.kind === "thinking" && current.contentIndex === undefined) {
-      this.entries = [...this.entries.slice(0, -1), { ...current, title: "thinking", content }];
-    } else {
-      this.entries = [...this.entries, { kind: "thinking", id: `thinking-${++this.sequence}`, title: "thinking", content }];
-    }
-    return this.entries;
-  }
-
-  updateRuntimeStatus(content) {
-    const normalizedContent = content?.trim();
-    if (!normalizedContent || normalizedContent === "Thinking through the product.") return this.entries;
-    if (ChatTimeline.isRedundantToolStatus(normalizedContent)) return this.entries;
-    const current = this.entries.at(-1);
-    if (current?.kind === "status") {
-      this.entries = [...this.entries.slice(0, -1), { ...current, content: normalizedContent }];
-    } else {
-      this.entries = [...this.entries, { kind: "status", id: "status-" + ++this.sequence, content: normalizedContent }];
-    }
-    return this.entries;
-  }
-
-  static isRedundantToolStatus(content) {
-    const normalizedContent = content?.trim();
-    return typeof normalizedContent === "string"
-      && (/^Calling tool .+\.$/i.test(normalizedContent) || /^Tool .+ (completed|failed)\.$/i.test(normalizedContent));
-  }
-
-  upsertTool(event) {
-    const previous = this.entries.find(entry => entry.kind === "tool" && entry.content.toolCallId === event.tool_call_id);
-    return this.upsert(`tool-${event.tool_call_id}`, {
-      kind: "tool",
-      id: previous?.id ?? `tool-${event.tool_call_id}`,
-      title: (event.name ?? previous?.content?.name ?? "tool").replaceAll("_", " "),
-      content: {
-        runId: event.run_id ?? previous?.content?.runId,
-        toolCallId: event.tool_call_id,
-        name: event.name ?? previous?.content?.name ?? "tool",
-        activityMessage: event.activity_message ?? previous?.content?.activityMessage,
-        arguments: event.arguments ?? previous?.content?.arguments ?? {},
-        locality: event.locality ?? previous?.content?.locality,
-        approval: event.approval ?? previous?.content?.approval,
-        result: event.result ?? previous?.content?.result,
-        error: event.error ?? previous?.content?.error,
-        detailRef: event.detail_ref ?? previous?.content?.detailRef
-      },
-      status: laterStatus(previous?.status, event.status)
-    });
-  }
-
-  /** skill.activated / skill.invoked, or a durable skill_event history part. */
-  upsertSkill(event) {
-    const id = skillEntryId(event);
-    return this.upsert(id, {
-      kind: "skill", id, title: event.name, status: event.status,
-      content: { runId: event.run_id, name: event.name, path: event.path, reason: event.reason, sourceToolCallId: event.source_tool_call_id, invocationType: event.invocation_type }
-    });
-  }
-
-  /** skill.run, or a durable skill_run history part. */
-  upsertSkillRun(event) {
-    const id = skillRunEntryId(event);
-    return this.upsert(id, {
-      kind: "skill_run", id, title: event.name, status: laterStatus(this.entries.find(entry => entry.id === id)?.status, event.status),
-      content: { runId: event.run_id, skillRunId: event.skill_run_id, skillId: event.skill_id, name: event.name, error: event.error }
-    });
-  }
-
-  upsert(id, next) {
-    const index = this.entries.findIndex(entry => entry.id === id || entry.id === next.id);
-    this.entries = index < 0 ? [...this.entries, next] : this.entries.map((entry, entryIndex) => entryIndex === index ? next : entry);
-    return this.entries;
-  }
-
-  patch(id, update) {
-    this.entries = this.entries.map(entry => entry.id === id ? update(entry) : entry);
-    return this.entries;
-  }
-
-  static streamingAssistantMessage(runId, timestamp = new Date().toISOString()) {
-    return { id: `stream-${runId}`, renderKey: `${runId}-assistant`, run_id: runId, role: "assistant", content: "", timestamp, transient: true, timeline: [] };
-  }
-
-  /** What a Run in progress has shown besides its text (the server's account of it): each step is placed once, by its id. */
-  restoreActivity({ run_id: runId, tool_calls: tools = [], skill_events: skills = [], skill_runs: runs = [] }) {
-    for (const tool of tools) this.upsertTool(toolEvent(tool, runId));
-    for (const event of skills) this.upsertSkill({ run_id: runId, ...event });
-    for (const run of runs) this.upsertSkillRun({ run_id: runId, ...run });
-    return this.entries;
-  }
-
-  /** Project a durable assistant message (protocol 0.8 `parts`) into timeline entries. */
-  static fromHistory(message) {
-    const timeline = new ChatTimeline();
-    const tools = new Map((message.tool_calls ?? []).map(tool => [tool.tool_call_id, tool]));
-    const skillRuns = new Map((message.skill_runs ?? []).map(run => [run.skill_run_id, run]));
-    if (!Array.isArray(message.parts) || !message.parts.length) {
-      timeline.appendText(message.content ?? "");
-      for (const tool of message.tool_calls ?? []) timeline.upsertTool(toolEvent(tool, message.run_id));
-      return timeline.snapshot();
-    }
-    for (const part of message.parts) {
-      if (part.type === "text") {
-        const start = Math.max(0, Number(part.start) || 0);
-        const end = Math.max(start, Number(part.end) || 0);
-        timeline.appendText(String(message.content ?? "").slice(start, end));
-      } else if (part.type === "thinking") {
-        timeline.restoreThinking(Number(part.contentIndex), String(part.content ?? ""));
-      } else if (part.type === "tool_call") {
-        const tool = tools.get(part.tool_call_id);
-        if (tool) timeline.upsertTool(toolEvent(tool, message.run_id));
-      } else if (part.type === "skill_run") {
-        const run = skillRuns.get(part.skill_run_id);
-        if (run) timeline.upsertSkillRun({ run_id: message.run_id, ...run });
-      } else if (part.type === "skill_event") {
-        const event = (message.skill_events ?? []).find(candidate => candidate.name === part.name
-          && candidate.status === part.status && candidate.reason === part.reason
-          && (candidate.source_tool_call_id ?? "") === (part.source_tool_call_id ?? ""));
-        if (event) timeline.upsertSkill({ run_id: message.run_id, ...event });
-      }
-    }
-    return timeline.snapshot();
-  }
+/** The tool entry for a `tool.call` event, over the entry it updates. */
+export function toolEntry(event, previous) {
+  const content = previous?.content;
+  return {
+    kind: "tool",
+    id: previous?.id ?? `tool-${event.tool_call_id}`,
+    title: (event.name ?? content?.name ?? "tool").replaceAll("_", " "),
+    content: {
+      runId: event.run_id ?? content?.runId,
+      toolCallId: event.tool_call_id,
+      name: event.name ?? content?.name ?? "tool",
+      activityMessage: event.activity_message ?? content?.activityMessage,
+      arguments: event.arguments ?? content?.arguments ?? {},
+      locality: event.locality ?? content?.locality,
+      approval: event.approval ?? content?.approval,
+      result: event.result ?? content?.result,
+      error: event.error ?? content?.error,
+      detailRef: event.detail_ref ?? content?.detailRef
+    },
+    status: laterStatus(previous?.status, event.status)
+  };
 }
+
+/** skill.activated / skill.invoked. */
+export const skillEntry = event => {
+  const id = skillEntryId(event);
+  return { kind: "skill", id, title: event.name, status: event.status, content: { runId: event.run_id, name: event.name, path: event.path, reason: event.reason, sourceToolCallId: event.source_tool_call_id, invocationType: event.invocation_type } };
+};
+
+/** skill.run, over the entry it updates. */
+export const skillRunEntry = (event, previous) => {
+  const id = skillRunEntryId(event);
+  return { kind: "skill_run", id, title: event.name, status: laterStatus(previous?.status, event.status), content: { runId: event.run_id, skillRunId: event.skill_run_id, skillId: event.skill_id, name: event.name, error: event.error } };
+};
 
 /**
  * Consecutive activity entries collapse into one activity group. Entries the
@@ -283,64 +78,44 @@ export function groupTimelineEntries(entries, standalone = () => false) {
 }
 
 /**
- * The Runtime keeps a Run's tool calls on every assistant message the Run passed through. A reply shows each step once,
- * on the last message of its Run, where the interleaving parts are.
- */
-export function withoutRepeatedSteps(messages) {
-  const seen = new Set();
-  return [...messages].reverse().map(message => {
-    if (message.role !== "assistant" || message.transient || !message.tool_calls?.length) return message;
-    const fresh = message.tool_calls.filter(tool => !seen.has(`${message.run_id}:${tool.tool_call_id}`));
-    for (const tool of message.tool_calls) seen.add(`${message.run_id}:${tool.tool_call_id}`);
-    return fresh.length === message.tool_calls.length ? message : { ...message, tool_calls: fresh };
-  }).reverse();
-}
-
-/**
- * Steps that no text interrupts are one row, even when they span replies: a reply that starts with steps folds into the
- * reply before it when that one ended with steps, so "steps | steps then text" and "text then steps | steps" each show a
- * single steps row. The live reply joins the same way, as `liveTail`, so a Run's saved steps and its running ones are one
- * row while it works. `kinds` are the activity kinds the host shows; empty thinking and blank text count as nothing.
+ * Steps that no text interrupts are one row, even when they span replies: a reply that starts with steps joins the reply
+ * before it when that one ended with steps. `kinds` are the activity kinds the host shows; empty thinking and blank text
+ * count as nothing.
  */
 export function foldStepOnlyMessages(messages, kinds = ACTIVITY_KINDS) {
   const shown = entry => !(entry.kind === "thinking" && !entry.streaming && !entry.content?.trim()) && !(entry.kind === "text" && !String(entry.content ?? "").trim())
     && (!ACTIVITY_KINDS.includes(entry.kind) || kinds.includes(entry.kind));
-  const entriesOf = message => ChatTimeline.fromHistory(message).filter(shown);
   const isStep = entry => entry !== undefined && kinds.includes(entry.kind);
-  const foldable = message => message.role === "assistant" && !message.transient;
   const folded = [];
   for (const message of messages) {
     const last = folded.at(-1);
-    const lastEntries = last && foldable(last) ? [last, ...(last.foldedMessages ?? [])].flatMap(entriesOf) : [];
-    if (foldable(message) && isStep(lastEntries.at(-1)) && isStep(entriesOf(message)[0])) folded[folded.length - 1] = { ...last, foldedMessages: [...(last.foldedMessages ?? []), message] };
-    else if (message.role === "assistant" && message.transient && isStep(lastEntries.at(-1)) && isStep((message.timeline ?? []).filter(shown)[0])) folded[folded.length - 1] = { ...last, liveTail: message };
-    else folded.push(message);
+    if (last?.role === "assistant" && message.role === "assistant" && isStep(last.timeline.filter(shown).at(-1)) && isStep(message.timeline.filter(shown)[0])) {
+      folded[folded.length - 1] = { ...last, timeline: [...last.timeline, ...message.timeline], transient: message.transient };
+    } else folded.push(message);
   }
   return folded;
 }
 
 /**
- * A message the user submitted that the Runtime has not yet confirmed. `clientMessageId` is minted when the user sends
- * and is the message's id everywhere. With `stableId` the placeholder carries that id, so the saved row replaces it by id;
- * without it the placeholder is matched to the saved row by Run and role.
+ * A message the user submitted that the log does not carry yet. `clientMessageId` is minted when the user sends and is the
+ * message's id everywhere: the log's `user.message` (or `message.queued`) with that id replaces the placeholder.
  */
 export class PendingSubmission {
-  constructor({ conversationId, runId, clientMessageId, content, attachments, files, stableId = false }) {
+  constructor({ conversationId, runId, clientMessageId, content, attachments, files }) {
     this.conversationId = conversationId;
     this.runId = runId;
     this.clientMessageId = clientMessageId;
     this.content = content;
     this.attachments = attachments;
     this.files = files;
-    this.optimisticMessageId = stableId ? clientMessageId : `optimistic-${clientMessageId}`;
-    this.renderKey = stableId ? clientMessageId : `${runId}-user`;
-    this.stableId = stableId;
     /** The user must send again: the send failed in a way that may or may not have reached the server. */
     this.awaitingUser = false;
     /** Handed to the transport on this connection; a transport that outlives its connection does not hand it twice. */
     this.dispatched = false;
     /** This message started the Run, rather than joining one that was already running. */
     this.leadsRun = false;
+    /** The server took it while a Run was going: it waits, queued, until the Run takes it up. */
+    this.queued = false;
   }
 
   /** What survives a page reload: the words and the already-uploaded attachments, never the files. */
@@ -348,22 +123,21 @@ export class PendingSubmission {
     return { conversationId: this.conversationId, clientMessageId: this.clientMessageId, content: this.content, attachments: this.attachments };
   }
 
-  static fromRecord(record, { runId, stableId }) {
-    return new PendingSubmission({ ...record, runId, files: [], stableId });
+  static fromRecord(record, { runId }) {
+    return new PendingSubmission({ ...record, runId, files: [] });
   }
 
   optimisticMessage() {
     return {
-      id: this.optimisticMessageId,
-      renderKey: this.renderKey,
+      id: this.clientMessageId,
+      renderKey: this.clientMessageId,
       run_id: this.runId,
       role: "user",
       content: this.content,
       timestamp: new Date().toISOString(),
       attachments: this.attachments.map(({ text: _text, data_base64: _data, ...attachment }) => attachment),
       optimistic: true,
-      provisional: true,
-      state: "sending"
+      state: this.queued ? "queued" : "sending"
     };
   }
 }

@@ -10,6 +10,7 @@ import type { OutboundMessage } from "../protocol.js";
 import type { RuntimeStore } from "../store.js";
 import { errorMessage } from "./modelTurn.js";
 import type { EventProjection } from "./sinks.js";
+import { protectedSkillPath, redactedToolOutput, redactedTrigger } from "./privateBoundary.js";
 import type { UsageSurface } from "../usage/usage.js";
 
 export type SessionBinding = {
@@ -248,13 +249,6 @@ export function privateBoundaryProjection(current: () => { agentCorpusRoot?: str
     return protectPrivateAgentBoundary(event as unknown as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>;
   };
 }
-
-const protectedSkillPath = (agentId: string, name: string): string =>
-  `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(name)}`;
-
-const redactedTrigger = <T extends { path?: string }>(trigger: T): T => ({ ...trigger, path: trigger.path ? "agent://private" : undefined });
-
-const redactedToolOutput = (result: unknown) => ({ arguments: {}, result: result !== undefined ? { private_result_redacted: true } : undefined });
 
 export function protectPrivateAgentBoundary(
   message: OutboundMessage,

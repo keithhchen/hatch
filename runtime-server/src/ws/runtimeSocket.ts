@@ -11,6 +11,7 @@ import { creatorAgentView } from "../chat/creatorAgentCatalog.js";
 import { errorMessage } from "../chat/modelTurn.js";
 import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import { SocketSink, projecting } from "../chat/sinks.js";
+import { protectPublicLogEvents } from "../chat/publicLog.js";
 import {
   conversationBinding,
   privateBoundaryProjection,
@@ -22,7 +23,7 @@ import {
 import { DESKTOP_RETIRED_CODE, DESKTOP_RETIRED_NOTICE, isDesktopFrame } from "../chat/desktopRetired.js";
 import { chatFailure, submitUserMessage, type ChatEdge } from "../chat/turnSubmission.js";
 import { clientAttributesOf, parseInboundMessage, type ClientHello, type OutboundMessage } from "../protocol.js";
-import type { RuntimeStore } from "../store.js";
+import type { PublicLogEvent, RuntimeStore } from "../store.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 
 /** What the Runtime socket protocol needs from the rest of the Runtime; the composition root supplies it. */
@@ -150,9 +151,31 @@ export async function handleRuntimeSocket(
       ? send({ type: "message.rejected", run_id: frame.run_id, client_message_id: typeof frame.client_message_id === "string" ? frame.client_message_id : frame.run_id, error })
       : send({ type: "turn.failed", run_id: frame.run_id, error });
   /** Local-tool calls still waiting for a client: whoever reconnects can answer them. */
-  const replayPendingToolRequests = async (conversationId: string): Promise<void> => {
-    for (const request of await chat.pendingToolRequests(conversationId)) sink.push(request as unknown as Record<string, unknown>);
+  const replayPendingToolRequests = async (conversationId: string, only?: Set<string>): Promise<void> => {
+    const pending = await chat.pendingToolRequests(conversationId);
+    // A call that was answered is forgotten: the id may come again with a later question.
+    if (only) for (const id of [...only]) if (!pending.some((request) => request.tool_call_id === id)) only.delete(id);
+    for (const request of pending) {
+      if (only) { if (only.has(request.tool_call_id)) continue; only.add(request.tool_call_id); }
+      sink.push(request as unknown as Record<string, unknown>);
+    }
   };
+
+  /** Local-tool calls already put to this client, so a call is not asked twice. */
+  const asked = new Set<string>();
+  /** Follows the conversation's log for this connection: each event is one `log.event` frame. A client that must answer a local tool is asked when its call enters the log. */
+  const follow = (conversationId: string, after: number | undefined): (() => void) => chat.tail.attach(conversationId, after, {
+    push: (event) => {
+      // The same protection as every page of the log: what a buyer sees never opens the Expert's private corpus.
+      sink.push({ type: "log.event", event: binding ? protectPublicLogEvents([event as unknown as PublicLogEvent], binding.productId)[0] : event });
+      if (event.type !== "tool.call" || event.locality !== "client" || event.status !== "requested") return;
+      // The client that must answer a local tool is asked when the call enters the log. A skill's calls show redacted arguments there: those are asked from the durable record.
+      if (event.scope === "skill_run") { void replayPendingToolRequests(conversationId, asked).catch(() => undefined); return; }
+      asked.add(String(event.tool_call_id));
+      const { run_id, tool_call_id, name, arguments: args, approval, scope } = event as Record<string, unknown>;
+      sink.push({ type: "tool_call.request", run_id, tool_call_id, name, arguments: args, approval, ...(scope ? { scope } : {}) });
+    }
+  });
 
   socket.on("message", (data) => {
     lastClientActivityAt = Date.now();
@@ -247,11 +270,11 @@ export async function handleRuntimeSocket(
               corpus_digest: binding.corpusDigest,
               ...(binding.agentCorpus ? { creator_agent: creatorAgentView(binding.agentCorpus) } : {})
             });
-            // A connection sees its conversation's live events, whoever started the Run.
-            // Subscribed before the ready frame is awaited: a client that answers it at once cannot outrun its own subscription.
-            detach = chat.hub.subscribe(conversation.id, sink);
+            // A connection sees its conversation's log, whoever started the Run: what follows `after`, then what is appended.
+            // Following starts before the ready frame is awaited: a client that answers it at once cannot outrun its own subscription.
+            detach = follow(conversation.id, message.after);
             await ready;
-            await replayPendingToolRequests(conversation.id);
+            await replayPendingToolRequests(conversation.id, asked);
             startEstablishedConnectionHeartbeat();
           } finally {
             helloPending = false;
@@ -274,9 +297,8 @@ export async function handleRuntimeSocket(
             return;
           }
           detach?.();
-          const afterCursor = message.after_cursor ?? (await conversationRepository.recoverySnapshot(conversation.id, [])).cursor;
-          detach = chat.feed.attach(conversation.id, { afterCursor, stream: message.stream }, sink);
-          if (message.stream) await replayPendingToolRequests(conversation.id);
+          detach = follow(conversation.id, message.after);
+          await replayPendingToolRequests(conversation.id, asked);
           return;
         }
 
@@ -326,10 +348,8 @@ export async function handleRuntimeSocket(
             binding = current;
             // A stop that arrived while the message was being admitted found no Run to cancel: the Run it started is cancelled now.
             if (submission.signal.reason instanceof UserStop && accepted.outcome !== "replayed") await chat.cancel(conversation.id, accepted.run.id, submission.signal.reason.message);
-            if (accepted.outcome === "replayed") {
-              await send({ type: "message.accepted", conversation_id: conversation.publicId, run_id: accepted.run.id, client_message_id: accepted.clientMessageId, outcome: accepted.outcome });
-              await send({ type: "turn.state", run_id: accepted.run.id, status: accepted.run.status, reason: "Idempotent client message replay" });
-            }
+            // The acknowledgement is for the connection that sent the message; the message itself is in the log for everyone.
+            await send({ type: "message.accepted", conversation_id: conversation.publicId, run_id: accepted.run.id, client_message_id: accepted.clientMessageId, outcome: accepted.outcome });
           } catch (error) {
             if (submission.signal.aborted) return;
             await refuseMessage(message, chatFailure(error));

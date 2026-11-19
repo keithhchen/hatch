@@ -54,7 +54,7 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
   const chatRef = useRef(null);
 
   const post = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
-  const refresh = () => controller.refresh(ASSISTANT_CONVERSATION).catch(cause => setError(friendlyError(cause, t)));
+  const refresh = () => Promise.all([transport.loadView(), controller.refresh(ASSISTANT_CONVERSATION)]).catch(cause => setError(friendlyError(cause, t)));
   const act = async (task, action) => {
     try { await post(`${TASKS}/${task.id}/${action}`); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }

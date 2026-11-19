@@ -102,6 +102,7 @@ class FakeAssistant implements AssistantHost {
   partial = async () => "";
   steps: ReplySteps | undefined;
   activity = async () => this.steps;
+  log = async (_account: string, query: unknown) => ({ events: [{ position: 1, type: "user.message", at: "t", id: "m1", content: JSON.stringify(query) }], head: 1, has_more: false });
   retried: string[] = [];
   retry = async (_account: string, input: { id: string }) => { this.retried.push(input.id); return { run: { id: "arun-2" }, outcome: "started" as const }; };
 }
@@ -303,6 +304,19 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     assert.deepEqual(after.messages.map(m => [m.role, m.text]), [["user", "Remind me tomorrow"], ["assistant", "Noted."]]);
     assert.equal((await h.call(`${path}/stop`, { method: "POST" })).status, 202);
     assert.equal(h.assistant.stopped, 1);
+  } finally { await h.close(); }
+});
+
+test("assistant: the log is read by position or by turns, GET only, with nothing the Assistant's page may not show", async () => {
+  const h = await harness();
+  try {
+    const path = "/v1/creator/assistant/conversation/log";
+    assert.equal((await h.call(path, { token: null })).status, 401);
+    const page = await (await h.call(`${path}?after=3&limit=10`)).json() as { events: Array<{ content: string }>; head: number };
+    assert.deepEqual(JSON.parse(page.events[0]!.content), { after: 3, limit: 10 });
+    assert.deepEqual(JSON.parse(((await (await h.call(`${path}?turns=2&before=9`)).json()) as typeof page).events[0]!.content), { turns: 2, before: 9 });
+    assert.equal(((await (await h.call(`${path}?turns=2&after=1`)).json()) as { error: { code: string } }).error.code, "invalid_log_query");
+    assert.equal((await h.call(path, { method: "POST", body: {} })).status, 405);
   } finally { await h.close(); }
 });
 

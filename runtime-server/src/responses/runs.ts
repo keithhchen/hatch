@@ -3,6 +3,7 @@ import type { ChatEdge } from "../chat/turnSubmission.js";
 import type { RuntimeStore } from "../store.js";
 import type { VisibleConversationMessage } from "../store.js";
 import { attachmentMessageId, type ChatAssets } from "../chat/assets.js";
+import { runText } from "../chat/publicLog.js";
 import type { UsageReader } from "../usage/usage.js";
 import { isTerminal, responseObject, usageOf, userMessageItem, type AttachedFile, type Json, type RunView } from "./mapping.js";
 
@@ -31,7 +32,7 @@ export class RunViews {
     const at = runs.findIndex((row) => row.id === run.id);
     return {
       run, includeToolCalls,
-      text: reply?.content ?? run.partialOutput ?? "",
+      text: reply?.content ?? runText(events, run.id),
       ...(reply?.finish_reason ? { finishReason: reply.finish_reason } : {}),
       toolCalls: reply?.tool_calls ?? [],
       approvals: await this.approvals(conversation, run, chat),
