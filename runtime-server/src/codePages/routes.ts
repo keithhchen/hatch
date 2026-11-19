@@ -10,6 +10,12 @@ const CODE_ROUTE = /^\/v1\/codes\/([^/]+)(\/intake)?$/;
  * which spends the code and starts the Run; answers with the state after it. The code is the credential: nothing here takes another.
  */
 export async function handleCodePageRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, pages: CodePages): Promise<void> {
+  if (req.method === "GET" && url.pathname === "/v1/codes/landing") {
+    res.setHeader("cache-control", "no-store");
+    try { writeJson(res, 200, await pages.landing(url.searchParams.get("product") ?? "")); }
+    catch { writeJson(res, 404, { error: { code: "not_found", message: "Not found." } }); }
+    return;
+  }
   const match = CODE_ROUTE.exec(url.pathname);
   if (!match || (match[2] ? req.method !== "POST" : req.method !== "GET")) {
     writeJson(res, match ? 405 : 404, { error: { code: match ? "method_not_allowed" : "not_found", message: match ? "Method not allowed." : "Not found." } });

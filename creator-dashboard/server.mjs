@@ -405,7 +405,11 @@ export async function createDashboardApp(options = {}) {
       // The page of an access code (/c/<code>): the code is the only credential, so these routes take no session. They reach the Runtime's
       // /v1/codes/<code>, which limits wrong codes by the client address passed on here.
       if (request.method === "GET" && url.pathname === "/v1/web-chat/code-landing") {
-        return codePageProductId ? send(response, 200, { product_id: codePageProductId }) : send(response, 404, { error: { code: "not_found", message: "Not found." } });
+        if (!codePageProductId) return send(response, 404, { error: { code: "not_found", message: "Not found." } });
+        // The product page: what is sold and its price are the Runtime's (the Product's corpus, HATCH_PAY_PRICE_FEN); only the Product id is ours.
+        const upstream = await fetchImpl(new URL(`/v1/codes/landing?product=${encodeURIComponent(codePageProductId)}`, runtimeUrl));
+        const landing = upstream.ok ? await upstream.json() : {};
+        return send(response, 200, { product_id: codePageProductId, name: landing.product?.name, description: landing.product?.description, price_fen: landing.price_fen });
       }
       const codePage = CODE_PAGE_PATH.exec(url.pathname);
       if (codePage && request.method === (codePage[2] ? "POST" : "GET")) {
