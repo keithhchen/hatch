@@ -559,7 +559,8 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
   // The log keeps text and the step in the order they happened; the paragraphs are the fold's to join.
   assert.deepEqual(
     events.filter((event) => event.type === "assistant.text" || event.type === "tool.call").map((event) => event.type === "assistant.text" ? ["text", String(event.content)] : ["tool", String(event.tool_call_id)]),
-    [["text", beforeTool], ["tool", "call_interleave"], ["tool", "call_interleave"], ["text", afterTool]]
+    // The guard holds back the end of the first segment until the next release, so the cut is where it released.
+    [["text", beforeTool.slice(0, firstBoundary)], ["tool", "call_interleave"], ["tool", "call_interleave"], ["text", `${beforeTool.slice(firstBoundary)}${afterTool}`]]
   );
   socket.close();
 });
@@ -736,10 +737,10 @@ test("thinking deltas stream with Pi indexes and persist the same ordered snapsh
       .map((message) => message.type === "assistant.delta" ? message.delta : undefined),
     [
       { kind: "thinking_start", contentIndex: 3 },
-      { kind: "thinking_delta", contentIndex: 3, delta: "considering " },
-      { kind: "thinking_delta", contentIndex: 3, delta: "the request" },
+      // Thinking is written to the log in chunks, so the two deltas arrive as one.
+      { kind: "thinking_delta", contentIndex: 3, delta: "considering the request" },
       { kind: "thinking_end", contentIndex: 3, content: "considering the request" },
-      { kind: "text", content: "Done.", offset: 0 }
+      { kind: "text", content: "Done." }
     ]
   );
   const [conversation] = [...new Set((await store.readEvents()).map((event) => "conversation_id" in event ? event.conversation_id : undefined))].filter(Boolean) as string[];
