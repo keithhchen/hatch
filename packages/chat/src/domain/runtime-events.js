@@ -7,7 +7,7 @@ import { ChatTimeline } from "./timeline.js";
  * not applied, so a host text-reveal policy can pace them.
  *
  * Outcome kinds: text, timeline, tool_request, approval_request, turn_state,
- * compacted, changed, accepted, ready, terminal, message_rejected, session_error, ignored.
+ * compacted, changed, titled, accepted, ready, terminal, message_rejected, session_error, ignored.
  */
 const replying = Object.freeze({ key: "agentReplying" });
 const outcome = (kind, fields = {}) => Object.freeze({ kind, ...fields });
@@ -71,6 +71,8 @@ const sessionHandlers = Object.freeze({
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
   // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
   "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id }),
+  // The conversation was given its title (once, after its first Run): a list of conversations shows it without reading again.
+  "conversation.titled": (_timeline, event) => event.title ? outcome("titled", { conversationId: event.conversation_id, title: event.title }) : IGNORED,
   // The server cannot vouch for the live stream (events were dropped or a relay connection was lost): read the conversation again.
   resync: () => outcome("resync")
 });

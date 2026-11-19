@@ -693,6 +693,10 @@ export class ConversationController {
       if (outcome.committed === "assistant") this.markSettled();
       this.requestRefresh(conversationId);
     },
+    titled(outcome, { conversationId }) {
+      const id = outcome.conversationId ?? conversationId;
+      this.setState(state => ({ conversations: state.conversations.map(item => item.id === id ? { ...item, title: outcome.title } : item) }));
+    },
     timeline(outcome) {
       this.publishTimeline(timeline => timeline.snapshot());
       if (outcome.status) this.setState({ status: outcome.status });

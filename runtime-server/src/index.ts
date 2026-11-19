@@ -58,6 +58,9 @@ import { clientMessageInputDigest } from "./protocol.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
 import { openArtifactMode } from "./artifact/open.js";
+import { ConversationTitles, type TitleModel } from "./chat/conversationTitles.js";
+import { roleTitleModel } from "./chat/titleModel.js";
+import { FilePrompts, PostgresPrompts } from "./prompts.js";
 import { REPORT_CONTEXT_BUDGET, type ArtifactMode } from "./artifact/mode.js";
 import type { ReportRecord } from "./artifact/ports.js";
 import { artifactToolDefinitions } from "./artifact/toolDefinitions.js";
@@ -137,6 +140,8 @@ export type RuntimeServerOptions = {
   /** Where each role's model is chosen. Defaults to the Runtime database's `hatch_model_roles`, or the seed choices without one. */
   models?: ModelRoleResolver;
   createRuntime?: () => AgentRuntime;
+  /** Writes a conversation's title; tests inject one. By default the model of the `title` role. */
+  titleModel?: TitleModel;
   /** Chat's compaction strategy; tests inject one with a test-only summarizer. */
   compactionStrategy?: ChatRuntimeOptions<SessionBinding>["compactionStrategy"];
   conversationStore?: RuntimeStore;
@@ -509,6 +514,12 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
     ...(options.library ? { library: new RetryingLibrary(options.library) } : {}),
     ...(artifact ? { artifacts: artifact.lifecycle } : {}),
+    titles: new ConversationTitles({
+      repository: conversationRepository, history: conversationStore,
+      prompts: conversationStore instanceof PostgresStore ? new PostgresPrompts(conversationStore.pool) : new FilePrompts(),
+      model: options.titleModel ?? roleTitleModel(models),
+      skip: async conversationId => Boolean(await artifact?.reports.get(conversationId))
+    }),
     afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); },
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})

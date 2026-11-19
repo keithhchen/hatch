@@ -18,7 +18,9 @@ export const MODEL_ROLES = {
   /** The Inspiration node: research over the open web. */
   inspiration: "kimi-k3.1-pro",
   /** The Content Creation node. */
-  content: "kimi-k3.1-pro"
+  content: "kimi-k3.1-pro",
+  /** The title of a Product conversation, written once after its first Run. A short, background call: DeepSeek Flash, with thinking off. */
+  title: "deepseek-flash"
 } as const satisfies Record<string, LlmProfileName>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
@@ -27,7 +29,8 @@ export const MODEL_ROLE_NAMES = Object.keys(MODEL_ROLES) as ModelRole[];
 const ALLOWED: Record<ModelRole, readonly string[]> = {
   chat: RUNTIME_LLM_PROFILE_NAMES, assistant: RUNTIME_LLM_PROFILE_NAMES,
   factory: FACTORY_LLM_PROFILE_NAMES,
-  ingest: ["kimi-k3.1-pro"], inspiration: FACTORY_LLM_PROFILE_NAMES, content: FACTORY_LLM_PROFILE_NAMES
+  ingest: ["kimi-k3.1-pro"], inspiration: FACTORY_LLM_PROFILE_NAMES, content: FACTORY_LLM_PROFILE_NAMES,
+  title: RUNTIME_LLM_PROFILE_NAMES
 };
 
 /** What a use of a role is about: the Product whose chat this is, when it is one. */

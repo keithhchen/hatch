@@ -314,6 +314,12 @@ export interface ConversationRepository {
     limit?: number;
   }): Promise<ConversationListPage>;
   updateConversation(id: string, input: UpdateConversationInput): Promise<ConversationRecord>;
+  /**
+   * Names a conversation that has no title, once: a single conditional write, so concurrent instances and retries write at most
+   * once and a title a user set is never replaced. Returns the conversation when this call wrote the title, `undefined` when it
+   * already had one. The version is not bumped: a rename that read the conversation first still applies, over this title.
+   */
+  setTitleIfUnset(id: string, title: string): Promise<ConversationRecord | undefined>;
   createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }>;
   acceptSubmission(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission>;
   /**
@@ -628,6 +634,16 @@ export class InMemoryConversationRepository implements ConversationRepository {
         type: "conversation.updated",
         payload: publicConversationEvent(updated)
       });
+      return cloneConversation(updated);
+    });
+  }
+
+  async setTitleIfUnset(id: string, title: string): Promise<ConversationRecord | undefined> {
+    return this.write(async () => {
+      const current = this.conversations.get(id);
+      if (!current || current.title) return undefined;
+      const updated: ConversationRecord = { ...current, title };
+      this.conversations.set(id, updated);
       return cloneConversation(updated);
     });
   }
@@ -1890,6 +1906,12 @@ export class PostgresConversationRepository implements ConversationRepository {
     const updated = conversationFromRow(result.rows[0]);
     await this.appendEvent({ conversationId: id, type: "conversation.updated", payload: publicConversationEvent(updated) });
     return updated;
+  }
+
+  async setTitleIfUnset(id: string, title: string): Promise<ConversationRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<ConversationRow>("UPDATE hatch_conversations SET title = $2 WHERE id = $1 AND title IS NULL RETURNING *", [id, title]);
+    return result.rows[0] ? conversationFromRow(result.rows[0]) : undefined;
   }
 
   async createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }> {

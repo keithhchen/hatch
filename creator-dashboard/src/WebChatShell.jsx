@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, Menu, Plus, X } from "lucide-react";
 import { CreatorHeading } from "@hatch/chat/react";
+import { conversationTitle } from "./webChatI18n.js";
 import { WebBrand } from "./WebBrand.jsx";
 import { WebChatAccountControls, libraryLink } from "./productAgent.jsx";
 import { documentLanguage } from "./locale.jsx";
@@ -99,7 +100,7 @@ export function WebChatShell({ identity, agentName, conversations, selectedId, h
       <nav className="web-chat__conversation-list" aria-label={t("conversationHistory")}>
         {conversations.map(item => (
           <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === selectedId} onClick={() => select(item.id)}>
-            <span className="web-chat__conversation-title">{item.title || t("newConversation")}</span>
+            <span className="web-chat__conversation-title">{conversationTitle(item, t)}</span>
             <time className="web-chat__conversation-date" dateTime={item.created_at}>{conversationDate(item.created_at, locale)}</time>
           </button>
         ))}

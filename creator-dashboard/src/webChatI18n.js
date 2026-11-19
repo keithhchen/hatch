@@ -438,6 +438,9 @@ export function webChatT(locale, key, values = {}) {
   return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), template);
 }
 
+/** What the sidebar calls a conversation: its title, or the localized "New conversation" while it has none. */
+export const conversationTitle = (conversation, t) => conversation.title?.trim() || t("newConversation");
+
 export function webChatErrorText(error, locale) {
   if (!error) return "";
   if (error.key) return webChatT(locale, error.key, error.values);

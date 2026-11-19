@@ -65,6 +65,8 @@ export async function gatewayFixture(options: { noServiceToken?: boolean; localT
   const chatAssets = options.assets ? new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
   const seen: ConversationMessage[][] = [];
   const runtime: RuntimeServer = createRuntimeServer({
+    // These tests count the model requests of their Runs: no conversation is titled.
+    titleModel: async () => "",
     conversationStore: store,
     conversationRepository: repository,
     agentCorpusResolver: { resolve: async () => corpus, resolveByProduct: async () => corpus, list: async () => [] } as unknown as AgentCorpusResolver,

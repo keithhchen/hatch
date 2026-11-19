@@ -385,3 +385,21 @@ test("an event that does not fit the page never stops the stream: it is skipped 
   assert.equal(controller.getState().messages.at(-1).timeline.map(entry => entry.content).join(""), "Hello");
   controller.dispose();
 });
+
+test("a title event updates that conversation in the list, live, and leaves the others alone", async () => {
+  const { transport, controller } = setup();
+  transport.list = () => Promise.resolve({ conversations: [{ id: "conv" }, { id: "other", title: "Kept" }] });
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.handlers.onOpen();
+  connection.emit({ type: "session.ready", conversation_id: "conv" });
+  await controller.loadLibrary();
+  const before = controller.getState().conversations;
+  assert.equal(before.find(item => item.id === "conv").title, undefined);
+  connection.emit({ type: "conversation.titled", conversation_id: "conv", title: "juduvalve.com 获客诊断" });
+  const titles = () => Object.fromEntries(controller.getState().conversations.map(item => [item.id, item.title]));
+  assert.deepEqual(titles(), { conv: "juduvalve.com 获客诊断", other: "Kept" });
+  connection.emit({ type: "conversation.titled", conversation_id: "unlisted", title: "Nobody's" });
+  assert.deepEqual(titles(), { conv: "juduvalve.com 获客诊断", other: "Kept" }, "a conversation that is not listed adds nothing");
+});

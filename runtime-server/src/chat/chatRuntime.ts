@@ -11,6 +11,7 @@ import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
 import type { ClientGroup } from "../surfaces/contract.js";
 import { DEFAULT_RUN_LEASE_MS } from "../conversationRepository.js";
 import type { RuntimeStore } from "../store.js";
+import type { ConversationTitles } from "./conversationTitles.js";
 import { ChatCompaction } from "./chatCompaction.js";
 import type { Library } from "./library.js";
 import { ChatService, RunRegistry, type PrincipalLimits, type RunAdmission } from "./chatService.js";
@@ -65,6 +66,8 @@ export type ChatRuntimeOptions<Scope> = {
   library?: Library;
   /** Told of each Run a restart interrupted, once it is ended. */
   afterInterrupted?: (run: ConversationRunRecord) => void;
+  /** Names a conversation after its first completed Run; the page hears it as `conversation.titled`. Absent for the Assistant's own conversation. */
+  titles?: Pick<ConversationTitles, "runEnded">;
   /** Report conversations' lifecycle: a Run that ends with no report published fails the report. */
   artifacts?: ArtifactLifecycle;
 };
@@ -96,6 +99,10 @@ export class ChatRuntime<Scope> {
     const terminators = runTerminators(repository, this.hub, executorId, (ended, ending) => {
       if (ending.status === "failed") void options.analytics?.runFailed(ended.run, ending.failure.code, this.registry.clientOf(ended.run.conversationId));
       void options.artifacts?.runEnded(ended.run, ending);
+      // After the Run's end is told: a title never delays it, and what it fails at is its own.
+      void options.titles?.runEnded(ended, ending).then(titled => {
+        if (titled?.title) this.hub.publish(titled.id, { type: "conversation.titled", conversation_id: titled.publicId, title: titled.title });
+      });
     });
     this.supervisor = new RunSupervisor(
       repository,
