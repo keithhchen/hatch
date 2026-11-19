@@ -71,7 +71,7 @@ export class HatchPay {
   }
 
   private html(res: http.ServerResponse, status: number, body: string) {
-    res.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" });
+    res.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "origin", "x-content-type-options": "nosniff" });
     res.end(body);
   }
   private json(res: http.ServerResponse, status: number, body: unknown) {
@@ -79,7 +79,7 @@ export class HatchPay {
     res.end(JSON.stringify(body));
   }
   private redirect(res: http.ServerResponse, location: string) {
-    res.writeHead(302, { location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+    res.writeHead(302, { location, "cache-control": "no-store", "referrer-policy": "origin" });
     res.end();
   }
 
