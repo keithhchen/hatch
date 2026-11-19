@@ -19,8 +19,8 @@ export const MODEL_ROLES = {
   inspiration: "kimi-k3.1-pro",
   /** The Content Creation node. */
   content: "kimi-k3.1-pro",
-  /** The title of a Product conversation, written once after its first Run. A short, background call: the flash-class profile. */
-  title: "gemini-api"
+  /** The title of a Product conversation, written once after its first Run. A short, background call: DeepSeek Flash, with thinking off. */
+  title: "deepseek-flash"
 } as const satisfies Record<string, LlmProfileName>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;

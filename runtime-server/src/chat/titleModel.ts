@@ -2,8 +2,8 @@ import { createPiModels } from "../piModel.js";
 import type { ModelRoleResolver } from "../modelRoles.js";
 import type { TitleModel } from "./conversationTitles.js";
 
-/** Room for a reasoning model's thinking and then a short title. */
-const TITLE_MAX_TOKENS = 2_048;
+/** A title is short, and the default profile does not think: a small output limit. */
+const TITLE_MAX_TOKENS = 256;
 
 /** The title model in production: one completion on whichever profile the `title` role names now. */
 export const roleTitleModel = (models: ModelRoleResolver, env: NodeJS.ProcessEnv = process.env): TitleModel => async ({ system, user, signal }) => {

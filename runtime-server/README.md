@@ -286,7 +286,7 @@ on lives in two tables, created and seeded on first use by whichever process rea
 | `ingest` | `kimi-k3.1-pro` | The hosted ingest agent. Kimi profiles only. |
 | `inspiration` | `kimi-k3.1-pro` | The Inspiration node of a Product workspace (research on the open web). |
 | `content` | `kimi-k3.1-pro` | The Content Creation node of a Product workspace. |
-| `title` | `gemini-api` | The title of a Product conversation, written once after its first Run completes (see below). Any profile in the catalogue. |
+| `title` | `deepseek-flash` | The title of a Product conversation, written once after its first Run completes (see below). Any profile in the catalogue. |
 
 A seed row is inserted only when its role has no row; after that the database rules. List the valid profile names with
 `node -e 'import("./dist/llmProfiles.js").then(m => console.log(m.LLM_PROFILE_NAMES.join("\n")))'` (`chat` and `assistant` accept all
