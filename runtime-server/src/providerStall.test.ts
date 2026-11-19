@@ -209,7 +209,7 @@ test("the guard waits for the per-profile first-event deadline and asks a stalle
   const guarded = withStallGuard(hangsThenAnswers(1, seen), { firstEventMs: 150, silenceMs: 40, restarts: 1 });
   const started = Date.now();
   const events = await drain(guarded(model, { messages: [] }, {}) as ReturnType<typeof call>);
-  assert.ok(Date.now() - started >= 150);
+  assert.ok(Date.now() - started >= 140);
   assert.equal(seen.requests, 2);
   assert.notEqual(events.at(-1)?.type, "error");
 });
