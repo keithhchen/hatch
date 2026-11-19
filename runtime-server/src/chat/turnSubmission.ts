@@ -21,6 +21,7 @@ import type { ChatServiceApi } from "./serviceApi.js";
 import { controlledTurnAuthorizationError, resolveTurnAgentBinding, revalidateTurnAuthorization, type SessionBinding } from "./sessionBinding.js";
 import { prepareSocketMessage } from "./socketAttachments.js";
 import { productRequiresLocalTools } from "./toolSurface.js";
+import type { AccessGate } from "../accessGate.js";
 
 /** What both transports need to turn an authenticated user message into a Run or a steer. */
 export type ChatEdge = {
@@ -37,6 +38,8 @@ export type ChatEdge = {
   authIdentityResolver?: AuthIdentityResolver;
   agentCorpusResolver?: AgentCorpusResolver;
   creatorToolControlPlane?: CreatorToolControlPlane;
+  /** Products whose buyers come in by access code take no message from the chat. */
+  accessGate?: AccessGate;
 };
 
 export type ChatSession = {
@@ -101,6 +104,7 @@ export async function submitUserMessage(
   signal?: AbortSignal
 ): Promise<{ submission: Submission; binding: SessionBinding }> {
   const binding = await authorizedBinding(edge, session, signal);
+  if (await edge.accessGate?.required(binding.productId)) throw new ChatError("access_code_required", "需要兑换码", 403);
   if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
     throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
   }
@@ -137,6 +141,7 @@ export async function retryRun(
   signal?: AbortSignal
 ): Promise<Retried> {
   const binding = await authorizedBinding(edge, session, signal);
+  if (await edge.accessGate?.required(binding.productId)) throw new ChatError("access_code_required", "需要兑换码", 403);
   signal?.throwIfAborted();
   return edge.chat.service.retry({
     principal: userPrincipal(binding.userId),

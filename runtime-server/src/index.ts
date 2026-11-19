@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import { stat } from "node:fs/promises";
 import path from "node:path";
@@ -15,6 +16,7 @@ import { PostgresStore } from "./postgresStore.js";
 import {
   InMemoryConversationRepository,
   PostgresConversationRepository,
+  type ConversationRecord,
   type ConversationRepository
 } from "./conversationRepository.js";
 import { ToolBridge } from "./toolBridge.js";
@@ -34,7 +36,9 @@ import {
   renderSkillsSection,
   visibleSkillsForSession
 } from "./skills.js";
-import { type BriefSpec } from "./brief.js";
+import { briefAccessCode, briefAnswer, briefEmail, type BriefSpec } from "./brief.js";
+import { readCorpusEmailTemplate } from "./agentBox/reportEmail.js";
+import type { ReportEmailContext } from "./agentBox/tools.js";
 import { createOutputGuardFromEnvironment, PassThroughOutputGuard, type OutputGuard } from "./outputGuard.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
@@ -54,7 +58,8 @@ import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
 import { accountPrincipal } from "./chat/principal.js";
 import { RestartRetrier } from "./chat/restartRetry.js";
-import { clientMessageInputDigest } from "./protocol.js";
+import { TASK_START_MESSAGE_CONTENT, clientMessageInputDigest } from "./protocol.js";
+import { CodePages } from "./codePages/codePages.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
 import { openArtifactMode } from "./artifact/open.js";
@@ -78,9 +83,16 @@ import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { openAgentBoxMode } from "./agentBox/open.js";
+import { AccessGate } from "./accessGate.js";
+import { PostgresProductCapabilities, type ProductCapabilities } from "./agentBox/capabilities.js";
+import { DeliverableFollowups } from "./chat/deliverableFollowup.js";
 import { BOX_TOOL_CALL_LIMIT, type AgentBoxMode } from "./agentBox/tools.js";
 import type { HtmlPages } from "./agentBox/htmlPages.js";
+import { briefContactOf, type ContactOf, type ReportLeads } from "./agentBox/reportLeads.js";
 import type { BuyerFiles } from "./agentBox/files.js";
+import { openHatchPay } from "./hatchPay/open.js";
+import type { HatchPay } from "./hatchPay/routes.js";
+import type { AccessCodes } from "./accessCodes/accessCodes.js";
 import { openSiteResearchMode } from "./siteTools/open.js";
 import type { SiteResearchMode } from "./siteTools/tools.js";
 import { GUEST_PREFIX } from "./chat/principal.js";
@@ -205,11 +217,20 @@ export type RuntimeServerOptions = {
   /** Report mode: products that offer it, and conversations that are reports. */
   artifact?: ArtifactMode;
   /** The Agent's own computer and the pages it publishes, for the Products that have it. */
-  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles };
+  agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string; reportLeads?: (contactOf: ContactOf) => ReportLeads };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
   /** The Products with the engine_kimi_hosted row run on Kimi Hosted Agents. */
   kimiHosted?: KimiHostedMode;
+  /** Products with the `access_code` capability take a Run only for a conversation that redeemed the Brief's code. */
+  accessGate?: AccessGate;
+  /** Which Products have which capabilities; with it, `deliverable_html` Products are followed up until they publish an HTML report. */
+  productCapabilities?: ProductCapabilities;
+  /** Access codes (redeemed when a chat starts) and the WeChat Pay pages that sell them (/hatch-pay/). */
+  accessCodes?: AccessCodes;
+  /** The same codes as one client sees them (rate-limited by its address): the chat start redeems and looks up through this, answering a TooManyAttempts with its 429. */
+  accessCodesFor?: (headers: http.IncomingHttpHeaders) => AccessCodes;
+  hatchPay?: HatchPay;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -234,6 +255,29 @@ export type RuntimeServerOptions = {
   /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
   responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "features" | "holdMs" | "keepAliveMs">;
 };
+
+/** Where a conversation's report is mailed, from its Brief's email answer, and what the mail says; undefined when the Brief has none. */
+export async function reportEmailContext(conversation: ConversationRecord, binding: SessionBinding, origin = "https://gethatchapp.com"): Promise<ReportEmailContext | undefined> {
+  const recipient = briefEmail(conversation.briefSnapshot);
+  if (!recipient) return undefined;
+  const expert = binding.agentCorpus?.creator.name;
+  // The code's own page is where the report is found again: the mail carries it, with the code.
+  const code = briefAccessCode(conversation.briefSnapshot);
+  return {
+    recipient,
+    chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}`,
+    ...code ? { code, codeUrl: `${origin}/c/${encodeURIComponent(code)}` } : {},
+    productName: binding.agentCorpus?.product.name ?? "Hatch",
+    ...expert && expert !== "Expert" ? { expertName: expert } : {},
+    ...briefAnswer(conversation.briefSnapshot, "website") ? { website: briefAnswer(conversation.briefSnapshot, "website")! } : {},
+    ...(template => template ? { template } : {})(await readCorpusEmailTemplate(binding.agentCorpusRoot))
+  };
+}
+
+/** The report email is for the Products with the access code capability only: any other Product mails nothing. */
+export async function gatedReportEmailContext(gate: Pick<AccessGate, "required"> | undefined, conversation: ConversationRecord, binding: SessionBinding, origin?: string): Promise<ReportEmailContext | undefined> {
+  return await gate?.required(binding.productId) ? reportEmailContext(conversation, binding, origin) : undefined;
+}
 
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
@@ -280,6 +324,22 @@ export async function createRuntimeServerFromEnvironment(
   const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
   // The Products that run on Kimi Hosted Agents, by a row: the others are not touched.
   const kimiHosted = conversationStore instanceof PostgresStore ? await openKimiHostedMode({ pool: conversationStore.pool, environment }) : undefined;
+  const productCapabilities = conversationStore instanceof PostgresStore ? new PostgresProductCapabilities(conversationStore.pool) : undefined;
+  await productCapabilities?.initialize();
+  const agentCorpusResolver = runtimeRegistryToken && registryUrl
+      ? new RuntimeReleaseAgentCorpusResolver({
+        registryUrl,
+        serviceToken: runtimeRegistryToken,
+        corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
+        timeoutMs: registryAuthorizationTimeoutMs(environment)
+      })
+      : runtimeCorpusRoot
+        ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
+        : undefined;
+  // Access codes and, when fully configured, WeChat Pay.
+  const hatchPay = conversationStore instanceof PostgresStore ? await openHatchPay({ pool: conversationStore.pool, environment, ...agentCorpusResolver ? { corpora: agentCorpusResolver } : {} }) : undefined;
+  // The access code gate reads the codes through the limiter that counts a client's failed attempts by its address.
+  const accessGate = productCapabilities ? new AccessGate(productCapabilities, hatchPay ? (headers) => hatchPay.accessCodesFor(headers ?? {}) : undefined) : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
@@ -291,16 +351,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(commerceServiceToken && environment.HATCH_COMMERCE_URL?.trim() ? { library: new HttpLibrary(environment.HATCH_COMMERCE_URL.trim(), commerceServiceToken) } : {}),
     insecureLocalMode: config.insecureLocalMode,
     authIdentityResolver: registryAuth,
-    agentCorpusResolver: runtimeRegistryToken && registryUrl
-      ? new RuntimeReleaseAgentCorpusResolver({
-        registryUrl,
-        serviceToken: runtimeRegistryToken,
-        corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
-        timeoutMs: registryAuthorizationTimeoutMs(environment)
-      })
-      : runtimeCorpusRoot
-        ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
-        : undefined,
+    agentCorpusResolver,
     conversationStore,
     analytics,
     ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment), { analytics }) }; })() : {}),
@@ -309,6 +360,9 @@ export async function createRuntimeServerFromEnvironment(
     ...(agentBox ? { agentBox } : {}),
     ...(siteResearch ? { siteResearch } : {}),
     ...(kimiHosted ? { kimiHosted } : {}),
+    ...(accessGate ? { accessGate } : {}),
+    ...(productCapabilities ? { productCapabilities } : {}),
+    ...(hatchPay ? { accessCodes: hatchPay.codes, accessCodesFor: hatchPay.accessCodesFor, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -385,6 +439,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       : options.conversationRepository instanceof PostgresConversationRepository
         ? new PostgresStore({ pool: options.conversationRepository.pool }) : createConversationStore());
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
+  // A report's price-tier clicks: the buyer is read from the Brief of the conversation the page's access code opened.
+  const reportLeads = options.agentBox?.reportLeads?.(briefContactOf(options.accessCodes ?? { lookup: async () => null }, conversationRepository));
   const models = options.models ?? (conversationStore instanceof PostgresStore ? new PostgresModelRoleResolver(conversationStore.pool) : new InMemoryModelRoleResolver());
   const createRuntime = options.createRuntime ?? (() => createAgentRuntime(models));
   if (conversationStore instanceof PostgresStore && conversationRepository instanceof PostgresConversationRepository) {
@@ -482,7 +538,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         const report = await artifact?.turnFor(turn.conversation, turn.run);
         if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation, report ? "flat" : "messages"));
         if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
-        const box = report ? undefined : await agentBox?.mode.turnFor({ productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX) });
+        const box = report ? undefined : await agentBox?.mode.turnFor({
+          productId: binding.productId, userId: binding.userId, guest: binding.userId.startsWith(GUEST_PREFIX),
+          email: await gatedReportEmailContext(options.accessGate, turn.conversation, binding, agentBox.origin)
+        });
         serverTools.setBox(box?.tools);
         const site = report ? undefined : await options.siteResearch?.turnFor(binding.productId);
         serverTools.setSite(site?.tools);
@@ -537,6 +596,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       skip: async conversationId => Boolean(await artifact?.reports.get(conversationId))
     }),
     afterInterrupted: (run) => { void restartRetrier.afterInterrupted(run); },
+    afterReply: (run) => { void deliverableFollowups?.afterReply(run); },
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
@@ -555,6 +615,35 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       });
     }
   });
+  // A Product that must end with an HTML report asks, in the conversation, for it when a Run ends without one.
+  const deliverableFollowups = options.productCapabilities && agentBox ? new DeliverableFollowups({
+    capabilities: options.productCapabilities, repository: conversationRepository,
+    prompts: conversationStore instanceof PostgresStore ? new PostgresPrompts(conversationStore.pool) : new FilePrompts(),
+    hasPage: async conversation => Boolean(await agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt))),
+    start: async (conversation, key, content) => {
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.submit({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        clientMessageId: key, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
+        runId: `run_${randomUUID().replaceAll("-", "")}`, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
+      });
+    }
+  }) : undefined;
+  // The page of an access code: its intake starts the Run of the Brief, its status reads that Run and the report.
+  const codePages = options.accessGate && agentBox && agentCorpusResolver ? new CodePages({
+    gate: options.accessGate, corpora: agentCorpusResolver, repository: conversationRepository, store: conversationStore,
+    ...Number(process.env.HATCH_PAY_PRICE_FEN) > 0 ? { priceFen: Number(process.env.HATCH_PAY_PRICE_FEN) } : {},
+    reportUrl: conversation => agentBox.pages.latestUrlSince(conversation.productId, conversation.ownerAccountId, new Date(conversation.createdAt)),
+    start: async (conversation, key) => {
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      return chat.service.submit({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        clientMessageId: key, message: async () => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }),
+        digest: clientMessageInputDigest({ content: "", task_start: true }), runId: `run_${randomUUID().replaceAll("-", "")}`,
+        corpusDigest: scope.corpusDigest, requiresLocalTools: false
+      });
+    }
+  }) : undefined;
   const startArtifactRun = async (record: ReportRecord, runId: string, content: string, clientMessageId: string) => {
     const conversation = await conversationRepository.getConversation(record.conversationId);
     if (!conversation) throw new Error(`Conversation ${record.conversationId} was not found`);
@@ -576,6 +665,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
     creatorToolControlPlane: options.creatorToolControlPlane,
+    ...(options.accessGate ? { accessGate: options.accessGate } : {}),
     consumerBufferedBytes: options.maxConsumerBufferedBytes ?? MAX_CONSUMER_BUFFERED_BYTES
   };
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
@@ -627,6 +717,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       allowedOrigins,
       artifact,
       htmlPages: agentBox?.pages,
+      reportLeads,
+      hatchPay: options.hatchPay,
+      codePages,
       buyerFiles: agentBox?.files,
       guests: options.guestTokens,
       ...(options.library ? { carryOver: new GuestCarryOver({ repository: conversationRepository, library: options.library }) } : {})

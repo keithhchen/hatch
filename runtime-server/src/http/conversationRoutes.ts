@@ -101,6 +101,9 @@ export async function handleConversationHttpRequest(
     return edge;
   };
 
+  // A Product whose buyers come in by access code (/c/<code>) has no conversations for them to read or write.
+  if (await edge?.accessGate?.required(binding.productId)) throw new ConversationHttpError(403, "access_code_required", "需要兑换码");
+
   if (url.pathname === "/v1/conversations") {
     if (req.method === "GET") {
       const status = parseConversationStatus(url.searchParams.get("status"));

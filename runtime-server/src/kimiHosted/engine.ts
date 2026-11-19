@@ -146,6 +146,9 @@ export class KimiHostedEngine<Scope extends { productId: string; userId: string 
   private async publishReport(turn: Turn<Scope>, api: KimiHostedApi, sessions: KimiSessions, publisher: ReportPublisher, sessionId: string): Promise<string> {
     const html = (await api.listArtifacts(sessionId)).filter(artifact => /\.html?$/i.test(artifact.name));
     const latest = html.sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "")).at(-1);
+    // With deliverable_html (DeliverableFollowups) the rule is: this engine completes a Run only with a published page, and a Run
+    // without one FAILS here. The follow-up runs only after a completed Run, so it never acts on a Kimi Run (a completed one has
+    // its page, a failed one is not followed up); the buyer's own "answer again" starts a new session.
     if (!latest) throw new KimiHostedError("kimi_no_report", "The Kimi agent finished without saving an HTML report.");
     const known = (await sessions.open(turn.conversation.id))?.pages[latest.id];
     if (known) return known;

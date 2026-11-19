@@ -1007,3 +1007,19 @@ test("a missing asset and an error are never cached, so a deploy's handover cann
   assert.equal(missing.status, 404);
   assert.equal(missing.headers.get("cache-control"), "no-store");
 });
+
+
+test("GET /c/?code=XXX answers with a 302 to /c/XXX before any page is drawn", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-code-"));
+  const registry = registryFixture({ signedIn: "buyer" });
+  await listen(registry);
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(directory, "ledger.jsonl"), registryUrl: serverUrl(registry) });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => { api.close(); registry.close(); });
+  const redirected = await fetch(`${serverUrl(api)}/c/?code=%20msc123456`, { redirect: "manual" });
+  assert.equal(redirected.status, 302);
+  assert.equal(redirected.headers.get("location"), "/c/MSC123456");
+  const landing = await fetch(`${serverUrl(api)}/c/`, { redirect: "manual" });
+  assert.notEqual(landing.status, 302);
+});

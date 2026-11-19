@@ -22,7 +22,11 @@ import type { ArtifactMode } from "../artifact/mode.js";
 import { handleProductArtifactRequest } from "../artifact/routes.js";
 import { handleFileRoute, type BuyerFiles } from "../agentBox/files.js";
 import { handleReportAssetRoute } from "../agentBox/reportAssets.js";
+import { handleHatchPayRoute, type HatchPay } from "../hatchPay/routes.js";
+import { handleCodePageRoute } from "../codePages/routes.js";
+import type { CodePages } from "../codePages/codePages.js";
 import { handleHtmlRoute, type HtmlPages } from "../agentBox/htmlPages.js";
+import type { ReportLeads } from "../agentBox/reportLeads.js";
 import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
   bearerToken,
@@ -63,6 +67,12 @@ export type RuntimeHttpDeps = {
   carryOver?: Pick<GuestCarryOver, "carry">;
   /** Pages the Agent published (/html/<id>), opened by their signed link. */
   htmlPages?: HtmlPages;
+  /** The price-tier clicks of a report (POST /html/<id>/lead). */
+  reportLeads?: ReportLeads;
+  /** The page of each access code (/v1/codes/<code>): intake, progress, report. Only for Products with the access code capability. */
+  codePages?: CodePages;
+  /** WeChat Pay pages that sell access codes (/hatch-pay/); 503 while not configured. */
+  hatchPay?: HatchPay;
   /** Files the Agent saved (/file/<id>), downloaded by their signed link. */
   buyerFiles?: BuyerFiles;
 };
@@ -89,7 +99,9 @@ export async function handleHttpRequest(
     writeJson(res, 200, { ok: true });
     return;
   }
-  if (url.pathname.startsWith("/html/") && await handleHtmlRoute(req, res, url, deps.htmlPages)) return;
+  if (url.pathname.startsWith("/html/") && await handleHtmlRoute(req, res, url, deps.htmlPages, deps.reportLeads)) return;
+  if (url.pathname.startsWith("/v1/codes/") && deps.codePages) return handleCodePageRoute(req, res, url, deps.codePages);
+  if (url.pathname === "/hatch-pay" || url.pathname.startsWith("/hatch-pay/")) return handleHatchPayRoute(req, res, url, deps.hatchPay);
   if (url.pathname.startsWith("/report-assets/") && await handleReportAssetRoute(req, res, url)) return;
   if (url.pathname.startsWith("/file/") && await handleFileRoute(req, res, url, deps.buyerFiles)) return;
   if (req.method === "GET" && url.pathname === "/readyz") {

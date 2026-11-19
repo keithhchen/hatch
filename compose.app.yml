@@ -157,6 +157,10 @@ services:
       VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
       VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:-}
       HATCH_VERCEL_SANDBOX_IMAGE: ${HATCH_VERCEL_SANDBOX_IMAGE:-}
+      # The report email (Resend): sent when a report page is published to a Brief's email address. Off without a key.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      HATCH_REPORT_EMAIL_FROM: ${HATCH_REPORT_EMAIL_FROM:-}
+      HATCH_REPORT_EMAIL_REPLY_TO: ${HATCH_REPORT_EMAIL_REPLY_TO:-}
       # Site research tools (site_research capability), run by the Runtime itself: each tool is off without its key. Never given to a box.
       PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
@@ -169,6 +173,19 @@ services:
       HATCH_MANAGED_AGENTS_API_KEY: ${HATCH_MANAGED_AGENTS_API_KEY:-}
       # Public web search for report mode (HATCH_SEARCH_PROVIDER picks the provider; default parallel).
       PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
+      # WeChat Pay (/hatch-pay/) and the access-code email. All of them or the pay routes answer 503 (the Runtime logs hatch_pay_disabled with what is missing).
+      WECHATPAY_MCHID: ${WECHATPAY_MCHID:-}
+      WECHATPAY_SERIAL: ${WECHATPAY_SERIAL:-}
+      WECHATPAY_PRIVATE_KEY_B64: ${WECHATPAY_PRIVATE_KEY_B64:-}
+      WECHATPAY_APIV3_KEY: ${WECHATPAY_APIV3_KEY:-}
+      WECHATPAY_PUBLIC_KEY_ID: ${WECHATPAY_PUBLIC_KEY_ID:-}
+      WECHATPAY_PUBLIC_KEY_B64: ${WECHATPAY_PUBLIC_KEY_B64:-}
+      WECHAT_MP_APPID: ${WECHAT_MP_APPID:-}
+      WECHAT_MP_APPSECRET: ${WECHAT_MP_APPSECRET:-}
+      HATCH_PAY_PUBLIC_BASE: ${HATCH_PAY_PUBLIC_BASE:-}
+      HATCH_PAY_NOTIFY_URL: ${HATCH_PAY_NOTIFY_URL:-}
+      HATCH_PAY_PRICE_FEN: ${HATCH_PAY_PRICE_FEN:-}
+      HATCH_PAY_EMAIL_FROM: ${HATCH_PAY_EMAIL_FROM:-Hatch <noreply@gethatchapp.com>}
       # What one contact may send to one Product, in all.
       HATCH_RUNTIME_MAX_CONTACT_MESSAGES: ${HATCH_RUNTIME_MAX_CONTACT_MESSAGES:-1000}
       # Voice messages are transcribed by the first of these that works: gemini (GEMINI_API_KEY), then qwen (DASHSCOPE_API_KEY).
@@ -275,6 +292,8 @@ services:
       HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: ${HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:?set HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_GUEST_TOKEN_SECRET: ${HATCH_GUEST_TOKEN_SECRET:?set HATCH_GUEST_TOKEN_SECRET in /opt/hatch/.env}
       HATCH_OAUTH_STATE_KEY: ${HATCH_OAUTH_STATE_KEY:?set HATCH_OAUTH_STATE_KEY in /opt/hatch/.env}
+      # The Product the landing page (/c/) sells access codes for. The landing is off while unset.
+      HATCH_CODE_PAGE_PRODUCT_ID: ${HATCH_CODE_PAGE_PRODUCT_ID:-}
       HATCH_COMMERCE_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
       HATCH_PORTAL_STATE_PATH: /var/lib/hatch/commerce/portal-state.json
       HATCH_COMMERCE_PAYMENT_MODE: disabled
