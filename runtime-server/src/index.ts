@@ -100,6 +100,9 @@ import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { MAX_CONSUMER_BUFFERED_BYTES } from "./chat/sinks.js";
 import { productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
+import { KIMI_HOSTED_ENGINE_CAPABILITY, SwitchedEngine } from "./chat/runEngine.js";
+import { KimiHostedEngine } from "./kimiHosted/engine.js";
+import { HtmlPagesPublisher, openKimiHostedMode, type KimiHostedMode } from "./kimiHosted/open.js";
 import { observed } from "./observability/http.js";
 import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
 import { log } from "./observability/log.js";
@@ -217,6 +220,8 @@ export type RuntimeServerOptions = {
   agentBox?: { mode: AgentBoxMode; pages: HtmlPages; files: BuyerFiles; origin?: string; reportLeads?: (contactOf: ContactOf) => ReportLeads };
   /** Site research tools (page speed, places, IP and URL lookups), for the Products that have them. */
   siteResearch?: SiteResearchMode;
+  /** The Products with the engine_kimi_hosted row run on Kimi Hosted Agents. */
+  kimiHosted?: KimiHostedMode;
   /** Products with the `access_code` capability take a Run only for a conversation that redeemed the Brief's code. */
   accessGate?: AccessGate;
   /** Which Products have which capabilities; with it, `deliverable_html` Products are followed up until they publish an HTML report. */
@@ -317,6 +322,8 @@ export async function createRuntimeServerFromEnvironment(
   const agentBox = conversationStore instanceof PostgresStore ? await openAgentBoxMode({ pool: conversationStore.pool, blobs: chatBlobs!, environment }) : undefined;
   // Site research, for the Products that have it switched on: off without any of its keys.
   const siteResearch = conversationStore instanceof PostgresStore ? await openSiteResearchMode({ pool: conversationStore.pool, environment }) : undefined;
+  // The Products that run on Kimi Hosted Agents, by a row: the others are not touched.
+  const kimiHosted = conversationStore instanceof PostgresStore ? await openKimiHostedMode({ pool: conversationStore.pool, environment }) : undefined;
   const productCapabilities = conversationStore instanceof PostgresStore ? new PostgresProductCapabilities(conversationStore.pool) : undefined;
   await productCapabilities?.initialize();
   const agentCorpusResolver = runtimeRegistryToken && registryUrl
@@ -352,6 +359,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(artifact ? { artifact } : {}),
     ...(agentBox ? { agentBox } : {}),
     ...(siteResearch ? { siteResearch } : {}),
+    ...(kimiHosted ? { kimiHosted } : {}),
     ...(accessGate ? { accessGate } : {}),
     ...(productCapabilities ? { productCapabilities } : {}),
     ...(hatchPay ? { accessCodes: hatchPay.codes, accessCodesFor: hatchPay.accessCodesFor, ...hatchPay.pay ? { hatchPay: hatchPay.pay } : {} } : {}),
@@ -512,7 +520,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     }
   };
   const serverToolTimeoutMs = options.serverToolTimeoutMs ?? 120_000;
-  const runner: TurnRunner<SessionBinding> = {
+  const piEngine: TurnRunner<SessionBinding> = {
     async run(turn) {
       const binding = turn.scope;
       try {
@@ -552,6 +560,14 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       }
     }
   };
+  // The one dispatch point of a Product Run: a Product with the engine_kimi_hosted row runs on Kimi Hosted Agents, every other one on piEngine as before.
+  const kimiHosted = options.kimiHosted;
+  const runner: TurnRunner<SessionBinding> = kimiHosted
+    ? new SwitchedEngine<SessionBinding>({
+      capabilities: kimiHosted.capabilities, capability: KIMI_HOSTED_ENGINE_CAPABILITY, standard: piEngine,
+      alternative: new KimiHostedEngine<SessionBinding>({ api: kimiHosted.api, sessions: kimiHosted.sessions, store: conversationStore, publisher: agentBox && new HtmlPagesPublisher(agentBox.files, agentBox.pages) })
+    })
+    : piEngine;
   const chat = new ChatRuntime<SessionBinding>({
     repository: conversationRepository,
     store: conversationStore,
