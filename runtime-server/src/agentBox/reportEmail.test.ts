@@ -69,24 +69,21 @@ async function setup(options: { repository?: HtmlPageRepository; sender?: FakeSe
 
 test("template: values are escaped, blocks vanish when empty, the subject is plain text", () => {
   assert.equal(escapeHtml(`<a href="x">&'`), "&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
-  const source = "Hi {{name}}{{#pdf_url}} PDF: {{pdf_url}}{{/pdf_url}}{{#website}} for {{website}}{{/website}}.";
+  const source = "Hi {{name}}{{#note}} Note: {{note}}{{/note}}{{#website}} for {{website}}{{/website}}.";
   assert.equal(renderTemplate(source, { name: "<b>A</b>", website: "x.com" }), "Hi &lt;b&gt;A&lt;/b&gt; for x.com.");
-  assert.equal(renderTemplate(source, { name: "A", pdf_url: " " }), "Hi A.");
+  assert.equal(renderTemplate(source, { name: "A", note: " " }), "Hi A.");
   assert.equal(renderTemplate("{{name}} & co", { name: "<A>" }, true), "<A> & co");
   assert.equal(renderTemplate("{{unknown}}|", {}), "|");
 });
 
-test("the platform default template has no PDF block without a PDF, and has a readable text alternative", async () => {
+test("the platform default template carries the report and chat links, and has a readable text alternative", async () => {
   const defaults = new FilePrompts();
   const html = await defaults.get("report-email-default");
   const values = { report_url: "https://x.test/html/1?t=a&b", chat_url: "https://x.test/chat", product_name: "A<B", expert_name: "", website: "" };
   const without = renderTemplate(html, values);
-  assert.ok(!without.includes("PDF") && !without.includes("{{") && without.includes("A&lt;B") && without.includes("https://x.test/html/1?t=a&amp;b"));
-  const withPdf = renderTemplate(html, { ...values, pdf_url: "https://x.test/file/2" });
-  assert.match(withPdf, /href="https:\/\/x\.test\/file\/2"/);
-  const text = htmlToText(withPdf);
+  assert.ok(!without.includes("{{") && without.includes("A&lt;B") && without.includes("https://x.test/html/1?t=a&amp;b"));
+  const text = htmlToText(without);
   assert.match(text, /在线查看报告 \(https:\/\/x\.test\/html\/1\?t=a&b\)/);
-  assert.match(text, /下载 PDF 版本 \(https:\/\/x\.test\/file\/2\)/);
   assert.ok(!/[<>]/.test(text.replace(/A<B/g, "")));
   assert.equal(await defaults.get("report-email-default-subject"), "你的「{{product_name}}」报告已生成");
 });
@@ -109,19 +106,17 @@ test("a Product's own template overrides the default, file by file", async () =>
   assert.match(mail!.text, /^Mine P&Q go \(https:\/\/example\.test\/html\//);
 });
 
-test("publish_html emails the report, PDF and chat links once, to the Brief's address", async () => {
+test("publish_html emails the report and chat links once, to the Brief's address", async () => {
   const { runnerFor, saveFile, sender, events } = await setup();
   const box = await runnerFor("u1");
-  const pdf = await saveFile(box, "report.pdf", "%PDF-1.4 fake");
-  const published = await box.run("publish_html", { file_id: await saveFile(box, "r.html", PAGE), title: "Audit", pdf_file_id: pdf });
-  assert.match(String(published.pdf_url), /^https:\/\/example\.test\/file\//);
+  const published = await box.run("publish_html", { file_id: await saveFile(box, "r.html", PAGE), title: "Audit" });
   await until(() => sender!.sent.length === 1);
   const mail = sender!.sent[0]!;
   assert.equal(mail.to, "buyer@example.com");
   assert.equal(mail.from, "MSC <reports@example.test>");
   assert.equal(mail.replyTo, "msc@example.test");
   assert.equal(mail.idempotencyKey, published.page_id);
-  for (const link of [String(published.url), String(published.pdf_url), "https://example.test/chat/product/prod-1/conversation/conv_1"]) assert.ok(mail.html.replaceAll("&amp;", "&").includes(link), link);
+  for (const link of [String(published.url), "https://example.test/chat/product/prod-1/conversation/conv_1"]) assert.ok(mail.html.replaceAll("&amp;", "&").includes(link), link);
   assert.ok(mail.html.includes("出海 &lt;体检&gt;") && !mail.html.includes("<体检>"));
   assert.equal(mail.subject, "你的「出海 <体检>」报告已生成");
   assert.ok(mail.text.includes(String(published.url)));
@@ -171,26 +166,7 @@ test("a transient failure is retried; a permanent one is logged, releases the cl
   assert.ok(await broken.pageRepository.claimEmail(String(published.page_id), "h", 600));
 });
 
-test("pdf_file_id must be this buyer's own saved PDF", async () => {
-  const { runnerFor, saveFile } = await setup();
-  const box = await runnerFor("u1");
-  const page = await saveFile(box, "r.html", PAGE);
-  const error = async (args: Record<string, unknown>) => String(((await box.run("publish_html", { file_id: page, title: "T", ...args })).error as { message: string } | undefined)?.message);
-  assert.match(await error({ pdf_file_id: randomUUID() }), /No saved file has the id/);
-  assert.match(await error({ pdf_file_id: page }), /not a PDF/, "an html file");
-  assert.match(await error({ pdf_file_id: await saveFile(box, "fake.pdf", "just text") }), /not a PDF/, "named .pdf, not a PDF");
-  assert.match(await error({ pdf_file_id: 5 }), /pdf_file_id is a string/);
-  // Another buyer's PDF is not found.
-  const other = await runnerFor("u2");
-  const theirs = await saveFile(other, "theirs.pdf", "%PDF-1.7 x");
-  assert.match(await error({ pdf_file_id: theirs }), /No saved file has the id/);
-  const mine = await saveFile(box, "mine.pdf", "%PDF-1.7 y");
-  assert.ok((await box.run("publish_html", { file_id: page, title: "T", pdf_file_id: mine })).pdf_url);
-  // The PDF stays with the page when it is published again without one.
-  assert.ok((await box.run("publish_html", { file_id: page, title: "T" })).pdf_url);
-});
-
-test("postgres: concurrent publishes and retries email one page once; pdf is a nullable column", { skip: !databaseUrl, timeout: 30_000 }, async () => {
+test("postgres: concurrent publishes and retries email one page once", { skip: !databaseUrl, timeout: 30_000 }, async () => {
   const schema = `email_test_${randomUUID().replaceAll("-", "")}`;
   const admin = new Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
   let pool: Pool | undefined;
@@ -203,13 +179,11 @@ test("postgres: concurrent publishes and retries email one page once; pdf is a n
     const { runnerFor, saveFile, sender, events } = await setup({ repository, sender: new FakeSender() });
     const box = await runnerFor("u1");
     const file = await saveFile(box, "r.html", PAGE);
-    const pdf = await saveFile(box, "r.pdf", "%PDF-1.4 z");
-    const results = await Promise.all(Array.from({ length: 12 }, (_, i) => box.run("publish_html", { file_id: file, title: "T", ...i % 2 ? { pdf_file_id: pdf } : {} })));
+    const results = await Promise.all(Array.from({ length: 12 }, (_, i) => box.run("publish_html", { file_id: file, title: "T" })));
     assert.equal(new Set(results.map(r => r.page_id)).size, 1);
     await until(() => events.filter(e => e.event === "report_email_skipped").length === 11);
     assert.equal(sender!.sent.length, 1);
-    const row = (await pool.query("SELECT pdf_file_id, emailed_at, email_message_id, emailed_to FROM hatch_html_pages")).rows[0];
-    assert.equal(row.pdf_file_id, pdf);
+    const row = (await pool.query("SELECT emailed_at, email_message_id, emailed_to FROM hatch_html_pages")).rows[0];
     assert.equal(row.email_message_id, "msg-1");
     assert.match(row.emailed_to, /^[0-9a-f]{12}$/);
 

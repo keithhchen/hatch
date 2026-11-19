@@ -45,15 +45,14 @@ export const boxToolDefinitions = (workDir: string): ToolDefinition[] => [
   definition("save_file", `Keep a file from ${workDir} for the user (an HTML page, a PDF, an image): returns its file_id and a url: a link the user can open or download. Never invent file links; give the user this url. Saving the same content again returns the same id. Save again after changing the file.`,
     { path: { type: "string", description: `The file under ${workDir}.` } }, ["path"]),
   definition("publish_html", "Publish a saved HTML file as a web page and get its link to send to the user. The page is a whole HTML document; it is shown as is, scripts allowed. The same file_id gives the same link; a changed page is a new save and a new link. When the user gave an email address, the link is emailed to them automatically; do not send it yourself.",
-    { file_id: { type: "string", description: "The id save_file returned." }, title: { type: "string", description: "The page's name." },
-      pdf_file_id: { type: "string", description: "Optional: the id save_file returned for the PDF of this same report; its download link goes in the email." } }, ["file_id", "title"])
+    { file_id: { type: "string", description: "The id save_file returned." }, title: { type: "string", description: "The page's name." } }, ["file_id", "title"])
 ];
 
 /** What the box tools need, shared by every conversation. */
 export type AgentBoxDeps = { capabilities: ProductCapabilities; boxes: AgentBoxes; workDir: string; pdf: PdfPageRenderer; files: BuyerFiles; pages: HtmlPages; reportEmail?: ReportEmails };
 
 /** What the report email of a conversation needs beyond the page: where it goes and what it says. Without a recipient nothing is sent. */
-export type ReportEmailContext = Omit<ReportEmailJob, "pageId" | "recipient" | "reportUrl" | "pdfUrl"> & { recipient?: string };
+export type ReportEmailContext = Omit<ReportEmailJob, "pageId" | "recipient" | "reportUrl"> & { recipient?: string };
 
 export class AgentBoxMode {
   constructor(private readonly deps: AgentBoxDeps) {}
@@ -100,11 +99,10 @@ export class AgentBoxMode {
             }
             case "publish_html": {
               if (typeof args.file_id !== "string" || typeof args.title !== "string") throw new BoxToolError("file_id and title are strings.");
-              if (args.pdf_file_id !== undefined && typeof args.pdf_file_id !== "string") throw new BoxToolError("pdf_file_id is a string.");
-              const published = await pages.publish(scope, args.file_id, args.title, args.pdf_file_id || undefined);
+              const published = await pages.publish(scope, args.file_id, args.title);
               // After the publish has succeeded and without waiting for it: the email never delays or fails the tool.
               if (reportEmail && email?.recipient) {
-                void reportEmail.notify({ ...email, recipient: email.recipient, pageId: published.page_id, reportUrl: published.url, ...published.pdf_url ? { pdfUrl: published.pdf_url } : {} });
+                void reportEmail.notify({ ...email, recipient: email.recipient, pageId: published.page_id, reportUrl: published.url });
               }
               return published;
             }

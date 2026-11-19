@@ -3,14 +3,14 @@ import type http from "node:http";
 import { decodeText } from "../assets/sniff.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { BoxToolError } from "./ports.js";
-import type { BuyerFiles, BuyerScope, SavedFile } from "./files.js";
+import type { BuyerFiles, BuyerScope } from "./files.js";
 
 /** A saved HTML file published at a link: the page is the file, so publishing the same file again gives the same page. */
-export type HtmlPage = { id: string; productId: string; userId: string; fileId: string; title: string; createdAt: string; pdfFileId?: string };
+export type HtmlPage = { id: string; productId: string; userId: string; fileId: string; title: string; createdAt: string };
 
 export interface HtmlPageRepository {
   /** The page of this file, created on the first call: one step, so two calls never make two pages. */
-  publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title" | "pdfFileId">): Promise<HtmlPage>;
+  publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title">): Promise<HtmlPage>;
   get(id: string): Promise<HtmlPage | undefined>;
   /**
    * Take the right to email this page, in one conditional step: true for exactly one caller. A claim whose send never finished
@@ -32,23 +32,22 @@ CREATE TABLE IF NOT EXISTS hatch_html_pages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (product_id, user_id, file_id)
 );
-ALTER TABLE hatch_html_pages ADD COLUMN IF NOT EXISTS pdf_file_id TEXT;
 ALTER TABLE hatch_html_pages ADD COLUMN IF NOT EXISTS emailed_at TIMESTAMPTZ;
 ALTER TABLE hatch_html_pages ADD COLUMN IF NOT EXISTS emailed_to TEXT;
 ALTER TABLE hatch_html_pages ADD COLUMN IF NOT EXISTS email_message_id TEXT;`;
 
-type Row = { id: string; product_id: string; user_id: string; file_id: string; title: string; created_at: Date; pdf_file_id: string | null };
-const pageOf = (row: Row): HtmlPage => ({ id: row.id, productId: row.product_id, userId: row.user_id, fileId: row.file_id, title: row.title, createdAt: row.created_at.toISOString(), ...row.pdf_file_id ? { pdfFileId: row.pdf_file_id } : {} });
+type Row = { id: string; product_id: string; user_id: string; file_id: string; title: string; created_at: Date };
+const pageOf = (row: Row): HtmlPage => ({ id: row.id, productId: row.product_id, userId: row.user_id, fileId: row.file_id, title: row.title, createdAt: row.created_at.toISOString() });
 
 export class PostgresHtmlPageRepository implements HtmlPageRepository {
   constructor(private readonly db: PostgresQueryExecutor) {}
   async initialize(): Promise<void> { await this.db.query(SCHEMA); }
-  async publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title" | "pdfFileId">): Promise<HtmlPage> {
-    // On a conflict the title stays; a PDF given now is attached, one not given is kept.
+  async publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title">): Promise<HtmlPage> {
+    // The no-op update makes RETURNING give the existing row on a conflict.
     const result = await this.db.query(
-      `INSERT INTO hatch_html_pages (id, product_id, user_id, file_id, title, pdf_file_id) VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (product_id, user_id, file_id) DO UPDATE SET pdf_file_id = COALESCE(EXCLUDED.pdf_file_id, hatch_html_pages.pdf_file_id) RETURNING *`,
-      [randomUUID(), page.productId, page.userId, page.fileId, page.title, page.pdfFileId ?? null]);
+      `INSERT INTO hatch_html_pages (id, product_id, user_id, file_id, title) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (product_id, user_id, file_id) DO UPDATE SET title = hatch_html_pages.title RETURNING *`,
+      [randomUUID(), page.productId, page.userId, page.fileId, page.title]);
     return pageOf(result.rows[0] as Row);
   }
   async claimEmail(id: string, recipientHash: string, staleSeconds: number): Promise<boolean> {
@@ -73,10 +72,10 @@ export class PostgresHtmlPageRepository implements HtmlPageRepository {
 export class MemoryHtmlPageRepository implements HtmlPageRepository {
   private readonly pages: HtmlPage[] = [];
   private readonly emails = new Map<string, { at: number; messageId?: string }>();
-  async publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title" | "pdfFileId">): Promise<HtmlPage> {
+  async publish(page: Pick<HtmlPage, "productId" | "userId" | "fileId" | "title">): Promise<HtmlPage> {
     const found = this.pages.find(p => p.productId === page.productId && p.userId === page.userId && p.fileId === page.fileId);
-    if (found) { if (page.pdfFileId) found.pdfFileId = page.pdfFileId; return { ...found }; }
-    const created: HtmlPage = { productId: page.productId, userId: page.userId, fileId: page.fileId, title: page.title, ...page.pdfFileId ? { pdfFileId: page.pdfFileId } : {}, id: randomUUID(), createdAt: new Date().toISOString() };
+    if (found) return { ...found };
+    const created: HtmlPage = { ...page, id: randomUUID(), createdAt: new Date().toISOString() };
     this.pages.push(created);
     return { ...created };
   }
@@ -123,23 +122,12 @@ export function checkPage(name: string, mime: string, bytes: Buffer): string {
 export class HtmlPages {
   constructor(private readonly repository: HtmlPageRepository, private readonly files: BuyerFiles, private readonly links: HtmlLinks) {}
 
-  /** `pdfFileId` is a saved PDF of the same report, of the same buyer, kept with the page for its download link. */
-  async publish(scope: BuyerScope, fileId: string, title: string, pdfFileId?: string): Promise<{ page_id: string; url: string; pdf_url?: string }> {
+  async publish(scope: BuyerScope, fileId: string, title: string): Promise<{ page_id: string; url: string }> {
     const file = await this.files.find(scope, fileId);
     if (!file) throw new BoxToolError(`No saved file has the id ${fileId}. Save the page with save_file first and pass the id it returns.`);
     checkPage(file.name, file.mime, (await this.files.content(scope, fileId))!);
-    let pdf: SavedFile | undefined;
-    if (pdfFileId) {
-      pdf = await this.files.find(scope, pdfFileId);
-      if (!pdf) throw new BoxToolError(`No saved file has the id ${pdfFileId}. Save the PDF with save_file first and pass the id it returns as pdf_file_id.`);
-      if (pdf.mime !== "application/pdf" || !(await this.files.content(scope, pdfFileId))?.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
-        throw new BoxToolError(`${pdf.name} is not a PDF file; pdf_file_id takes the id of a saved .pdf.`);
-      }
-    }
-    const page = await this.repository.publish({ productId: scope.productId, userId: scope.userId, fileId, title: title.trim() || file.name, ...pdf ? { pdfFileId: pdf.id } : {} });
-    // The page's own PDF, which may have been attached by an earlier publish of the same file.
-    const attached = page.pdfFileId ? await this.files.find(scope, page.pdfFileId) : undefined;
-    return { page_id: page.id, url: this.links.url(page.id), ...attached ? { pdf_url: attached.url } : {} };
+    const page = await this.repository.publish({ productId: scope.productId, userId: scope.userId, fileId, title: title.trim() || file.name });
+    return { page_id: page.id, url: this.links.url(page.id) };
   }
 
   /** The page's HTML for a valid link; undefined for anything else, so a wrong link and a missing page look the same. */
