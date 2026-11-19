@@ -3,8 +3,8 @@ import type { StallLimits } from "./providerStall.js";
 import { ModelProfileError } from "./errors/modelProfile.js";
 
 /** The catalogue of usable models. Which role runs on which profile is data (`hatch_model_roles`), not code: see modelRoles.ts. */
-export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "deepseek-flash", "deepseek-flash-thinking", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "deepseek-v4-pro", "deepseek-flash", "deepseek-flash-thinking", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon", "gemini-3.8-flash"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon", "gemini-3.8-flash"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
@@ -175,6 +175,23 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoningEffort: "low",
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
+  // gemini-api under its explicit name: the same model, so a Product can be pointed at it by what it is.
+  // Thinking levels: low | medium | high (minimal is a 400). Thinking is on at medium by default; long agentic loops run at medium.
+  "gemini-3.8-flash": {
+    name: "gemini-3.8-flash",
+    family: "gemini",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-3.8-flash",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    thinkingLevel: "medium",
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+  },
   "gemini-3.1-pro": {
     name: "gemini-3.1-pro",
     family: "gemini",
@@ -240,6 +257,23 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
     thinkingLevel: "low",
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+  },
+  // Gemini 4 Neon (aistudio.google.com/docs/models/gemini-4-neon): 1,048,576 context, 65,536 output, text/image/video/audio/PDF in.
+  // Thinking levels low | medium | high | xhigh (default high; minimal is a 400). $3 / $15 per 1M tokens, thinking billed as output.
+  "gemini-4-neon": {
+    name: "gemini-4-neon",
+    family: "gemini",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-4-neon",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    thinkingLevel: "medium",
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   }
 };

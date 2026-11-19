@@ -36,7 +36,9 @@ test("every profile names a family that resolves to an adapter", () => {
       ["deepseek-flash-thinking", "openai-compatible"],
       ["gemini-4-argon", "gemini"],
       ["gemini-4-carbon", "gemini"],
-      ["gemini-4-hydrogen", "gemini"]
+      ["gemini-4-hydrogen", "gemini"],
+      ["gemini-4-neon", "gemini"],
+      ["gemini-3.8-flash", "gemini"]
     ]
   );
 });
@@ -164,3 +166,58 @@ test("deepseek-flash-thinking: reasoning_content streams as thinking and is sent
   assert.equal(sent[0].tool_calls[0].id, "call_1");
   assert.equal(sent[1].reasoning_content, "wrap up");
 });
+
+for (const name of ["gemini-4-neon", "gemini-3.8-flash"] as const) {
+  test(`${name}: thinking level is sent, and the tool call's thought signature is replayed unchanged on the next request`, async () => {
+    const { createServer } = await import("node:http");
+    const bodies: Array<Record<string, any>> = [];
+    const chunk = (parts: unknown[], finishReason?: string) => `data: ${JSON.stringify({ candidates: [{ content: { role: "model", parts }, ...(finishReason ? { finishReason } : {}), index: 0 }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 } })}\n\n`;
+    const server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (d) => (raw += d));
+      req.on("end", () => {
+        bodies.push(JSON.parse(raw));
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        if (bodies.length === 1) res.end(chunk([{ text: "plan", thought: true }]) + chunk([{ functionCall: { name: "audit_check", args: { id: "c1" }, id: "call_9" }, thoughtSignature: "U0lHTkFUVVJFMQ==" }], "STOP"));
+        else res.end(chunk([{ text: "done" }], "STOP"));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const base = llmProfile(name);
+      const profile = { ...base, baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1beta` };
+      const adapter = adapterFor(profile);
+      const model = adapter.model(profile, adapter.endpoint(profile, {}));
+      const stream = adapter.streamFn(profile, adapter.resolve(profile, { apiKey: "k" }));
+      const tools = [{ name: "audit_check", description: "r", parameters: { type: "object", properties: { id: { type: "string" } } } }];
+      const user = { role: "user", content: "audit", timestamp: 1 };
+
+      const first = await stream(model as never, { messages: [user], tools } as never, {} as never);
+      const events: string[] = [];
+      for await (const e of first as AsyncIterable<{ type: string }>) events.push(e.type);
+      const message = await (first as { result(): Promise<any> }).result();
+      assert.ok(events.includes("thinking_end") && events.includes("toolcall_end"));
+      assert.equal(message.stopReason, "toolUse");
+      const call = message.content.find((b: any) => b.type === "toolCall");
+      assert.equal(call.name, "audit_check");
+      assert.deepEqual(call.arguments, { id: "c1" });
+
+      const cfg = bodies[0]!.generationConfig.thinkingConfig;
+      assert.equal(cfg.thinkingLevel, base.thinkingLevel.toUpperCase());
+      assert.equal(cfg.includeThoughts, true);
+      assert.equal(cfg.thinkingBudget, undefined, "level, not a budget");
+
+      const toolResult = { role: "toolResult", toolCallId: call.id, toolName: "audit_check", content: [{ type: "text", text: "{\"ok\":1}" }], isError: false, timestamp: 2 };
+      const second = await stream(model as never, { messages: [user, message, toolResult], tools } as never, {} as never);
+      for await (const _ of second as AsyncIterable<unknown>) { /* drain */ }
+      const contents = bodies[1]!.contents;
+      const modelTurn = contents.find((c: any) => c.role === "model");
+      const part = modelTurn.parts.find((p: any) => p.functionCall);
+      assert.equal(part.thoughtSignature, "U0lHTkFUVVJFMQ==");
+      assert.equal(part.functionCall.name, "audit_check");
+      assert.equal(contents[contents.length - 1].parts[0].functionResponse.name, "audit_check");
+    } finally {
+      server.close();
+    }
+  });
+}

@@ -52,3 +52,21 @@ test("deepseek-flash-thinking is deepseek-flash with thinking enabled, high effo
   assert.equal(profile.input, undefined, "text and image");
   assert.equal(llmProfile("deepseek-flash").thinkingType, "disabled");
 });
+
+test("gemini-3.8-flash is gemini-api by name, and gemini-4-neon has the API's limits; both think at medium with images allowed", () => {
+  const flash = llmProfile("gemini-3.8-flash");
+  assert.equal(flash.model, llmProfile("gemini-api").model);
+  assert.equal(flash.maxTokens, 65_536);
+  const neon = llmProfile("gemini-4-neon");
+  assert.equal(neon.model, "gemini-4-neon");
+  assert.equal(neon.contextWindow, 1_048_576);
+  assert.equal(neon.maxTokens, 65_536);
+  for (const profile of [flash, neon]) {
+    assert.equal(profile.family, "gemini");
+    assert.equal(profile.apiKeyEnv, "GEMINI_API_KEY");
+    assert.equal(profile.reasoning, true);
+    assert.equal(profile.thinkingLevel, "medium");
+    assert.equal(profile.input, undefined, "text and image");
+    assert.deepEqual(profile.stall, llmProfile("gemini-3.1-pro").stall);
+  }
+});
