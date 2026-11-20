@@ -5,7 +5,7 @@ import { InMemoryConversationRepository } from "../conversationRepository.js";
 import { TASK_START_DIGEST } from "../protocol.js";
 import { ChatError, accountOf, userPrincipal } from "./principal.js";
 import { SentMessageLimits } from "./contactBinding.js";
-import { GuestCarryOver, RetryingLibrary, type Library } from "./library.js";
+import { CodeGatedLibrary, GuestCarryOver, RetryingLibrary, type Library } from "./library.js";
 
 const guestId = "g".repeat(22);
 const tokens = new GuestTokens("secret-a");
@@ -130,4 +130,15 @@ test("a library save is retried with backoff, fails only when every attempt fail
   assert.equal(calls.length, 4);
   assert.equal(await library.save("a1", "p1"), true);
   assert.equal(calls.length, 5, "saving is asked every time; the library answers idempotently");
+});
+
+test("a code-gated Product's conversation is never saved to a library, and a normal Product still is", async () => {
+  const calls: string[] = [];
+  const inner: Library = { save: async (account, productId) => { calls.push(`${account}:${productId}`); return true; } };
+  const library = new CodeGatedLibrary(inner, { required: async (productId) => productId === "coded" });
+
+  assert.equal(await library.save("a1", "coded"), false);
+  assert.deepEqual(calls, []);
+  assert.equal(await library.save("a1", "plain"), true);
+  assert.deepEqual(calls, ["a1:plain"]);
 });

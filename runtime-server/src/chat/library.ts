@@ -1,4 +1,5 @@
 import type { ConversationRepository } from "../conversationRepository.js";
+import { log } from "../observability/log.js";
 
 /** Port: an account's library, the Agents it keeps to come back to. Saving one already there changes nothing. */
 export interface Library {
@@ -49,6 +50,22 @@ export class RetryingLibrary implements Library {
         await this.sleep(this.delaysMs[attempt]!);
       }
     }
+  }
+}
+
+/**
+ * A Product whose buyers come in by an access code has no library for them: they find their report through the code, so
+ * nothing is saved for its conversations. Every other Product is saved as ever.
+ */
+export class CodeGatedLibrary implements Library {
+  constructor(private readonly library: Library, private readonly gate: { required(productId: string): Promise<boolean> }) {}
+
+  async save(accountId: string, productId: string): Promise<boolean> {
+    if (await this.gate.required(productId)) {
+      log.debug("library_save_skipped", { product_id: productId, reason: "access_code" });
+      return false;
+    }
+    return this.library.save(accountId, productId);
   }
 }
 
