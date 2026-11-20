@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect, landingResponse } from "../server.mjs";
-import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, isDesktop, intakeAnswers, missingField, stepStates, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash } from "./codePageModel.js";
+import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, isDesktop, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash } from "./codePageModel.js";
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 
@@ -214,4 +214,20 @@ test("the landing endpoint carries the Agent's words from landing.json, else the
   assert.equal(bare.hook, "诊断官网");
   assert.equal("cta" in bare, false);
   assert.equal(hookCopy(bare).cta, "开始诊断");
+});
+
+test("waitLine counts the minutes down from the start, and falls back without one", () => {
+  const startedAt = "2026-11-20T10:00:00.000Z";
+  const at = minutes => waitLine({ startedAt, now: Date.parse(startedAt) + minutes * 60000, email: "a@b.co" });
+  assert.match(at(0), /约 10 分钟后报告会发送至 a@b.co/);
+  assert.match(at(3.2), /约 7 分钟/);
+  assert.match(at(9.5), /约 1 分钟/);
+  assert.equal(at(12), "报告即将完成，完成后会发送至 a@b.co");
+  assert.equal(waitLine({ now: 0 }), "您可以关闭此页面，约 10 分钟后报告会发送至您的邮箱");
+});
+
+test("readyLine greets by name, and without one stays plain", () => {
+  assert.equal(readyLine("Keith"), "Keith，你的诊断报告已生成");
+  assert.equal(readyLine(" "), "你的诊断报告已生成");
+  assert.equal(readyLine(undefined), "你的诊断报告已生成");
 });

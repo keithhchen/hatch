@@ -19,6 +19,8 @@ export type CodePageStatus = {
   creator?: { name: string };
   /** What the buyer asked to be diagnosed, as they gave it (the Brief's `website`); known once the intake is in. */
   website?: string;
+  /** The buyer's name as they gave it (the Brief's `name`); known once the intake is in. */
+  name?: string;
   /** Intake only: what to ask. The access code is not asked: the page's own address is it. */
   fields?: Array<{ id: string; label: string; required: boolean; type?: string }>;
   /** Generating only: the steps the Product's own mapping names, and which one the Run has reached (-1: none yet). */
@@ -26,6 +28,8 @@ export type CodePageStatus = {
   step?: number;
   /** Generating only: where the report will be mailed (the Brief's email), as the buyer gave it. */
   email?: string;
+  /** Generating only: when the code was spent and the Run began (the conversation's creation, ISO), for the page's countdown. */
+  started_at?: string;
   report_url?: string;
 };
 
@@ -137,14 +141,15 @@ export class CodePages {
       return { state: "intake", product, creator, fields: (spec?.fields ?? []).filter((field) => field.type !== "access_code").map((field) => ({ ...field })) };
     }
     const website = briefAnswer(conversation.briefSnapshot, "website");
-    const who = { product, creator, ...(website ? { website } : {}) };
+    const name = briefAnswer(conversation.briefSnapshot, "name");
+    const who = { product, creator, ...(website ? { website } : {}), ...(name ? { name } : {}) };
     const report = await this.deps.reportUrl(conversation);
     if (report) return { state: "ready", ...who, report_url: report };
     if (held.outcome === "failed") return { state: "failed", ...who };
     const names = new Set(await this.deps.store.toolNames(conversation.id));
     const step = map ? map.steps.reduce((reached, entry, index) => entry.tools.some((tool) => names.has(tool)) ? index : reached, -1) : -1;
     const email = briefEmail(conversation.briefSnapshot);
-    return { state: "generating", ...who, ...(email ? { email } : {}), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
+    return { state: "generating", ...who, started_at: conversation.createdAt, ...(email ? { email } : {}), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
   }
 
   /**

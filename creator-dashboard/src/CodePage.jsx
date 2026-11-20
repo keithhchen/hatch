@@ -2,8 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check } from "lucide-react";
 import { WebChatEgg } from "./webChatGate.jsx";
 import CoBrandLockup from "./CoBrandLockup.jsx";
-import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
-import { qrMatrix, qrPath, qrSide } from "./telegramBot.js";
+import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -12,6 +11,8 @@ const POLL_MS = 8000;
 const API = "/v1/web-chat/code";
 const REFUSALS = { not_found: "兑换码不存在", not_paid: "尚未支付" };
 const FEED_MS = 2400;
+const SCAN_QR = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/cobrand/gethatchapp-c-qr.jpg";
+const WAIT_TICK_MS = 30000;
 const INPUT_TYPES = { email: "email", tel: "tel", url: "url" };
 
 /** The card every state sits in. */
@@ -35,14 +36,11 @@ function Header({ product, website }) {
   </header>;
 }
 
-/** Desktop browsers cannot pay by WeChat H5: the buyer scans this page's address with a phone and pays there. */
-function ScanToPay({ url }) {
-  const matrix = qrMatrix(url);
-  const side = qrSide(matrix);
+/** Desktop browsers cannot pay by WeChat H5: the buyer scans this static code (it opens gethatchapp.com/c) with a phone and pays there. */
+function ScanToPay() {
   return <div className="code-page__scan" role="status">
     <p><strong>请用手机扫码打开，完成支付</strong></p>
-    <svg viewBox={`0 0 ${side} ${side}`} width="200" height="200" role="img" aria-label="当前页面二维码" shapeRendering="crispEdges"><rect width={side} height={side} fill="#fff" /><path d={qrPath(matrix)} fill="#111315" /></svg>
-    <p className="code-page__note">{url}</p>
+    <img src={SCAN_QR} width="180" height="180" alt="扫码打开" />
   </div>;
 }
 
@@ -156,7 +154,7 @@ function Landing({ request, navigate, reason }) {
     </dl>
     {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
     <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready} onClick={pay}><WeChatPayMark /><span>微信支付 {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
-    {scan ? <ScanToPay url={`${window.location.origin}${window.location.pathname}`} /> : null}
+    {scan ? <ScanToPay /> : null}
   </Card>;
 }
 
@@ -206,6 +204,8 @@ function Generating({ status, navigate }) {
   const [tick, setTick] = useState(0);
   useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), FEED_MS); return () => clearInterval(timer); }, []);
   const lines = feedWindow(feedPool({ steps, step: status.step }), tick);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), WAIT_TICK_MS); return () => clearInterval(timer); }, []);
   return <Card><Header product={status.product} website={status.website} /><div className="code-page__wait">
     <p className="code-page__generating" role="status">报告正在生成</p>
     {steps.length ? <ol className="code-page__steps">{steps.map(step => <li key={step.id} className={`code-page__step code-page__step--${step.state}`} aria-current={step.state === "now" ? "step" : undefined}>
@@ -213,7 +213,7 @@ function Generating({ status, navigate }) {
       <span>{step.label}</span>
     </li>)}</ol> : null}
     <ul className="code-page__feed" aria-live="off">{lines.map(line => <li key={`${tick}-${line}`}>{line}</li>)}</ul>
-    <p className="code-page__note">您可以关闭此页面，约 10 分钟后报告会发送至{status.email ? ` ${status.email}` : "您的邮箱"}</p>
+    <p className="code-page__note">{waitLine({ startedAt: status.started_at, now, email: status.email })}</p>
     <NewReport navigate={navigate} />
   </div></Card>;
 }
@@ -246,6 +246,7 @@ function CodePageBody({ code, request, navigate }) {
     case "intake": return <Intake status={status} code={code} request={request} onStatus={next => poller.current.accept(next)} />;
     case "generating": return <Generating status={status} navigate={navigate} />;
     case "ready": return <Card><Header product={status.product} website={status.website} /><div className="code-page__done">
+      <div className="code-page__success"><span className="code-page__success-mark"><Check size={28} strokeWidth={3} aria-hidden /></span><p role="status">{readyLine(status.name)}</p></div>
       <a className="code-page__button code-page__report" href={status.report_url} rel="noopener">查看报告</a>
       <NewReport navigate={navigate} />
     </div></Card>;
