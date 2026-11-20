@@ -55,19 +55,19 @@ function Field({ field, value, onChange, autoFocus }) {
   </div>;
 }
 
-/** The way in for an old report: its code, opening its own page. */
-function CodeBox({ navigate }) {
+/** A code typed in opens its own page: a 兑换码 its report, an 活动码 a new code of the person's own. */
+function CodeBox({ navigate, label = "兑换码", action = "打开", primary = false, autoFocus = true }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState(null);
   const open = event => {
     event.preventDefault();
     const typed = typedCode(code);
-    if (!typed) { setError("兑换码不存在"); return; }
+    if (!typed) { setError(`${label}不存在`); return; }
     navigate(CodeRoute.codePath(typed));
   };
-  return <form className="code-page__code" onSubmit={open}>
-    <input autoFocus autoCapitalize="characters" autoComplete="off" placeholder="兑换码" aria-label="兑换码" value={code} onChange={event => { setCode(event.target.value); setError(null); }} />
-    <button type="submit" className="code-page__button code-page__button--quiet" disabled={!code.trim()}>打开</button>
+  return <form className={`code-page__code${primary ? " code-page__code--primary" : ""}`} onSubmit={open}>
+    <input autoFocus={autoFocus} autoCapitalize="characters" autoComplete="off" placeholder={label} aria-label={label} value={code} onChange={event => { setCode(event.target.value); setError(null); }} />
+    <button type="submit" className={`code-page__button${primary ? "" : " code-page__button--quiet"}`} disabled={!code.trim()}>{action}</button>
     {error ? <p className="code-page__error" role="alert">{error}</p> : null}
   </form>;
 }
@@ -87,7 +87,8 @@ function Hook({ landing, reason, onStart, navigate }) {
       <p className="code-page__by"><strong>{agentName}</strong></p>
     </div>
     <div className="code-page__actions">
-      <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{cta}</button>
+      <CodeBox navigate={navigate} label="活动码" action="使用" primary autoFocus={false} />
+      <button type="button" className="code-page__button code-page__button--quiet code-page__buy" disabled={!landing} onClick={onStart}>{cta}</button>
       <button type="button" className="code-page__link" aria-expanded={codeOpen} onClick={() => setCodeOpen(open => !open)}>有兑换码？</button>
       {codeOpen ? <CodeBox navigate={navigate} /> : null}
     </div>
@@ -162,7 +163,7 @@ function Landing({ request, navigate, reason }) {
  * The Brief's own fields, as the Product defines them; the code is the page's address, so it is not asked. Answers given on the product
  * page before paying are submitted here by themselves, once; without them (or with some missing) the form is shown for the buyer to fill.
  */
-function Intake({ status, code, request, onStatus, navigate }) {
+function Intake({ status, code, request, onStatus }) {
   const [values, setValues] = useState({});
   const [error, setError] = useState(null);
   const [sending, setSending] = useState(false);
@@ -170,12 +171,7 @@ function Intake({ status, code, request, onStatus, navigate }) {
   const send = async answers => {
     setSending(true);
     setError(null);
-    try {
-      const next = await request(`${API}/${encodeURIComponent(code)}/intake`, { method: "POST", body: JSON.stringify(intakeAnswers(status.fields, answers)) });
-      // Under an event code the person was issued a code of their own: its page is theirs from now on.
-      if (next?.code && next.code !== code) navigate(CodeRoute.codePath(next.code), { replace: true });
-      else onStatus(next);
-    }
+    try { onStatus(await request(`${API}/${encodeURIComponent(code)}/intake`, { method: "POST", body: JSON.stringify(intakeAnswers(status.fields, answers)) })); }
     catch (cause) { setError(cause?.message ?? "提交失败，请重试"); setSending(false); }
   };
   useEffect(() => {
@@ -198,6 +194,20 @@ function Intake({ status, code, request, onStatus, navigate }) {
     {error ? <p className="code-page__error" role="alert">{error}</p> : null}
     <button type="submit" className="code-page__button">开始诊断</button>
   </form></Card>;
+}
+
+/** An event code's page: it issues this person a code of their own and moves to that code's page, which then runs as any free code's. */
+function EventIssue({ code, request, navigate }) {
+  const [error, setError] = useState(null);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    request(`${API}/${encodeURIComponent(code)}/issue`, { method: "POST", body: "{}" })
+      .then(issued => navigate(CodeRoute.codePath(issued.code), { replace: true }), cause => setError(cause?.message ?? "暂时无法打开，请稍后再试"));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (error) return <Card><p className="code-page__error" role="alert">{error}</p></Card>;
+  return <Card><div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /></div></Card>;
 }
 
 /** Buying another report: back to the product page. */
@@ -248,7 +258,8 @@ function CodePageBody({ code, request, navigate }) {
   if (!status) return <Card><div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /></div></Card>;
   switch (status.state) {
     case "entry": return <Landing request={request} navigate={navigate} reason={status.reason} />;
-    case "intake": return <Intake status={status} code={code} request={request} navigate={navigate} onStatus={next => poller.current.accept(next)} />;
+    case "event": return <EventIssue code={code} request={request} navigate={navigate} />;
+    case "intake": return <Intake status={status} code={code} request={request} onStatus={next => poller.current.accept(next)} />;
     case "generating": return <Generating status={status} navigate={navigate} />;
     case "ready": return <Card><Header product={status.product} website={status.website} /><div className="code-page__done">
       <div className="code-page__success"><span className="code-page__success-mark"><Check size={28} strokeWidth={3} aria-hidden /></span><p role="status">{readyLine(status.name)}</p></div>

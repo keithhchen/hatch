@@ -3,11 +3,12 @@ import { ChatError } from "../chat/principal.js";
 import { readJsonObject, writeJson } from "../http/httpSupport.js";
 import type { CodePages } from "./codePages.js";
 
-const CODE_ROUTE = /^\/v1\/codes\/([^/]+)(\/intake)?$/;
+const CODE_ROUTE = /^\/v1\/codes\/([^/]+)(\/intake|\/issue)?$/;
 
 /**
  * `GET /v1/codes/<code>`: the state of the code's page. `POST /v1/codes/<code>/intake`: the Brief's answers `{ "<field id>": "<value>" }`,
- * which spends the code and starts the Run; answers with the state after it. The code is the credential: nothing here takes another.
+ * which spends the code and starts the Run; answers with the state after it. `POST /v1/codes/<event code>/issue`: a new free code `{ code }`.
+ * The code is the credential: nothing here takes another.
  */
 export async function handleCodePageRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, pages: CodePages): Promise<void> {
   if (req.method === "GET" && url.pathname === "/v1/codes/landing") {
@@ -24,7 +25,7 @@ export async function handleCodePageRoute(req: http.IncomingMessage, res: http.S
   const code = decodeURIComponent(match[1]!);
   res.setHeader("cache-control", "no-store");
   try {
-    writeJson(res, 200, match[2] ? await pages.intake(code, await readJsonObject(req)) : await pages.status(code));
+    writeJson(res, 200, match[2] === "/issue" ? await pages.issue(code) : match[2] ? await pages.intake(code, await readJsonObject(req)) : await pages.status(code));
   } catch (error) {
     if (!(error instanceof ChatError)) throw error;
     writeJson(res, error.status, { error: { code: error.code, message: error.message } });

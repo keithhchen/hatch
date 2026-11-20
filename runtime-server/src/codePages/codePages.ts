@@ -9,7 +9,7 @@ import { conversationBinding, durableConversationId } from "../chat/sessionBindi
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
 
 /** What a person sees at /c/<code>: the entry, the intake form, the wait, the report, or a plain failure. */
-export type CodePageState = "entry" | "intake" | "generating" | "ready" | "failed";
+export type CodePageState = "entry" | "event" | "intake" | "generating" | "ready" | "failed";
 export type CodePageStatus = {
   state: CodePageState;
   /** Entry only: why the code did not open a page. */
@@ -31,8 +31,6 @@ export type CodePageStatus = {
   /** Generating only: when the code was spent and the Run began (the conversation's creation, ISO), for the page's countdown. */
   started_at?: string;
   report_url?: string;
-  /** Intake answer under an event code only: the new code the person was issued, whose page is theirs from now on. */
-  code?: string;
 };
 
 /** The Product's own map from what its Run does to steps a person understands: `runtime/progress.json` in its Corpus. */
@@ -141,6 +139,8 @@ export class CodePages {
     const held = await gate.codes().lookup(code);
     if (!held || !await gate.required(held.productId)) return { state: "entry", reason: "not_found" };
     if (held.status === "pending" || held.status === "void") return { state: "entry", reason: "not_paid" };
+    // An event code has no page of its own: the page issues the person a code (`issue`) and moves to it.
+    if (held.source === "event") return { state: "event" };
     const { resolved, map } = await this.resolved(held.productId);
     const product = { id: held.productId, name: resolved.corpus.product.name };
     const creator = { name: resolved.corpus.creator.name };
@@ -175,15 +175,6 @@ export class CodePages {
     const { resolved } = await this.resolved(held.productId);
     const spec = resolved.corpus.product.brief_spec as BriefSpec | undefined;
     if (!spec) throw new ChatError("brief_unavailable", "This Product has no Brief.", 409);
-    if (held.source === "event") {
-      // An event code is shared by a room: it is never spent; the answers are checked first, then the person gets a free code of their own.
-      if (held.status !== "active") throw new ChatError("access_code_not_found", "兑换码不存在", 404);
-      briefOf(spec, answers, code);
-      const issue = gate.codes().issueFree;
-      if (!issue) throw new ChatError("access_codes_unavailable", "兑换码服务暂不可用", 503);
-      const own = await issue.call(gate.codes(), held.productId);
-      return { ...await this.intake(own, answers), code: own };
-    }
     const brief = briefOf(spec, answers, code);
     const scope = { creatorId: resolved.corpus.creator.id, userId: codeOwner(code), productId: held.productId, corpusDigest: resolved.digest, explicit: true };
     const id = durableConversationId(scope, codeConversationId(code));
@@ -192,5 +183,19 @@ export class CodePages {
     await this.deps.start(conversation, codeIntakeKey(code));
     this.statuses.delete(code);
     return this.status(code);
+  }
+
+  /**
+   * An event code, shared by a room and never spent, issues each person who enters it a free code of their own; their page is that
+   * code's from then on, and everything after it is a free code's. Voiding the event code ends the event.
+   */
+  async issue(rawCode: string): Promise<{ code: string }> {
+    const code = normalizeCode(rawCode);
+    const { gate } = this.deps;
+    const held = await gate.codes().lookup(code);
+    if (!held || held.source !== "event" || held.status !== "active" || !await gate.required(held.productId)) throw new ChatError("access_code_not_found", "兑换码不存在", 404);
+    const issueFree = gate.codes().issueFree;
+    if (!issueFree) throw new ChatError("access_codes_unavailable", "兑换码服务暂不可用", 503);
+    return { code: await issueFree.call(gate.codes(), held.productId) };
   }
 }

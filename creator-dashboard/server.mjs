@@ -25,7 +25,7 @@ import { createGuestTokens } from "./guest.mjs";
 
 const ACCESS_CODE = /^[A-Z0-9_-]{4,64}$/;
 /** The page of an access code: its status, and its intake. A code is letters, digits, "_" and "-". */
-const CODE_PAGE_PATH = /^\/v1\/web-chat\/code\/([A-Za-z0-9_-]{4,64})(\/intake)?$/;
+const CODE_PAGE_PATH = /^\/v1\/web-chat\/code\/([A-Za-z0-9_-]{4,64})(\/intake|\/issue)?$/;
 import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
