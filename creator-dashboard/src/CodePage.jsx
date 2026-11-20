@@ -56,7 +56,7 @@ function Field({ field, value, onChange, autoFocus }) {
 }
 
 /** A code typed in opens its own page: a 兑换码 its report, an 活动码 a new code of the person's own. */
-function CodeBox({ navigate, label = "兑换码", action = "打开", primary = false, autoFocus = true }) {
+function CodeBox({ navigate, label, action }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState(null);
   const open = event => {
@@ -65,9 +65,9 @@ function CodeBox({ navigate, label = "兑换码", action = "打开", primary = f
     if (!typed) { setError(`${label}不存在`); return; }
     navigate(CodeRoute.codePath(typed));
   };
-  return <form className={`code-page__code${primary ? " code-page__code--primary" : ""}`} onSubmit={open}>
-    <input autoFocus={autoFocus} autoCapitalize="characters" autoComplete="off" placeholder={label} aria-label={label} value={code} onChange={event => { setCode(event.target.value); setError(null); }} />
-    <button type="submit" className={`code-page__button${primary ? "" : " code-page__button--quiet"}`} disabled={!code.trim()}>{action}</button>
+  return <form className="code-page__code" onSubmit={open}>
+    <input autoFocus autoCapitalize="characters" autoComplete="off" placeholder={label} aria-label={label} value={code} onChange={event => { setCode(event.target.value); setError(null); }} />
+    <button type="submit" className="code-page__button code-page__button--quiet" disabled={!code.trim()}>{action}</button>
     {error ? <p className="code-page__error" role="alert">{error}</p> : null}
   </form>;
 }
@@ -78,7 +78,8 @@ const BackArrow = ({ onClick }) => <button type="button" className="code-page__b
 /** Step 1: the Agent introduces itself, in the Product's own words. */
 function Hook({ landing, reason, onStart, navigate }) {
   const { agentName, hook, cta } = hookCopy(landing);
-  const [codeOpen, setCodeOpen] = useState(false);
+  // Below the main button: 有活动码？ opens the event code (offline events only); from there, a one-person 兑换码.
+  const [entry, setEntry] = useState(null);
   return <main className="code-page code-page--hook">
     {reason ? <p className="code-page__error" role="alert">{REFUSALS[reason]}</p> : null}
     <div className="code-page__intro">
@@ -87,10 +88,17 @@ function Hook({ landing, reason, onStart, navigate }) {
       <p className="code-page__by"><strong>{agentName}</strong></p>
     </div>
     <div className="code-page__actions">
-      <CodeBox navigate={navigate} label="活动码" action="使用" primary autoFocus={false} />
-      <button type="button" className="code-page__button code-page__button--quiet code-page__buy" disabled={!landing} onClick={onStart}>{cta}</button>
-      <button type="button" className="code-page__link" aria-expanded={codeOpen} onClick={() => setCodeOpen(open => !open)}>有兑换码？</button>
-      {codeOpen ? <CodeBox navigate={navigate} /> : null}
+      <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{cta}</button>
+      {entry === null ? <button type="button" className="code-page__link" onClick={() => setEntry("event")}>有活动码？</button> : null}
+      {entry === "event" ? <div className="code-page__entry">
+        <CodeBox key="event" navigate={navigate} label="活动码" action="使用" />
+        <p className="code-page__hint">活动码仅限线下活动体验</p>
+        <button type="button" className="code-page__link code-page__link--small" onClick={() => setEntry("code")}>如果您有一人一码的兑换码，点击这里</button>
+      </div> : null}
+      {entry === "code" ? <div className="code-page__entry">
+        <CodeBox key="code" navigate={navigate} label="兑换码" action="打开" />
+        <p className="code-page__hint">兑换码以 MSC 开头，一人一码</p>
+      </div> : null}
     </div>
   </main>;
 }
