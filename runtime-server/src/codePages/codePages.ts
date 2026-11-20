@@ -19,6 +19,8 @@ export type CodePageStatus = {
   creator?: { name: string };
   /** What the buyer asked to be diagnosed, as they gave it (the Brief's `website`); known once the intake is in. */
   website?: string;
+  /** The buyer's name as they gave it (the Brief's `name`); known once the intake is in. */
+  name?: string;
   /** Intake only: what to ask. The access code is not asked: the page's own address is it. */
   fields?: Array<{ id: string; label: string; required: boolean; type?: string }>;
   /** Generating only: the steps the Product's own mapping names, and which one the Run has reached (-1: none yet). */
@@ -139,7 +141,8 @@ export class CodePages {
       return { state: "intake", product, creator, fields: (spec?.fields ?? []).filter((field) => field.type !== "access_code").map((field) => ({ ...field })) };
     }
     const website = briefAnswer(conversation.briefSnapshot, "website");
-    const who = { product, creator, ...(website ? { website } : {}) };
+    const name = briefAnswer(conversation.briefSnapshot, "name");
+    const who = { product, creator, ...(website ? { website } : {}), ...(name ? { name } : {}) };
     const report = await this.deps.reportUrl(conversation);
     if (report) return { state: "ready", ...who, report_url: report };
     if (held.outcome === "failed") return { state: "failed", ...who };

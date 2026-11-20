@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check } from "lucide-react";
 import { WebChatEgg } from "./webChatGate.jsx";
 import CoBrandLockup from "./CoBrandLockup.jsx";
-import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, waitLine, typedCode, visibleSteps } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -246,6 +246,7 @@ function CodePageBody({ code, request, navigate }) {
     case "intake": return <Intake status={status} code={code} request={request} onStatus={next => poller.current.accept(next)} />;
     case "generating": return <Generating status={status} navigate={navigate} />;
     case "ready": return <Card><Header product={status.product} website={status.website} /><div className="code-page__done">
+      <div className="code-page__success"><span className="code-page__success-mark"><Check size={28} strokeWidth={3} aria-hidden /></span><p role="status">{readyLine(status.name)}</p></div>
       <a className="code-page__button code-page__report" href={status.report_url} rel="noopener">查看报告</a>
       <NewReport navigate={navigate} />
     </div></Card>;

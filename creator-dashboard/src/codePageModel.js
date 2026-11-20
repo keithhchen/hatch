@@ -166,3 +166,6 @@ export function waitLine({ startedAt, now, email }) {
   if (elapsed >= GENERATION_MINUTES) return `报告即将完成，完成后会${to}`;
   return `您可以关闭此页面，约 ${Math.max(1, Math.ceil(GENERATION_MINUTES - elapsed))} 分钟后报告会${to}`;
 }
+
+/** The ready state's headline: the buyer by name when known. */
+export const readyLine = name => `${String(name ?? "").trim() ? `${String(name).trim()}，` : ""}你的诊断报告已生成`;

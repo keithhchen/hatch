@@ -111,3 +111,6 @@
 .code-page__scan { display: grid; justify-items: center; gap: 12px; margin-top: 18px; padding: 18px; border-radius: 14px; background: var(--web-panel); text-align: center; color: var(--web-ink); }
 .code-page__scan p { margin: 0; }
 .code-page__scan img { border-radius: 8px; }
+.code-page__success { display: grid; justify-items: center; gap: 14px; margin-bottom: 22px; text-align: center; }
+.code-page__success p { margin: 0; font-weight: 600; color: var(--web-ink); }
+.code-page__success-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--web-pass); color: var(--web-pass); }
