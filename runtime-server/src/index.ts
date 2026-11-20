@@ -47,7 +47,7 @@ import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { ChatError, principalKey } from "./chat/principal.js";
 import { GuestAwareIdentityResolver, GuestTokens } from "./guestToken.js";
-import { GuestCarryOver, HttpLibrary, RetryingLibrary, type Library } from "./chat/library.js";
+import { CodeGatedLibrary, GuestCarryOver, HttpLibrary, RetryingLibrary, type Library } from "./chat/library.js";
 import type { PrincipalLimits } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
 import { SelfBinder } from "./chat/selfBinding.js";
@@ -273,6 +273,11 @@ export async function reportEmailContext(conversation: ConversationRecord, bindi
 }
 
 /** The report email is for the Products with the access code capability only: any other Product mails nothing. */
+/** Products that buyers enter by access code have no library to save to. */
+function withoutCodeProducts(library: Library, gate: Pick<AccessGate, "required"> | undefined): Library {
+  return gate ? new CodeGatedLibrary(library, gate) : library;
+}
+
 export async function gatedReportEmailContext(gate: Pick<AccessGate, "required"> | undefined, conversation: ConversationRecord, binding: SessionBinding, origin?: string): Promise<ReportEmailContext | undefined> {
   return await gate?.required(binding.productId) ? reportEmailContext(conversation, binding, origin) : undefined;
 }
@@ -570,7 +575,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
-    ...(options.library ? { library: new RetryingLibrary(options.library) } : {}),
+    ...(options.library ? { library: withoutCodeProducts(new RetryingLibrary(options.library), options.accessGate) } : {}),
     ...(artifact ? { artifacts: artifact.lifecycle } : {}),
     titles: new ConversationTitles({
       repository: conversationRepository, history: conversationStore,
