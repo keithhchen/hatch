@@ -262,6 +262,7 @@ test("generating: the steps come from the Product's own map and the tools the Ru
   assert.deepEqual(status.steps?.map((step) => step.label), ["抓取网站", "测速", "撰写报告"]);
   assert.equal(status.step, -1, "nothing done yet: no invented progress");
   assert.equal(status.email, "a@b.co");
+  assert.ok(Math.abs(Date.now() - Date.parse(status.started_at!)) < 60_000, "started_at is the ISO time the Run began");
   world.tools = ["fetch_url", "bash"];
   assert.equal((await pages.status(CODE)).step, 0);
   world.tools = ["fetch_url", "page_speed", "write"];

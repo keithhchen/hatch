@@ -26,6 +26,8 @@ export type CodePageStatus = {
   step?: number;
   /** Generating only: where the report will be mailed (the Brief's email), as the buyer gave it. */
   email?: string;
+  /** Generating only: when the code was spent and the Run began (the conversation's creation, ISO), for the page's countdown. */
+  started_at?: string;
   report_url?: string;
 };
 
@@ -144,7 +146,7 @@ export class CodePages {
     const names = new Set(await this.deps.store.toolNames(conversation.id));
     const step = map ? map.steps.reduce((reached, entry, index) => entry.tools.some((tool) => names.has(tool)) ? index : reached, -1) : -1;
     const email = briefEmail(conversation.briefSnapshot);
-    return { state: "generating", ...who, ...(email ? { email } : {}), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
+    return { state: "generating", ...who, started_at: conversation.createdAt, ...(email ? { email } : {}), ...(map ? { steps: map.steps.map(({ id, label }) => ({ id, label })), step } : {}) };
   }
 
   /**

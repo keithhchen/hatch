@@ -110,5 +110,4 @@
 .code-page__brand { display: flex; justify-content: center; }
 .code-page__scan { display: grid; justify-items: center; gap: 12px; margin-top: 18px; padding: 18px; border-radius: 14px; background: var(--web-panel); text-align: center; color: var(--web-ink); }
 .code-page__scan p { margin: 0; }
-.code-page__scan svg { max-width: 100%; height: auto; border-radius: 8px; }
-.code-page__scan .code-page__note { margin: 0; word-break: break-all; }
+.code-page__scan img { border-radius: 8px; }

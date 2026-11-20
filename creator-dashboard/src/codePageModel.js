@@ -153,3 +153,16 @@ export const hookCopy = landing => ({
   hook: landing?.hook ?? landing?.description ?? landing?.name,
   cta: landing?.cta ?? "开始诊断"
 });
+
+/** How long a report takes, in minutes: the countdown starts here. */
+export const GENERATION_MINUTES = 10;
+
+/** The wait line: whole minutes left (10, 9 … 1) counted from `startedAt`; "即将完成" past the estimate; the static estimate when the start is unknown. */
+export function waitLine({ startedAt, now, email }) {
+  const to = `发送至${email ? ` ${email}` : "您的邮箱"}`;
+  const started = Date.parse(startedAt ?? "");
+  if (Number.isNaN(started)) return `您可以关闭此页面，约 ${GENERATION_MINUTES} 分钟后报告会${to}`;
+  const elapsed = (now - started) / 60000;
+  if (elapsed >= GENERATION_MINUTES) return `报告即将完成，完成后会${to}`;
+  return `您可以关闭此页面，约 ${Math.max(1, Math.ceil(GENERATION_MINUTES - elapsed))} 分钟后报告会${to}`;
+}
