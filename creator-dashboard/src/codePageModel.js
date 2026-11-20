@@ -87,6 +87,9 @@ export const stepStates = (steps, step) => (steps ?? []).map((entry, index) => (
 /** WeChat's in-app browser cannot pay by H5: the buyer is sent out of it to the phone's own browser. */
 export const inWeChat = userAgent => /MicroMessenger/i.test(userAgent ?? "");
 
+/** WeChat H5 pay only works in a phone browser. A desktop is a UA with no phone or tablet marker and no touch (an iPad posing as a Mac has touch). */
+export const isDesktop = ({ userAgent, maxTouchPoints = 0 } = {}) => Boolean(userAgent) && !/Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle/i.test(userAgent) && maxTouchPoints < 2;
+
 /** The answers of the intake: its fields' values by id. */
 export const intakeAnswers = (fields, values) => Object.fromEntries(fields.map(field => [field.id, String(values[field.id] ?? "").trim()]));
 export const missingField = (fields, values) => fields.find(field => field.required && !String(values[field.id] ?? "").trim());
