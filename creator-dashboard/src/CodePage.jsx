@@ -28,7 +28,7 @@ const WeChatPayMark = () => <svg className="code-page__wxmark" viewBox="0 0 24 2
 function Header({ product, website }) {
   const domain = siteDomain(website);
   return <header className="code-page__header">
-    <CoBrandLockup cap={20} />
+    <CoBrandLockup cap={17} />
     <div className="code-page__who">
       <strong>{product?.name ?? "出海官网获客诊断"}</strong>
       {domain ? <span className="code-page__site">{domain}</span> : null}
@@ -82,7 +82,7 @@ function Hook({ landing, reason, onStart, navigate }) {
   return <main className="code-page code-page--hook">
     {reason ? <p className="code-page__error" role="alert">{REFUSALS[reason]}</p> : null}
     <div className="code-page__intro">
-      <CoBrandLockup cap={28} />
+      <CoBrandLockup cap={24} />
       {hook ? <h1 className="code-page__hook">{hook}</h1> : null}
       <p className="code-page__by"><strong>{agentName}</strong></p>
     </div>

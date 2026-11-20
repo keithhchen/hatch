@@ -5,9 +5,9 @@ export const MSC_LOGO = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/br
 
 /**
  * MSC × Hatch (light): the two logos with a hairline between them. Sized by --cobrand-cap (the cap height both share), so it scales crisply;
- * MSC's "MSC" glyph is as tall as Hatch's cap and its subtitle hangs below.
+ * MSC is drawn smaller than Hatch so the two carry equal weight, centred on one line.
  */
-export default function CoBrandLockup({ cap = 22, className = "" }) {
+export default function CoBrandLockup({ cap = 18, className = "" }) {
   return <span className={`cobrand ${className}`.trim()} style={{ "--cobrand-cap": `${cap}px` }} role="img" aria-label="MSC × Hatch">
     <img className="cobrand__msc" src={MSC_LOGO} alt="" draggable="false" />
     <i className="cobrand__rule" aria-hidden />
