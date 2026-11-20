@@ -98,6 +98,7 @@ function Hook({ landing, reason, onStart, navigate }) {
       {entry === "code" ? <div className="code-page__entry">
         <CodeBox key="code" navigate={navigate} label="兑换码" action="打开" />
         <p className="code-page__hint">兑换码以 MSC 开头，一人一码</p>
+        <button type="button" className="code-page__link code-page__link--small" onClick={() => setEntry("event")}>如果您有活动码，点击这里</button>
       </div> : null}
     </div>
   </main>;
