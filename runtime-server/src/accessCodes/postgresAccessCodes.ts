@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
   code TEXT PRIMARY KEY,
   product_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'used', 'void')),
-  source TEXT NOT NULL DEFAULT 'free' CHECK (source IN ('free', 'paid')),
+  source TEXT NOT NULL DEFAULT 'free' CHECK (source IN ('free', 'paid', 'event')),
   out_trade_no TEXT UNIQUE,
   amount_fen INTEGER,
   email TEXT,
@@ -21,7 +21,14 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
 ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS name TEXT;
 ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
-ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS outcome TEXT CHECK (outcome IN ('ready', 'failed'));`;
+ALTER TABLE hatch_access_codes ADD COLUMN IF NOT EXISTS outcome TEXT CHECK (outcome IN ('ready', 'failed'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hatch_access_codes_source_check' AND pg_get_constraintdef(oid) LIKE '%event%') THEN
+    ALTER TABLE hatch_access_codes DROP CONSTRAINT IF EXISTS hatch_access_codes_source_check;
+    ALTER TABLE hatch_access_codes ADD CONSTRAINT hatch_access_codes_source_check CHECK (source IN ('free', 'paid', 'event'));
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;`;
 
 // MSC and six characters, free or bought. No 0, 1, I, L or O: a code is read and typed by hand.
 const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -51,6 +58,16 @@ export class PostgresAccessCodes implements AccessCodes {
     throw new Error("Could not draw a free access code.");
   }
 
+  async issueFree(productId: string): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const code = newCode();
+      const inserted = await this.db.query(
+        `INSERT INTO hatch_access_codes (code, product_id, status, source) VALUES ($1, $2, 'active', 'free') ON CONFLICT DO NOTHING RETURNING code`, [code, productId]);
+      if (inserted.rows.length) return code;
+    }
+    throw new Error("Could not draw a free access code.");
+  }
+
   async activatePaid(input: { outTradeNo: string; transactionId: string; amountFen: number }): Promise<Activation | undefined> {
     const won = await this.db.query<Row>(
       `UPDATE hatch_access_codes SET status = 'active', transaction_id = $2, paid_at = now()
@@ -65,7 +82,7 @@ export class PostgresAccessCodes implements AccessCodes {
     const code = normalize(input.code);
     const won = await this.db.query(
       `UPDATE hatch_access_codes SET status = 'used', used_at = now(), used_by_conversation_id = $3
-       WHERE code = $1 AND product_id = $2 AND status = 'active' RETURNING code`,
+       WHERE code = $1 AND product_id = $2 AND status = 'active' AND source <> 'event' RETURNING code`,
       [code, input.productId, input.conversationId]);
     if (won.rows.length) return { ok: true };
     // Lost: read why. A code used by this very conversation is the same redeem repeated.
@@ -73,6 +90,7 @@ export class PostgresAccessCodes implements AccessCodes {
     if (!row || row.status === "void") return { ok: false, reason: "not_found" };
     if (row.product_id !== input.productId) return { ok: false, reason: "wrong_product" };
     if (row.status === "used") return row.used_by_conversation_id === input.conversationId ? { ok: true } : { ok: false, reason: "used" };
+    if (row.source === "event") return { ok: false, reason: "used" };
     return { ok: false, reason: "not_paid" };
   }
 

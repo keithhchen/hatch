@@ -6,8 +6,8 @@ import { ChatError } from "./chat/principal.js";
 /** A Product whose buyers come in by an access code and a page of their own (/c/<code>), never the chat: switched on per Product by a `hatch_product_capabilities` row. */
 export const ACCESS_CODE_CAPABILITY = "access_code";
 
-/** What the gate needs of the codes (see accessCodes/accessCodes.ts): spend one for a conversation, and read where one stands. */
-export type GateCodes = Pick<AccessCodes, "redeem" | "lookup">;
+/** What the gate needs of the codes (see accessCodes/accessCodes.ts): spend one for a conversation, read where one stands, and issue one for an event code. */
+export type GateCodes = Pick<AccessCodes, "redeem" | "lookup"> & Partial<Pick<AccessCodes, "issueFree">>;
 
 export const REFUSALS = {
   not_found: "兑换码不存在", not_paid: "尚未支付", used: "已被使用", wrong_product: "不适用于此产品"

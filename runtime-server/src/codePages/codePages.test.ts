@@ -46,7 +46,8 @@ async function setup(options: { capable?: boolean; codes?: Pick<AccessCodes, "re
   const codes = new MemoryAccessCodes({
     MSC123456: { status: "active", productId: PRODUCT, conversationId: null },
     MSC000002: { status: "pending", productId: PRODUCT, conversationId: null },
-    MSC000009: { status: "active", productId: "another-product", conversationId: null }
+    MSC000009: { status: "active", productId: "another-product", conversationId: null },
+    CKGSB: { status: "active", source: "event", productId: PRODUCT, conversationId: null }
   });
   const world = { report: undefined as string | undefined, tools: [] as string[], failStarts: 0, starts: 0 };
   // Run ids sort in the order they are made, as the real ones' creation times do.
@@ -128,6 +129,26 @@ test("intake submit: the code is spent and the Run starts, once, even for a doub
   const runs = await repository.listRuns(conversation.id);
   assert.equal(runs.length, 1);
   assert.equal(runs[0]!.clientMessageId, codeIntakeKey(CODE));
+});
+
+test("event code: shared by a room, never spent; each intake issues a free code of its own and starts its Run", async () => {
+  const { pages, codes, world, conversationOf } = await setup();
+  assert.equal((await pages.status("ckgsb")).state, "intake");
+  await assert.rejects(pages.intake("CKGSB", { ...answers, email: "" }), /email|邮箱/i);
+  assert.equal(codes.issued, 0, "a bad answer issues nothing");
+  const first = await pages.intake("ckgsb", answers);
+  const second = await pages.intake("CKGSB", { ...answers, name: "B" });
+  assert.deepEqual([first.code, second.code], ["MSCFREE1", "MSCFREE2"]);
+  assert.equal(first.state, "generating");
+  assert.equal(world.starts, 2);
+  assert.equal(codes.rows.MSCFREE1!.status, "used");
+  assert.ok(await conversationOf("MSCFREE2"));
+  assert.equal(codes.rows.CKGSB!.status, "active", "the event code is never spent");
+  assert.equal((await pages.status("CKGSB")).state, "intake");
+  assert.equal((await codes.redeem({ code: "CKGSB", productId: PRODUCT, conversationId: "conv_x" })).ok, false);
+  codes.rows.CKGSB!.status = "void";
+  await assert.rejects(pages.intake("CKGSB", answers), /兑换码不存在/);
+  assert.equal(codes.issued, 2);
 });
 
 test("50 simultaneous intakes all start their Run: nothing caps concurrent Runs", async () => {

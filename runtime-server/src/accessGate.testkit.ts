@@ -21,9 +21,9 @@ export const auditBrief = (code: string) => createBriefSnapshot(AUDIT_SPEC, [
   { field_id: "code", value: code }, { field_id: "website", value: "example.com" }
 ]);
 
-type Row = { status: "pending" | "active" | "used" | "void"; productId: string; conversationId: string | null; attempts?: number; nextAttemptAt?: number; outcome?: CodeOutcome };
+type Row = { status: "pending" | "active" | "used" | "void"; source?: "free" | "paid" | "event"; productId: string; conversationId: string | null; attempts?: number; nextAttemptAt?: number; outcome?: CodeOutcome };
 /** Test-only AccessCodes with the real adapter's rules: the Postgres one lives in accessCodes/postgresAccessCodes.ts. */
-export class MemoryAccessCodes implements Pick<AccessCodes, "redeem" | "lookup" | "due" | "claim" | "conclude"> {
+export class MemoryAccessCodes implements Pick<AccessCodes, "redeem" | "lookup" | "due" | "claim" | "conclude" | "issueFree"> {
   redeems = 0;
   private readonly usedAt = new Map<string, number>();
   constructor(readonly rows: Record<string, Row>) {}
@@ -34,10 +34,13 @@ export class MemoryAccessCodes implements Pick<AccessCodes, "redeem" | "lookup" 
     if (row.productId !== productId) return { ok: false, reason: "wrong_product" };
     if (row.status === "pending" || row.status === "void") return { ok: false, reason: "not_paid" };
     if (row.status === "used") return row.conversationId === conversationId ? { ok: true } : { ok: false, reason: "used" };
+    if (row.source === "event") return { ok: false, reason: "used" };
     row.status = "used"; row.conversationId = conversationId; this.usedAt.set(code.trim().toUpperCase(), Date.now());
     return { ok: true };
   }
-  async lookup(code: string) { const row = this.rows[code.trim().toUpperCase()]; return row ? { status: row.status, productId: row.productId, conversationId: row.conversationId, outcome: row.outcome ?? null, source: "paid" as const } : null; }
+  async lookup(code: string) { const row = this.rows[code.trim().toUpperCase()]; return row ? { status: row.status, productId: row.productId, conversationId: row.conversationId, outcome: row.outcome ?? null, source: row.source ?? "paid" } : null; }
+  issued = 0;
+  async issueFree(productId: string) { const code = `MSCFREE${++this.issued}`; this.rows[code] = { status: "active", source: "free", productId, conversationId: null }; return code; }
   /** The real adapter's rules, in memory: one claim per (code, attempts), a fresh spend waits 15 s for its own intake. */
   async due(now: Date, limit: number): Promise<DueCode[]> {
     return Object.entries(this.rows)

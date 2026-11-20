@@ -31,6 +31,8 @@ export type CodePageStatus = {
   /** Generating only: when the code was spent and the Run began (the conversation's creation, ISO), for the page's countdown. */
   started_at?: string;
   report_url?: string;
+  /** Intake answer under an event code only: the new code the person was issued, whose page is theirs from now on. */
+  code?: string;
 };
 
 /** The Product's own map from what its Run does to steps a person understands: `runtime/progress.json` in its Corpus. */
@@ -54,6 +56,14 @@ export async function readLandingCopy(corpusRoot: string | undefined): Promise<L
     const text = (key: string) => typeof parsed[key] === "string" && (parsed[key] as string).trim() ? { [key]: (parsed[key] as string).trim() } : {};
     return { ...text("agent_name"), ...text("hook"), ...text("cta") };
   } catch { return undefined; }
+}
+
+/** The Brief of the intake's answers, with the code in its access code field; a bad answer is the buyer's to fix. */
+function briefOf(spec: BriefSpec, answers: Record<string, unknown>, code: string) {
+  const codeField = spec.fields.find((field) => field.type === "access_code");
+  const given = spec.fields.filter((field) => field.type !== "access_code").map((field) => ({ field_id: field.id, value: typeof answers[field.id] === "string" ? answers[field.id] as string : "" }));
+  try { return createBriefSnapshot(spec, [...given, ...codeField ? [{ field_id: codeField.id, value: code }] : []]); }
+  catch (error) { throw error instanceof BriefValidationError ? new ChatError("invalid_brief", error.message, 400) : error; }
 }
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -165,11 +175,16 @@ export class CodePages {
     const { resolved } = await this.resolved(held.productId);
     const spec = resolved.corpus.product.brief_spec as BriefSpec | undefined;
     if (!spec) throw new ChatError("brief_unavailable", "This Product has no Brief.", 409);
-    const codeField = spec.fields.find((field) => field.type === "access_code");
-    const given = spec.fields.filter((field) => field.type !== "access_code").map((field) => ({ field_id: field.id, value: typeof answers[field.id] === "string" ? answers[field.id] as string : "" }));
-    let brief;
-    try { brief = createBriefSnapshot(spec, [...given, ...codeField ? [{ field_id: codeField.id, value: code }] : []]); }
-    catch (error) { throw error instanceof BriefValidationError ? new ChatError("invalid_brief", error.message, 400) : error; }
+    if (held.source === "event") {
+      // An event code is shared by a room: it is never spent; the answers are checked first, then the person gets a free code of their own.
+      if (held.status !== "active") throw new ChatError("access_code_not_found", "兑换码不存在", 404);
+      briefOf(spec, answers, code);
+      const issue = gate.codes().issueFree;
+      if (!issue) throw new ChatError("access_codes_unavailable", "兑换码服务暂不可用", 503);
+      const own = await issue.call(gate.codes(), held.productId);
+      return { ...await this.intake(own, answers), code: own };
+    }
+    const brief = briefOf(spec, answers, code);
     const scope = { creatorId: resolved.corpus.creator.id, userId: codeOwner(code), productId: held.productId, corpusDigest: resolved.digest, explicit: true };
     const id = durableConversationId(scope, codeConversationId(code));
     await gate.admit(held.productId, id, brief);

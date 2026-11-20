@@ -162,7 +162,7 @@ function Landing({ request, navigate, reason }) {
  * The Brief's own fields, as the Product defines them; the code is the page's address, so it is not asked. Answers given on the product
  * page before paying are submitted here by themselves, once; without them (or with some missing) the form is shown for the buyer to fill.
  */
-function Intake({ status, code, request, onStatus }) {
+function Intake({ status, code, request, onStatus, navigate }) {
   const [values, setValues] = useState({});
   const [error, setError] = useState(null);
   const [sending, setSending] = useState(false);
@@ -170,7 +170,12 @@ function Intake({ status, code, request, onStatus }) {
   const send = async answers => {
     setSending(true);
     setError(null);
-    try { onStatus(await request(`${API}/${encodeURIComponent(code)}/intake`, { method: "POST", body: JSON.stringify(intakeAnswers(status.fields, answers)) })); }
+    try {
+      const next = await request(`${API}/${encodeURIComponent(code)}/intake`, { method: "POST", body: JSON.stringify(intakeAnswers(status.fields, answers)) });
+      // Under an event code the person was issued a code of their own: its page is theirs from now on.
+      if (next?.code && next.code !== code) navigate(CodeRoute.codePath(next.code), { replace: true });
+      else onStatus(next);
+    }
     catch (cause) { setError(cause?.message ?? "提交失败，请重试"); setSending(false); }
   };
   useEffect(() => {
@@ -243,7 +248,7 @@ function CodePageBody({ code, request, navigate }) {
   if (!status) return <Card><div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /></div></Card>;
   switch (status.state) {
     case "entry": return <Landing request={request} navigate={navigate} reason={status.reason} />;
-    case "intake": return <Intake status={status} code={code} request={request} onStatus={next => poller.current.accept(next)} />;
+    case "intake": return <Intake status={status} code={code} request={request} navigate={navigate} onStatus={next => poller.current.accept(next)} />;
     case "generating": return <Generating status={status} navigate={navigate} />;
     case "ready": return <Card><Header product={status.product} website={status.website} /><div className="code-page__done">
       <div className="code-page__success"><span className="code-page__success-mark"><Check size={28} strokeWidth={3} aria-hidden /></span><p role="status">{readyLine(status.name)}</p></div>
