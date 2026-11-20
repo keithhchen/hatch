@@ -22,16 +22,17 @@ async function serve(withCorpora = true) {
 }
 const q = (extra: Record<string, string> = {}) => `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK, ...extra })}`;
 
-test("pay page shows logo, product, expert, order lines, price and email; site and name are escaped and validated", async () => {
+test("pay page shows the MSC × Hatch lockup, product, order lines, price and email; site and name are escaped and validated", async () => {
   const s = await serve();
   try {
     const res = await fetch(s.base + q({ site: "https://www.Example.com/path?x=1", name: "<b>陈</b>" }));
     const html = await res.text();
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("referrer-policy"), "origin");
-    assert.match(html, /hatch-downloads\.oss-cn-shanghai\.aliyuncs\.com\/brand\/hatch-lockup\.png/);
+    assert.match(html, /hatch-downloads\.oss-cn-shanghai\.aliyuncs\.com\/brand\/cobrand\/msc-x-hatch-light\.png/);
     assert.match(html, /出海官网获客诊断/);
-    assert.match(html, /MSC咨询/);
+    assert.match(html, /alt="MSC × Hatch"/);
+    assert.doesNotMatch(html, /MSC咨询/, "the lockup carries the expert");
     assert.match(html, /一份说清官网为什么没有询盘的诊断/);
     assert.match(html, /<dd>example\.com<\/dd>/, "the site is a bare domain");
     assert.match(html, /<dd>&lt;b&gt;陈&lt;\/b&gt;<\/dd>/, "the name is escaped");

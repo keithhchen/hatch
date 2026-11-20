@@ -19,7 +19,7 @@ export type HatchPayDeps = {
   wechat: WeChatPay;
   openids: OpenIdResolver;
   mailer: CodeMailer;
-  /** Where the checkout card reads the Product's name, description and expert from. */
+  /** Where the checkout card reads the Product's name and description from. */
   corpora?: AgentCorpusResolverLike;
   /** `https://anyteach.cn/hatch-pay`: where the merchant's pages are reached, whatever host Runtime sits behind. */
   publicBase: string;
@@ -44,15 +44,14 @@ const PAGE_HEAD = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"
 <style>body{font:16px/1.6 system-ui,sans-serif;margin:0;padding:64px 24px;text-align:center}.price{font-size:44px;margin:0 0 32px}.btn{display:inline-block;font:inherit;padding:12px 40px;border:0;border-radius:8px;background:#111;color:#fff;text-decoration:none}.btn:disabled{opacity:.5}.alt{display:block;margin-top:20px;color:#555}.code{font:700 32px ui-monospace,monospace;letter-spacing:4px}#err{color:#b00020;margin-top:16px}</style></head><body>`;
 const GUIDE = `<svg width="72" height="72" viewBox="0 0 72 72" style="position:fixed;top:12px;right:16px" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 58C20 36 38 22 58 14M40 12l18 2-4 18"/></svg><p style="margin-top:120px;font-size:20px">请点击右上角 ··· 选择『在浏览器打开』</p>`;
 const page = (body: string, script = "") => `${PAGE_HEAD}${body}${script ? `<script>${script}</script>` : ""}</body></html>`;
-const LOGO = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/hatch-lockup.png";
+const LOGO = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/cobrand/msc-x-hatch-light.png";
 const CHECKOUT_CSS = `<style>
 :root{--ink:#111315;--bg:#faf8f4;--line:#e8e4dc;--mute:#6b6f73}
 body{background:var(--bg);color:var(--ink);padding:28px 16px;text-align:left}
 main.co{max-width:420px;margin:0 auto}
-.co .logo{display:block;width:96px;height:auto;margin:0 auto 20px}
+.co .logo{display:block;width:260px;max-width:80%;height:auto;margin:0 auto 24px}
 .co .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 1px 2px rgba(17,19,21,.04)}
 .co h1{font-size:19px;line-height:1.35;margin:0}
-.co .by{margin:4px 0 0;color:var(--mute);font-size:14px}
 .co .desc{margin:10px 0 0;font-size:14px;color:#3a3d40}
 .co dl{margin:16px 0 0;border-top:1px solid var(--line)}
 .co dl div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
@@ -151,12 +150,11 @@ export class HatchPay {
   }
 
   /** What the card says about the Product; whatever the corpus cannot tell is left out, never invented. */
-  private async productInfo(productId: string): Promise<{ name?: string; description?: string; expert?: string }> {
+  private async productInfo(productId: string): Promise<{ name?: string; description?: string }> {
     try {
       const resolved = await this.deps.corpora?.resolveByProduct(productId);
       if (!resolved) return {};
-      const expert = resolved.corpus.creator.name;
-      return { name: resolved.corpus.product.name, description: resolved.corpus.product.description, ...expert && expert !== "Expert" ? { expert } : {} };
+      return { name: resolved.corpus.product.name, description: resolved.corpus.product.description };
     } catch (error) { log.warn("hatch_pay_corpus_unavailable", { productId, error }); return {}; }
   }
 
@@ -164,8 +162,8 @@ export class HatchPay {
     const yuan = (this.deps.priceFen / 100).toFixed(2).replace(/\.?0+$/, "");
     const info = await this.productInfo(ask.product), e = escapeHtml;
     const row = (label: string, value?: string) => value ? `<div><dt>${label}</dt><dd>${e(value)}</dd></div>` : "";
-    const head = `${info.name ? `<h1>${e(info.name)}</h1>` : ""}${info.expert ? `<p class="by">${e(info.expert)}</p>` : ""}${info.description ? `<p class="desc">${e(info.description)}</p>` : ""}`;
-    return page(`${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="96" alt="Hatch"><div class="card">${head}<dl>${row("网站", order.site)}${row("姓名", order.name)}${row("兑换码发送至", ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>支付</button><div id="err"></div></div></main>`, `
+    const head = `${info.name ? `<h1>${e(info.name)}</h1>` : ""}${info.description ? `<p class="desc">${e(info.description)}</p>` : ""}`;
+    return page(`${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="260" height="48" alt="MSC × Hatch"><div class="card">${head}<dl>${row("网站", order.site)}${row("姓名", order.name)}${row("兑换码发送至", ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>支付</button><div id="err"></div></div></main>`, `
 const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err');
 const fail=m=>{err.textContent=m;btn.disabled=false;btn.classList.remove('busy')};
 const go=async()=>{btn.disabled=true;btn.classList.add('busy');err.textContent='';

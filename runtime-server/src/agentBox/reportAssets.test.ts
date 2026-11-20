@@ -83,6 +83,8 @@ test("report.js shows the content at once: no loader is built, and an old page's
     assert.equal(await fresh.evaluate(() => document.body.classList.contains("ready")), true);
     assert.equal(await fresh.locator(".ring strong").isVisible(), true);
     assert.equal(await fresh.locator("#journey").isVisible(), true);
+    assert.equal(await fresh.locator("footer img").getAttribute("src"), "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/cobrand/msc-x-hatch-light.png", "the footer carries the MSC × Hatch lockup");
+    assert.match(await fresh.locator("footer").innerText(), /出海官网获客诊断[\s\S]*流失人数与询盘数为模型估算/);
     assert.equal(await fresh.evaluate(() => typeof (window as unknown as { reportFinish: unknown }).reportFinish), "function");
     await fresh.evaluate(() => (window as unknown as { reportFinish: () => void }).reportFinish());
     assert.equal(await fresh.locator("main>section.visible").count(), 5);

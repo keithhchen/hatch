@@ -103,7 +103,7 @@
     `<summary>${NAMES[i]} · ${g.reduce((a, x) => a + x[2], 0)}/${g.length * 2}</summary>${g.map((x, k) => `<div class="check"><b>${x[2]}/2</b><div><strong>${k + 1}. ${esc(x[1])}</strong><span>${esc(x[3])} <small>（${esc(x[4])}）</small></span></div></div>`).join("")}`)));
 
   // 10 footer: fixed content
-  html($("footer"), "<span>MSC咨询 · 出海官网获客诊断</span><small>流失人数与询盘数为模型估算</small>");
+  html($("footer"), `<span style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><img src="https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/cobrand/msc-x-hatch-light.png" width="200" height="37" alt="MSC × Hatch" style="display:block;width:200px;max-width:100%;height:auto"><span>出海官网获客诊断</span></span><small>流失人数与询盘数为模型估算</small>`);
 
   // scroll reveal: CSS draws dots, radar and bars once their section is .visible
   const sections = [...document.querySelectorAll("main>section:not(.hero)")];
