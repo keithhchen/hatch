@@ -60,10 +60,11 @@
 .code-page__step--done { color: var(--web-body); }
 .code-page__dot { width: 8px; height: 8px; margin: 0 8px; flex: none; border-radius: 50%; background: var(--web-rule); }
 .code-page__header { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px solid var(--web-rule); }
-.code-page__who { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.code-page__who { display: grid; width: 100%; min-width: 0; gap: 2px; }
 .code-page__who strong { color: var(--web-ink); font-size: 17px; line-height: 1.3; }
 .code-page__who span { color: var(--web-muted); font-size: 13px; }
-.code-page__site { max-width: 40%; padding: 4px 10px; border-radius: 999px; overflow: hidden; color: var(--web-body); background: var(--web-panel); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.code-page__site { color: var(--web-body); font-size: 13px; overflow-wrap: anywhere; }
+.code-page__generating { margin: 0; color: var(--web-ink); font-size: 15px; }
 .code-page__wait { display: grid; }
 .code-page__spinner { width: 16px; height: 16px; margin: 0 4px; flex: none; box-sizing: border-box; border: 2px solid var(--web-yolk-soft); border-top-color: var(--web-yolk); border-radius: 50%; animation: code-page-spin .8s linear infinite; }
 .code-page__step > svg { flex: none; margin: 0 4px; color: var(--web-pass); }
@@ -107,4 +108,7 @@
 .cobrand { color: #111315; }
 .cobrand__hatch { display: block; height: calc(var(--cobrand-cap) * 1.09); width: auto; margin-top: calc(var(--cobrand-cap) * -.02); }
 .code-page__brand { display: flex; justify-content: center; }
-.code-page__headline { display: flex; align-items: center; gap: 12px; width: 100%; }
+.code-page__scan { display: grid; justify-items: center; gap: 12px; margin-top: 18px; padding: 18px; border-radius: 14px; background: var(--web-panel); text-align: center; color: var(--web-ink); }
+.code-page__scan p { margin: 0; }
+.code-page__scan svg { max-width: 100%; height: auto; border-radius: 8px; }
+.code-page__scan .code-page__note { margin: 0; word-break: break-all; }

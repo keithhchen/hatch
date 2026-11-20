@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check } from "lucide-react";
 import { WebChatEgg } from "./webChatGate.jsx";
 import CoBrandLockup from "./CoBrandLockup.jsx";
-import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, advance, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, typedCode, visibleSteps } from "./codePageModel.js";
+import { qrMatrix, qrPath, qrSide } from "./telegramBot.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -27,11 +28,22 @@ function Header({ product, website }) {
   const domain = siteDomain(website);
   return <header className="code-page__header">
     <CoBrandLockup cap={20} />
-    <div className="code-page__headline">
-      <div className="code-page__who"><strong>{product?.name ?? "出海官网获客诊断"}</strong></div>
+    <div className="code-page__who">
+      <strong>{product?.name ?? "出海官网获客诊断"}</strong>
       {domain ? <span className="code-page__site">{domain}</span> : null}
     </div>
   </header>;
+}
+
+/** Desktop browsers cannot pay by WeChat H5: the buyer scans this page's address with a phone and pays there. */
+function ScanToPay({ url }) {
+  const matrix = qrMatrix(url);
+  const side = qrSide(matrix);
+  return <div className="code-page__scan" role="status">
+    <p><strong>请用手机扫码打开，完成支付</strong></p>
+    <svg viewBox={`0 0 ${side} ${side}`} width="200" height="200" role="img" aria-label="当前页面二维码" shapeRendering="crispEdges"><rect width={side} height={side} fill="#fff" /><path d={qrPath(matrix)} fill="#111315" /></svg>
+    <p className="code-page__note">{url}</p>
+  </div>;
 }
 
 /** One field: the label above, the box below. A Brief field of type text is a textarea; the rest are one line. */
@@ -114,13 +126,17 @@ function Landing({ request, navigate, reason }) {
     go(result.step);
   };
   const ready = Boolean(landing?.product_id && landing.price_fen);
+  const [scan, setScan] = useState(false);
   const pay = () => {
+    if (isDesktop({ userAgent: window.navigator.userAgent, maxTouchPoints: window.navigator.maxTouchPoints })) { setScan(true); return; }
     PendingIntake.save(window.localStorage, values);
     window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name }));
   };
   if (failed) return <Card><p className="code-page__error" role="alert">暂时无法打开，请稍后再试</p></Card>;
   if (step === "hook") return <Hook landing={landing} reason={reason} onStart={next} navigate={navigate} />;
+  const header = <Header product={landing} website={step === "pay" ? values.website : undefined} />;
   if (step === "form") return <Card>
+    {header}
     <BackArrow onClick={back} />
     <form onSubmit={next} noValidate>
       {BUYER_FIELDS.map(field => <Field key={field.id} field={field} value={values[field.id] ?? ""} onChange={value => { setValues(current => ({ ...current, [field.id]: value })); setError(null); }} />)}
@@ -129,6 +145,7 @@ function Landing({ request, navigate, reason }) {
     </form>
   </Card>;
   return <Card>
+    {header}
     <BackArrow onClick={back} />
     <dl className="code-page__order">
       <div><dt>产品</dt><dd>{landing?.name}</dd></div>
@@ -139,6 +156,7 @@ function Landing({ request, navigate, reason }) {
     </dl>
     {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
     <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready} onClick={pay}><WeChatPayMark /><span>微信支付 {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
+    {scan ? <ScanToPay url={`${window.location.origin}${window.location.pathname}`} /> : null}
   </Card>;
 }
 
@@ -189,7 +207,7 @@ function Generating({ status, navigate }) {
   useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), FEED_MS); return () => clearInterval(timer); }, []);
   const lines = feedWindow(feedPool({ steps, step: status.step }), tick);
   return <Card><Header product={status.product} website={status.website} /><div className="code-page__wait">
-    <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>报告正在生成</span></div>
+    <p className="code-page__generating" role="status">报告正在生成</p>
     {steps.length ? <ol className="code-page__steps">{steps.map(step => <li key={step.id} className={`code-page__step code-page__step--${step.state}`} aria-current={step.state === "now" ? "step" : undefined}>
       {step.state === "done" ? <Check size={16} aria-hidden /> : step.state === "now" ? <span className="code-page__spinner" aria-hidden /> : <span className="code-page__dot" aria-hidden />}
       <span>{step.label}</span>
