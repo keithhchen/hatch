@@ -103,7 +103,7 @@
 
 /* MSC × Hatch lockup: --cobrand-cap is the cap height MSC's glyph and Hatch's letters share. */
 .cobrand { --cobrand-cap: 22px; display: inline-flex; align-items: flex-start; gap: calc(var(--cobrand-cap) * .62); max-width: 100%; line-height: 0; }
-.cobrand__msc { display: block; height: calc(var(--cobrand-cap) * 1.531); width: auto; min-width: 0; }
+.cobrand__msc { display: block; height: calc(var(--cobrand-cap) * 1.225); margin-top: calc(var(--cobrand-cap) * .1); width: auto; min-width: 0; }
 .cobrand__rule { display: block; flex: none; width: 1px; height: var(--cobrand-cap); background: currentColor; opacity: .3; }
 .cobrand { color: #111315; }
 .cobrand__hatch { display: block; height: calc(var(--cobrand-cap) * 1.09); width: auto; margin-top: calc(var(--cobrand-cap) * -.02); }
