@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LOCALES, useLocale } from "../locale.jsx";
 import { TrialScene } from "./TrialScenes";
+import { Credentials } from "./Credentials";
 import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landingCopy";
 
 const SHOW_PRICING = false;
@@ -724,6 +725,7 @@ export default function HatchPage() {
         <p className="hero-body hero-manifesto">{t.heroManifesto[0]}<strong>{t.heroManifesto[1][0]}<mark>{t.heroManifesto[1][1]}</mark>{t.heroManifesto[1][2]}</strong></p>
         <FieldPicker t={t} value={field} onChange={setField} />
         <p className="hero-body hero-after">{t.heroBody}</p>
+        <Credentials label={t.selectedFor} />
       </section>
 
       <Story key={`${lang}-${field}`} t={t} s={s} />
