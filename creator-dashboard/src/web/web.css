@@ -63,7 +63,7 @@ button { font: inherit; color: inherit; }
 .hero-manifesto strong { display: block; margin-top: 6px; color: var(--ink); font-weight: 700; }
 .hero-manifesto mark { padding: 0 2px; background: linear-gradient(transparent 58%, var(--yolk) 58%, var(--yolk) 92%, transparent 92%); color: inherit; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .hero-after { margin-top: 32px; }
-.credentials { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px 32px; margin-top: 40px; color: var(--muted); font-size: 16px; font-weight: 600; opacity: 0.8; }
+.credentials { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px 32px; margin-top: 40px; font-size: 16px; font-weight: 600; }
 .credentials-label { flex-basis: 100%; text-align: center; font-size: 13px; font-weight: 700; }
 .credential { display: inline-flex; align-items: center; gap: 8px; }
 
