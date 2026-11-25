@@ -728,6 +728,10 @@ export default function HatchPage() {
         <Credentials label={t.selectedFor} />
       </section>
 
+      <section className="demo">
+        <video key={lang} className="demo-video" controls playsInline preload="metadata" poster="/assets/web/demo-poster.jpg" src={`/assets/web/demo-16x9-${lang === "en" ? "none" : lang}.mp4`} />
+      </section>
+
       <Story key={`${lang}-${field}`} t={t} s={s} />
 
       <Reveal key={`reveal-${lang}`} segments={t.revealSegments} />
