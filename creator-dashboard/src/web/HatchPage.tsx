@@ -8,6 +8,8 @@ import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landi
 
 const SHOW_PRICING = false;
 const LOCKUP = "/assets/web/hatch-lockup.svg";
+// Videos live on OSS in production (see .github/workflows/web.yml); locally they are served from /assets/web.
+const MEDIA_BASE = import.meta.env?.VITE_HATCH_WEB_MEDIA_BASE_URL || "/assets/web";
 const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
 function Egg({ size = 22 }: { size?: number }) {
   return (
@@ -729,7 +731,7 @@ export default function HatchPage() {
       </section>
 
       <section className="demo">
-        <video key={lang} className="demo-video" controls playsInline preload="metadata" poster="/assets/web/demo-poster.jpg" src={`/assets/web/demo-16x9-${lang === "en" ? "none" : lang}.mp4`} />
+        <video key={lang} className="demo-video" controls playsInline preload="metadata" poster="/assets/web/demo-poster.jpg" src={`${MEDIA_BASE}/demo-16x9-${lang === "en" ? "none" : lang}.mp4`} />
       </section>
 
       <Story key={`${lang}-${field}`} t={t} s={s} />
