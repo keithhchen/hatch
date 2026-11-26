@@ -6,6 +6,8 @@ export interface WeChatPay {
   /** False until the keys that verify WeChat's signatures are loaded: the pay routes answer 503 meanwhile. */
   ready(): boolean;
   createH5Order(order: OrderInput & { payerIp: string }): Promise<{ h5Url: string }>;
+  /** Scan-to-pay (Native, mode 2): `codeUrl` is what the QR code encodes. */
+  createNativeOrder(order: OrderInput): Promise<{ codeUrl: string }>;
   createJsapiOrder(order: OrderInput & { openid: string }): Promise<{ prepayId: string }>;
   queryOrder(outTradeNo: string): Promise<OrderState>;
   /** The parameters of `WeixinJSBridge.invoke('getBrandWCPayRequest', …)`, signed for this prepay id. */
@@ -141,12 +143,16 @@ export class WeChatPayV3 implements WeChatPay {
       .then(body => ({ h5Url: String(body.h5_url) }));
   }
 
+  createNativeOrder(order: OrderInput) {
+    return this.createOrder("native", order, {}).then(body => ({ codeUrl: String(body.code_url) }));
+  }
+
   createJsapiOrder(order: OrderInput & { openid: string }) {
     return this.createOrder("jsapi", order, { payer: { openid: order.openid } })
       .then(body => ({ prepayId: String(body.prepay_id) }));
   }
 
-  private createOrder(kind: "h5" | "jsapi", order: OrderInput, extra: Record<string, unknown>) {
+  private createOrder(kind: "h5" | "jsapi" | "native", order: OrderInput, extra: Record<string, unknown>) {
     return this.call("POST", `/v3/pay/transactions/${kind}`, {
       appid: this.config.appid, mchid: this.config.mchid, description: order.description, out_trade_no: order.outTradeNo,
       time_expire: rfc3339Beijing(order.expiresAt), notify_url: this.config.notifyUrl,

@@ -7,7 +7,7 @@ import type { Locale } from "../locale.js";
 
 export type AccessCodeStatus = "pending" | "active" | "used" | "void";
 export type AccessCodeSource = "free" | "paid" | "event";
-export type PayChannel = "jsapi" | "h5";
+export type PayChannel = "jsapi" | "h5" | "native";
 
 /** How a spent code's conversation ended: a published report, or a visible failure. Absent while it is still being worked on. */
 export type CodeOutcome = "ready" | "failed";

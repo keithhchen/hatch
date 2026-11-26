@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect, landingResponse } from "../server.mjs";
-import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, isDesktop, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash, fieldLabel, pickText } from "./codePageModel.js";
+import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash, fieldLabel, pickText } from "./codePageModel.js";
 import { codePageT } from "./codePageI18n.js";
 
 const t = (key, values) => codePageT("zh", key, values);
@@ -31,18 +31,6 @@ test("WeChat's in-app browser is told by its user agent; phone browsers are not"
   assert.equal(inWeChat("Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1"), false);
   assert.equal(inWeChat("Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36"), false);
   assert.equal(inWeChat(undefined), false);
-});
-
-test("desktop browsers are told by user agent and touch; phones and tablets are not", () => {
-  const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17 Safari/605.1.15";
-  assert.equal(isDesktop({ userAgent: mac, maxTouchPoints: 0 }), true);
-  assert.equal(isDesktop({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36" }), true);
-  assert.equal(isDesktop({ userAgent: mac, maxTouchPoints: 5 }), false, "iPadOS posing as a Mac");
-  assert.equal(isDesktop({ userAgent: "Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1", maxTouchPoints: 5 }), false);
-  assert.equal(isDesktop({ userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel) Chrome/120 Mobile Safari/537.36" }), false);
-  assert.equal(isDesktop({ userAgent: "Mozilla/5.0 (Linux; Android 13; SM-X700) Chrome/120 Safari/537.36" }), false, "Android tablet without Mobile");
-  assert.equal(isDesktop({ userAgent: "Mozilla/5.0 (iPad) Version/17 Safari/604.1" }), false);
-  assert.equal(isDesktop({}), false);
 });
 
 test("a typed code is trimmed and upper-cased, or it is not a code", () => {

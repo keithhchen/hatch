@@ -5,7 +5,7 @@ import CoBrandLockup from "./CoBrandLockup.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import { codePageErrorText, codePageT } from "./codePageI18n.js";
-import { BUYER_FIELDS, CodeRoute, advance, fieldLabel, pickText, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, advance, fieldLabel, pickText, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -13,7 +13,6 @@ import "./codePage.css";
 const POLL_MS = 8000;
 const API = "/v1/web-chat/code";
 const FEED_MS = 2400;
-const SCAN_QR = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/cobrand/gethatchapp-c-qr.jpg";
 const WAIT_TICK_MS = 30000;
 const INPUT_TYPES = { email: "email", tel: "tel", url: "url" };
 
@@ -47,15 +46,6 @@ function Header({ product, website }) {
       {domain ? <span className="code-page__site">{domain}</span> : null}
     </div>
   </header>;
-}
-
-/** Desktop browsers cannot pay by WeChat H5: the buyer scans this static code (it opens gethatchapp.com/c) with a phone and pays there. */
-function ScanToPay() {
-  const { t } = useCopy();
-  return <div className="code-page__scan" role="status">
-    <p><strong>{t("scanTitle")}</strong></p>
-    <img src={SCAN_QR} width="180" height="180" alt={t("scanAlt")} />
-  </div>;
 }
 
 /** One field: the label above, the box below. A Brief field of type text is a textarea; the rest are one line. */
@@ -156,9 +146,7 @@ function Landing({ request, navigate, reason }) {
     go(result.step);
   };
   const ready = Boolean(landing?.product_id && landing.price_fen);
-  const [scan, setScan] = useState(false);
   const pay = () => {
-    if (isDesktop({ userAgent: window.navigator.userAgent, maxTouchPoints: window.navigator.maxTouchPoints })) { setScan(true); return; }
     PendingIntake.save(window.localStorage, values);
     window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name, locale }));
   };
@@ -186,7 +174,6 @@ function Landing({ request, navigate, reason }) {
     </dl>
     {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
     <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready} onClick={pay}><WeChatPayMark /><span>{t("wechatPay")} {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
-    {scan ? <ScanToPay /> : null}
   </Card>;
 }
 

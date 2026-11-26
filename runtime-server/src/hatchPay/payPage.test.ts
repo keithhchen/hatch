@@ -127,7 +127,7 @@ test("the order stores the buyer's name with the pending code; an invalid name i
   const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
-  const order = (name: unknown) => fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, name }) });
+  const order = (name: unknown) => fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4", "user-agent": "iPhone Mobile" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, name }) });
   try {
     assert.equal((await order(" 王小明 ")).status, 200);
     assert.equal(created[0]!.name, "王小明");
@@ -162,4 +162,55 @@ test("the code email is sent in the background: the return page does not wait fo
     await new Promise(resolve => setImmediate(resolve));
     assert.ok(errors.mock.calls.some(c => String(c.arguments[0]).includes("hatch_pay_email_failed")));
   } finally { errors.mock.restore(); server.closeAllConnections(); server.close(); }
+});
+
+const DESKTOP = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
+const PHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148 Safari/604.1";
+const TRADE = `hp${"b".repeat(24)}`;
+
+async function serveNative(tradeState: string) {
+  const created: Array<Record<string, unknown>> = [];
+  const pay = new HatchPay({
+    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
+    wechat: {
+      ready: () => true, createNativeOrder: async () => ({ codeUrl: "weixin://wxpay/bizpayurl?pr=abc" }), createH5Order: async () => ({ h5Url: "https://wx.example/pay?a=1" }),
+      queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState })
+    },
+    codes: {
+      createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: TRADE }; },
+      order: async (o: string) => o === TRADE ? { productId: PRODUCT, email: "a@b.co" } : undefined
+    },
+    openids: {}, mailer: {}
+  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
+  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
+  const order = (userAgent: string) => fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4", "user-agent": userAgent }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK }) });
+  return { base, created, order, close: () => { server.closeAllConnections(); server.close(); } };
+}
+
+test("a desktop browser gets a Native order with the QR as SVG; a phone still gets H5", async () => {
+  const s = await serveNative("NOTPAY");
+  try {
+    const desktop = await (await s.order(DESKTOP)).json() as Record<string, string>;
+    assert.equal(desktop.mode, "native");
+    assert.match(desktop.qrSvg!, /^<svg /);
+    assert.equal(desktop.statusUrl, `https://anyteach.cn/hatch-pay/status?o=${TRADE}`);
+    assert.match(desktop.returnUrl!, new RegExp(`/return\\?o=${TRADE}`));
+    assert.equal(s.created[0]!.payChannel, "native");
+    const phone = await (await s.order(PHONE)).json() as Record<string, string>;
+    assert.equal(phone.mode, "h5");
+    assert.equal(s.created[1]!.payChannel, "h5");
+  } finally { s.close(); }
+});
+
+test("/status says whether WeChat has the order paid; an unknown or malformed order is 404", async () => {
+  for (const [state, paid] of [["NOTPAY", false], ["SUCCESS", true]] as const) {
+    const s = await serveNative(state);
+    try {
+      assert.deepEqual(await (await fetch(`${s.base}/status?o=${TRADE}`)).json(), { paid });
+      assert.equal((await fetch(`${s.base}/status?o=hp${"c".repeat(24)}`)).status, 404);
+      assert.equal((await fetch(`${s.base}/status?o=x`)).status, 404);
+    } finally { s.close(); }
+  }
 });

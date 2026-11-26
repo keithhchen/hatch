@@ -1,4 +1,5 @@
 import type http from "node:http";
+import qrcode from "qrcode-generator";
 import type { AccessCodes, Activation } from "../accessCodes/accessCodes.js";
 import { payerIp as payerIpOf } from "./payerIp.js";
 import type { AgentCorpusResolverLike } from "../agentCorpus.js";
@@ -34,6 +35,9 @@ const PRODUCT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 const TRADE_NO = /^hp[0-9a-f]{24}$/;
 const ORDER_MINUTES = 15;
+/** The same rule as the web's `isDesktop`: no phone or tablet token in the User-Agent. */
+const isDesktop = (req: http.IncomingMessage) => !/Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle/i.test(req.headers["user-agent"] ?? "");
+const qrSvg = (text: string) => { const qr = qrcode(0, "M"); qr.addData(text); qr.make(); return qr.createSvgTag({ cellSize: 4, margin: 16, scalable: true }); };
 
 const isChatUrl = (value: string | null): value is string => {
   if (!value) return false;
@@ -43,9 +47,9 @@ const withCode = (back: string, code: string) => { const url = new URL(back); ur
 
 /** What a visitor reads on these pages, by language. The WeChat Pay order's own description is not here: it stays Chinese, as WeChat's API wants. */
 const COPY = {
-  zh: { lang: "zh-CN", closed: "支付暂未开放", guide: "请点击右上角 ··· 选择『在浏览器打开』", openBrowser: "请在浏览器打开", invalid: "链接无效", unsellable: "不可购买", notFound: "页面不存在", failed: "出错了，请稍后重试", noAuth: "未获得授权", authFailed: "授权失败", retry: "重试", site: "网站", name: "姓名", sendTo: "兑换码发送至", pay: "支付", orderFailed: "下单失败", orderFailedLater: "下单失败，请稍后重试", notCompleted: "支付未完成", network: "网络错误，请重试", queryFailed: "查询失败，请稍后重试", checkPaid: "我已支付，查询结果", payAgain: "重新支付", mismatch: "支付金额与订单不符，请联系我们", noOrder: "订单不存在", yourCode: "你的访问码", badRequest: "请求无效", noIp: "无法获取网络地址" },
-  en: { lang: "en", closed: "Payments are not open yet", guide: "Tap ··· at the top right and choose “Open in browser”", openBrowser: "Please open this in a browser", invalid: "Invalid link", unsellable: "Not available for purchase", notFound: "Page not found", failed: "Something went wrong. Please try again later.", noAuth: "Not authorized", authFailed: "Authorization failed", retry: "Try again", site: "Website", name: "Name", sendTo: "Code sent to", pay: "Pay", orderFailed: "Could not create the order", orderFailedLater: "Could not create the order. Please try again later.", notCompleted: "Payment was not completed", network: "Network error. Please try again.", queryFailed: "Could not check the payment. Please try again later.", checkPaid: "I have paid, check the result", payAgain: "Pay again", mismatch: "The amount paid does not match the order. Please contact us.", noOrder: "Order not found", yourCode: "Your access code", badRequest: "Invalid request", noIp: "Could not read your network address" },
-  ja: { lang: "ja", closed: "決済はまだ開始されていません", guide: "右上の ··· をタップして「ブラウザで開く」を選んでください", openBrowser: "ブラウザで開いてください", invalid: "無効なリンクです", unsellable: "購入できません", notFound: "ページが見つかりません", failed: "エラーが発生しました。しばらくしてからもう一度お試しください。", noAuth: "認証されませんでした", authFailed: "認証に失敗しました", retry: "やり直す", site: "ウェブサイト", name: "お名前", sendTo: "コードの送付先", pay: "支払う", orderFailed: "注文を作成できませんでした", orderFailedLater: "注文を作成できませんでした。しばらくしてからもう一度お試しください。", notCompleted: "支払いが完了しませんでした", network: "ネットワークエラーです。もう一度お試しください。", queryFailed: "確認に失敗しました。しばらくしてからもう一度お試しください。", checkPaid: "支払い済み、結果を確認する", payAgain: "もう一度支払う", mismatch: "お支払い金額が注文と一致しません。お問い合わせください。", noOrder: "注文が見つかりません", yourCode: "アクセスコード", badRequest: "無効なリクエストです", noIp: "ネットワークアドレスを取得できません" }
+  zh: { lang: "zh-CN", closed: "支付暂未开放", guide: "请点击右上角 ··· 选择『在浏览器打开』", openBrowser: "请在浏览器打开", invalid: "链接无效", unsellable: "不可购买", notFound: "页面不存在", failed: "出错了，请稍后重试", noAuth: "未获得授权", authFailed: "授权失败", retry: "重试", site: "网站", name: "姓名", sendTo: "兑换码发送至", pay: "支付", orderFailed: "下单失败", orderFailedLater: "下单失败，请稍后重试", notCompleted: "支付未完成", network: "网络错误，请重试", queryFailed: "查询失败，请稍后重试", checkPaid: "我已支付，查询结果", payAgain: "重新支付", mismatch: "支付金额与订单不符，请联系我们", noOrder: "订单不存在", yourCode: "你的访问码", badRequest: "请求无效", noIp: "无法获取网络地址", scan: "请用微信扫码支付" },
+  en: { lang: "en", closed: "Payments are not open yet", guide: "Tap ··· at the top right and choose “Open in browser”", openBrowser: "Please open this in a browser", invalid: "Invalid link", unsellable: "Not available for purchase", notFound: "Page not found", failed: "Something went wrong. Please try again later.", noAuth: "Not authorized", authFailed: "Authorization failed", retry: "Try again", site: "Website", name: "Name", sendTo: "Code sent to", pay: "Pay", orderFailed: "Could not create the order", orderFailedLater: "Could not create the order. Please try again later.", notCompleted: "Payment was not completed", network: "Network error. Please try again.", queryFailed: "Could not check the payment. Please try again later.", checkPaid: "I have paid, check the result", payAgain: "Pay again", mismatch: "The amount paid does not match the order. Please contact us.", noOrder: "Order not found", yourCode: "Your access code", badRequest: "Invalid request", noIp: "Could not read your network address", scan: "Scan with WeChat to pay" },
+  ja: { lang: "ja", closed: "決済はまだ開始されていません", guide: "右上の ··· をタップして「ブラウザで開く」を選んでください", openBrowser: "ブラウザで開いてください", invalid: "無効なリンクです", unsellable: "購入できません", notFound: "ページが見つかりません", failed: "エラーが発生しました。しばらくしてからもう一度お試しください。", noAuth: "認証されませんでした", authFailed: "認証に失敗しました", retry: "やり直す", site: "ウェブサイト", name: "お名前", sendTo: "コードの送付先", pay: "支払う", orderFailed: "注文を作成できませんでした", orderFailedLater: "注文を作成できませんでした。しばらくしてからもう一度お試しください。", notCompleted: "支払いが完了しませんでした", network: "ネットワークエラーです。もう一度お試しください。", queryFailed: "確認に失敗しました。しばらくしてからもう一度お試しください。", checkPaid: "支払い済み、結果を確認する", payAgain: "もう一度支払う", mismatch: "お支払い金額が注文と一致しません。お問い合わせください。", noOrder: "注文が見つかりません", yourCode: "アクセスコード", badRequest: "無効なリクエストです", noIp: "ネットワークアドレスを取得できません", scan: "WeChatでスキャンして支払う" }
 } satisfies Record<Locale, Record<string, string>>;
 
 const PAGE_HEAD = (locale: Locale) => `<!doctype html><html lang="${COPY[locale].lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hatch</title>
@@ -71,6 +75,7 @@ main.co{max-width:420px;margin:0 auto}
 .co .btn.busy .spin{display:inline-block}
 @keyframes sp{to{transform:rotate(360deg)}}
 .co #err{min-height:20px;text-align:center;font-size:14px}
+.co #qr{text-align:center;margin-top:16px;font-size:14px}.co #qr svg{display:block;width:220px;height:220px;margin:0 auto 8px}
 </style>`;
 /** The site as a bare domain, or undefined when it is not a plausible one. */
 export const siteDomain = (value: string | null): string | undefined => {
@@ -104,6 +109,7 @@ export class HatchPay {
       if (req.method === "GET" && route === "/")return await this.payPage(req, res, url);
       if (req.method === "GET" && route === "/oauth") return await this.oauth(res, url);
       if (req.method === "POST" && route === "/order") return await this.order(req, res);
+      if (req.method === "GET" && route === "/status") return await this.status(res, url);
       if (req.method === "GET" && route === "/return") return await this.return(res, url);
       if (req.method === "POST" && route === "/notify") return await this.notify(req, res);
       this.html(res, 404, page(locale, `<p>${t.notFound}</p>`));
@@ -173,13 +179,17 @@ export class HatchPay {
     const info = await this.productInfo(ask.product), e = escapeHtml, t = COPY[ask.locale];
     const row = (label: string, value?: string) => value ? `<div><dt>${label}</dt><dd>${e(value)}</dd></div>` : "";
     const head = `${info.name ? `<h1>${e(info.name)}</h1>` : ""}${info.description ? `<p class="desc">${e(info.description)}</p>` : ""}`;
-    return page(ask.locale, `${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="260" height="48" alt="MSC × Hatch"><div class="card">${head}<dl>${row(t.site, order.site)}${row(t.name, order.name)}${row(t.sendTo, ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>${t.pay}</button><div id="err"></div></div></main>`, `
-const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err');
+    return page(ask.locale, `${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="260" height="48" alt="MSC × Hatch"><div class="card">${head}<dl>${row(t.site, order.site)}${row(t.name, order.name)}${row(t.sendTo, ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>${t.pay}</button><div id="qr"></div><div id="err"></div></div></main>`, `
+const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err'),qr=document.getElementById('qr');
 const fail=m=>{err.textContent=m;btn.disabled=false;btn.classList.remove('busy')};
 const go=async()=>{btn.disabled=true;btn.classList.add('busy');err.textContent='';
  try{const r=await fetch(${jsLiteral(`${this.deps.publicBase}/order`)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ask)});
   const j=await r.json();if(!r.ok)return fail(j.error||${jsLiteral(t.orderFailed)});
   if(j.mode==='h5'){location.href=j.url;return}
+  if(j.mode==='native'){btn.style.display='none';qr.innerHTML=j.qrSvg+${jsLiteral(t.scan)};
+   const stop=()=>{clearInterval(poll);clearTimeout(expire)};
+   const poll=setInterval(async()=>{try{if((await(await fetch(j.statusUrl)).json()).paid){stop();location.href=j.returnUrl}}catch(e){}},3000);
+   const expire=setTimeout(()=>{stop();qr.innerHTML='';btn.style.display='';fail('')},${ORDER_MINUTES * 60_000});return}
   WeixinJSBridge.invoke('getBrandWCPayRequest',j.params,x=>{if(x.err_msg==='get_brand_wcpay_request:ok')location.href=j.returnUrl;else fail(${jsLiteral(t.notCompleted)})});
  }catch(e){fail(${jsLiteral(t.network)})}};
 btn.onclick=go;
@@ -209,9 +219,10 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
     const name = buyerName(typeof body.name === "string" ? body.name : null);
     const openid = typeof body.openid === "string" && body.openid ? body.openid : undefined;
     const payerIp = payerIpOf(req.headers);
-    if (!openid && !payerIp) return this.json(res, 400, { error: t.noIp });
+    const native = !openid && isDesktop(req);
+    if (!openid && !native && !payerIp) return this.json(res, 400, { error: t.noIp });
 
-    const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, ...name ? { name } : {}, payChannel: openid ? "jsapi" : "h5", locale });
+    const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, ...name ? { name } : {}, payChannel: openid ? "jsapi" : native ? "native" : "h5", locale });
     const returnUrl = `${this.deps.publicBase}/return?${new URLSearchParams({ o: outTradeNo, back: ask.back, locale })}`;
     const order = {
       outTradeNo, description: "Hatch 兑换码", amountFen: this.deps.priceFen,
@@ -222,11 +233,25 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
         const { prepayId } = await this.deps.wechat.createJsapiOrder({ ...order, openid });
         return this.json(res, 200, { mode: "jsapi", params: this.deps.wechat.jsapiInvokeParams(prepayId), returnUrl });
       }
+      if (native) {
+        const { codeUrl } = await this.deps.wechat.createNativeOrder(order);
+        return this.json(res, 200, { mode: "native", qrSvg: qrSvg(codeUrl), statusUrl: `${this.deps.publicBase}/status?o=${outTradeNo}`, returnUrl });
+      }
       const { h5Url } = await this.deps.wechat.createH5Order({ ...order, payerIp: payerIp! });
       return this.json(res, 200, { mode: "h5", url: `${h5Url}&redirect_url=${encodeURIComponent(returnUrl)}` });
     } catch (error) {
       log.error("hatch_pay_order_failed", { outTradeNo, code, error });
       return this.json(res, 502, { error: t.orderFailedLater });
+    }
+  }
+
+  /** Whether WeChat has the order as paid; /return settles it. Read-only, so a page may poll it. */
+  private async status(res: http.ServerResponse, url: URL) {
+    const outTradeNo = url.searchParams.get("o") ?? "";
+    if (!TRADE_NO.test(outTradeNo) || !await this.deps.codes.order(outTradeNo)) return this.json(res, 404, { error: COPY[localeOf(url.searchParams.get("locale"))].noOrder });
+    try { return this.json(res, 200, { paid: (await this.deps.wechat.queryOrder(outTradeNo)).tradeState === "SUCCESS" }); } catch (error) {
+      log.error("hatch_pay_status_failed", { outTradeNo, error });
+      return this.json(res, 502, { error: COPY[localeOf(url.searchParams.get("locale"))].queryFailed });
     }
   }
 

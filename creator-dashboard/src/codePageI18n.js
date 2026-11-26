@@ -2,7 +2,6 @@
 export const codePageCopy = Object.freeze({
   zh: Object.freeze({
     productFallback: "出海官网获客诊断",
-    scanTitle: "请用手机扫码打开，完成支付", scanAlt: "扫码打开",
     optional: "选填", back: "返回", next: "下一步",
     eventCode: "活动码", accessCode: "兑换码", use: "使用", open: "打开",
     codeNotFound: "{label}不存在",
@@ -31,7 +30,6 @@ export const codePageCopy = Object.freeze({
   }),
   en: Object.freeze({
     productFallback: "Website diagnosis for going global",
-    scanTitle: "Scan with your phone to open this page and pay", scanAlt: "Scan to open",
     optional: "Optional", back: "Back", next: "Next",
     eventCode: "event code", accessCode: "access code", use: "Use", open: "Open",
     codeNotFound: "We couldn't find that {label}",
@@ -60,7 +58,6 @@ export const codePageCopy = Object.freeze({
   }),
   ja: Object.freeze({
     productFallback: "海外展開向けWebサイト診断",
-    scanTitle: "スマートフォンでスキャンして開き、お支払いください", scanAlt: "スキャンして開く",
     optional: "任意", back: "戻る", next: "次へ",
     eventCode: "イベントコード", accessCode: "引き換えコード", use: "利用", open: "開く",
     codeNotFound: "その{label}は見つかりません",

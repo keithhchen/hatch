@@ -22,7 +22,8 @@ const mailer = (sender: EmailSender) => new AccessCodeMailer({
   prompts: { get: async name => name.endsWith("-subject") ? "码 {{code}}" : "<p>{{product_name}} {{amount}} <a href=\"{{code_url}}\">{{code}}</a></p>" } satisfies PromptRows,
   products: { describe: async () => ({ productName: "网站诊断" }) } satisfies ProductMailInfos
 });
-const ORIGIN = { origin: "https://anyteach.cn" };
+/** A phone: a desktop browser gets a Native order, not H5. */
+const ORIGIN = { origin: "https://anyteach.cn", "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148" };
 
 async function isolated() {
   const schema = `paycodes_test_${randomUUID().replaceAll("-", "")}`;

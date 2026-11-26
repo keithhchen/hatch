@@ -58,7 +58,7 @@ test("the pay page is in the visitor's language by the web's locale parameter; n
 test("the order keeps the visitor's language with the pending code, its way back carries it, and the paid mail gets the stored one", async () => {
   const s = await serve();
   try {
-    const order = (body: Record<string, unknown>) => fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, ...body }) });
+    const order = (body: Record<string, unknown>) => fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4", "user-agent": "iPhone Mobile" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, ...body }) });
     const placed = await order({ locale: "en" });
     assert.equal(placed.status, 200);
     assert.equal(s.created[0]!.locale, "en");

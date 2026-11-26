@@ -128,3 +128,16 @@ test("AES-256-GCM resource: round trip, and a wrong key or tampered ciphertext f
 test("time_expire is RFC 3339 in +08:00", () => {
   assert.equal(rfc3339Beijing(new Date("2026-11-19T16:30:05Z")), "2026-11-20T00:30:05+08:00");
 });
+
+test("a Native order posts to /v3/pay/transactions/native without a payer and returns the code_url", async () => {
+  const wechat = await fakeWeChat(() => ({ body: { code_url: "weixin://wxpay/bizpayurl?pr=abc" } }));
+  try {
+    const pay = new WeChatPayV3(testKeys().config, { hosts: [wechat.url], log: () => undefined });
+    assert.deepEqual(await pay.createNativeOrder(order), { codeUrl: "weixin://wxpay/bizpayurl?pr=abc" });
+    const request = wechat.requests[0]!, sent = JSON.parse(request.body);
+    assert.equal(request.url, "/v3/pay/transactions/native");
+    assert.equal(sent.out_trade_no, order.outTradeNo);
+    assert.equal(sent.notify_url, "https://gethatchapp.com/hatch-pay/notify");
+    assert.equal("scene_info" in sent || "payer" in sent, false);
+  } finally { await wechat.close(); }
+});

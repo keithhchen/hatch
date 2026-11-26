@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS hatch_access_codes (
   out_trade_no TEXT UNIQUE,
   amount_fen INTEGER,
   email TEXT,
-  pay_channel TEXT CHECK (pay_channel IN ('jsapi', 'h5')),
+  pay_channel TEXT CHECK (pay_channel IN ('jsapi', 'h5', 'native')),
   transaction_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   paid_at TIMESTAMPTZ,
@@ -28,6 +28,13 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hatch_access_codes_source_check' AND pg_get_constraintdef(oid) LIKE '%event%') THEN
     ALTER TABLE hatch_access_codes DROP CONSTRAINT IF EXISTS hatch_access_codes_source_check;
     ALTER TABLE hatch_access_codes ADD CONSTRAINT hatch_access_codes_source_check CHECK (source IN ('free', 'paid', 'event'));
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hatch_access_codes_pay_channel_check' AND pg_get_constraintdef(oid) LIKE '%native%') THEN
+    ALTER TABLE hatch_access_codes DROP CONSTRAINT IF EXISTS hatch_access_codes_pay_channel_check;
+    ALTER TABLE hatch_access_codes ADD CONSTRAINT hatch_access_codes_pay_channel_check CHECK (pay_channel IN ('jsapi', 'h5', 'native'));
   END IF;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;`;
