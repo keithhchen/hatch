@@ -54,9 +54,9 @@ const orderCode = (code: string) => withCode(CODE_LANDING, code);
 
 /** What a visitor reads on these pages, by language. The WeChat Pay order's own description is not here: it stays Chinese, as WeChat's API wants. */
 const COPY = {
-  zh: { lang: "zh-CN", closed: "支付暂未开放", guide: "请点击右上角 ··· 选择『在浏览器打开』", openBrowser: "请在浏览器打开", invalid: "链接无效", unsellable: "不可购买", notFound: "页面不存在", failed: "出错了，请稍后重试", noAuth: "未获得授权", authFailed: "授权失败", retry: "重试", orderNo: "订单号", email: "邮箱", unpaid: "待支付", paidTag: "已支付", expiredTag: "已过期", renew: "重新下单", copy: "复制", copied: "已复制", wechatPay: "微信支付", orderFailed: "下单失败", orderFailedLater: "下单失败，请稍后重试", notCompleted: "支付未完成", network: "网络错误，请重试", queryFailed: "查询失败，请稍后重试", confirming: "正在确认支付结果…", mismatch: "支付金额与订单不符，请联系我们", noOrder: "订单不存在", badRequest: "请求无效", noIp: "无法获取网络地址", scan: "请用微信扫码支付", paid: "支付成功", redirecting: "支付成功，正在跳转…", notExpired: "订单仍在有效期内" },
-  en: { lang: "en", closed: "Payments are not open yet", guide: "Tap ··· at the top right and choose “Open in browser”", openBrowser: "Please open this in a browser", invalid: "Invalid link", unsellable: "Not available for purchase", notFound: "Page not found", failed: "Something went wrong. Please try again later.", noAuth: "Not authorized", authFailed: "Authorization failed", retry: "Try again", orderNo: "Order no.", email: "Email", unpaid: "Unpaid", paidTag: "Paid", expiredTag: "Expired", renew: "Order again", copy: "Copy", copied: "Copied", wechatPay: "WeChat Pay", orderFailed: "Could not create the order", orderFailedLater: "Could not create the order. Please try again later.", notCompleted: "Payment was not completed", network: "Network error. Please try again.", queryFailed: "Could not check the payment. Please try again later.", confirming: "Confirming your payment…", mismatch: "The amount paid does not match the order. Please contact us.", noOrder: "Order not found", badRequest: "Invalid request", noIp: "Could not read your network address", scan: "Scan with WeChat to pay", paid: "Payment received", redirecting: "Payment received, redirecting…", notExpired: "This order is still valid" },
-  ja: { lang: "ja", closed: "決済はまだ開始されていません", guide: "右上の ··· をタップして「ブラウザで開く」を選んでください", openBrowser: "ブラウザで開いてください", invalid: "無効なリンクです", unsellable: "購入できません", notFound: "ページが見つかりません", failed: "エラーが発生しました。しばらくしてからもう一度お試しください。", noAuth: "認証されませんでした", authFailed: "認証に失敗しました", retry: "やり直す", orderNo: "注文番号", email: "メール", unpaid: "未払い", paidTag: "支払い済み", expiredTag: "期限切れ", renew: "注文し直す", copy: "コピー", copied: "コピーしました", wechatPay: "WeChat Pay", orderFailed: "注文を作成できませんでした", orderFailedLater: "注文を作成できませんでした。しばらくしてからもう一度お試しください。", notCompleted: "支払いが完了しませんでした", network: "ネットワークエラーです。もう一度お試しください。", queryFailed: "確認に失敗しました。しばらくしてからもう一度お試しください。", confirming: "お支払いを確認しています…", mismatch: "お支払い金額が注文と一致しません。お問い合わせください。", noOrder: "注文が見つかりません", badRequest: "無効なリクエストです", noIp: "ネットワークアドレスを取得できません", scan: "WeChatでスキャンして支払う", paid: "お支払いが完了しました", redirecting: "お支払いを確認しました。移動しています…", notExpired: "この注文はまだ有効です" }
+  zh: { lang: "zh-CN", closed: "支付暂未开放", guide: "请点击右上角 ··· 选择『在浏览器打开』", openBrowser: "请在浏览器打开", invalid: "链接无效", unsellable: "不可购买", notFound: "页面不存在", failed: "出错了，请稍后重试", noAuth: "未获得授权", authFailed: "授权失败", retry: "重试", orderNo: "订单号", email: "邮箱", unpaid: "待支付", paidTag: "已支付", expiredTag: "已过期", renew: "重新下单", copy: "复制", copied: "已复制", wechatPay: "微信支付", orderFailed: "下单失败", orderFailedLater: "下单失败，请稍后重试", notCompleted: "支付未完成", network: "网络错误，请重试", queryFailed: "查询失败，请稍后重试", confirming: "正在确认支付结果…", mismatch: "支付金额与订单不符，请联系我们", noOrder: "订单不存在", badRequest: "请求无效", noIp: "无法获取网络地址", scan: "请用微信扫码支付", paid: "支付成功", redirecting: "支付成功，正在跳转…", elsewhere: "此订单已在其他设备上发起支付" },
+  en: { lang: "en", closed: "Payments are not open yet", guide: "Tap ··· at the top right and choose “Open in browser”", openBrowser: "Please open this in a browser", invalid: "Invalid link", unsellable: "Not available for purchase", notFound: "Page not found", failed: "Something went wrong. Please try again later.", noAuth: "Not authorized", authFailed: "Authorization failed", retry: "Try again", orderNo: "Order no.", email: "Email", unpaid: "Unpaid", paidTag: "Paid", expiredTag: "Expired", renew: "Order again", copy: "Copy", copied: "Copied", wechatPay: "WeChat Pay", orderFailed: "Could not create the order", orderFailedLater: "Could not create the order. Please try again later.", notCompleted: "Payment was not completed", network: "Network error. Please try again.", queryFailed: "Could not check the payment. Please try again later.", confirming: "Confirming your payment…", mismatch: "The amount paid does not match the order. Please contact us.", noOrder: "Order not found", badRequest: "Invalid request", noIp: "Could not read your network address", scan: "Scan with WeChat to pay", paid: "Payment received", redirecting: "Payment received, redirecting…", elsewhere: "This order was started on another device" },
+  ja: { lang: "ja", closed: "決済はまだ開始されていません", guide: "右上の ··· をタップして「ブラウザで開く」を選んでください", openBrowser: "ブラウザで開いてください", invalid: "無効なリンクです", unsellable: "購入できません", notFound: "ページが見つかりません", failed: "エラーが発生しました。しばらくしてからもう一度お試しください。", noAuth: "認証されませんでした", authFailed: "認証に失敗しました", retry: "やり直す", orderNo: "注文番号", email: "メール", unpaid: "未払い", paidTag: "支払い済み", expiredTag: "期限切れ", renew: "注文し直す", copy: "コピー", copied: "コピーしました", wechatPay: "WeChat Pay", orderFailed: "注文を作成できませんでした", orderFailedLater: "注文を作成できませんでした。しばらくしてからもう一度お試しください。", notCompleted: "支払いが完了しませんでした", network: "ネットワークエラーです。もう一度お試しください。", queryFailed: "確認に失敗しました。しばらくしてからもう一度お試しください。", confirming: "お支払いを確認しています…", mismatch: "お支払い金額が注文と一致しません。お問い合わせください。", noOrder: "注文が見つかりません", badRequest: "無効なリクエストです", noIp: "ネットワークアドレスを取得できません", scan: "WeChatでスキャンして支払う", paid: "お支払いが完了しました", redirecting: "お支払いを確認しました。移動しています…", elsewhere: "この注文は別の端末で支払いが開始されています" }
 } satisfies Record<Locale, Record<string, string>>;
 
 const PAGE_HEAD = (locale: Locale) => `<!doctype html><html lang="${COPY[locale].lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hatch</title>
@@ -93,6 +93,7 @@ main.co{width:min(440px,100%);margin:4vh auto 0}
 .co #renew{border:1px solid #17150f;background:#17150f}
 .co #renew.busy{opacity:.9;cursor:progress;pointer-events:none}
 .co [data-s=paid] #pay,.co [data-s=paid] #renew,.co [data-s=expired] #pay,.co [data-s=unpaid] #renew{display:none}
+.co [data-e] #pay{display:none}.co [data-e] #renew{display:flex}
 .co .btn.busy .wx{display:none}
 .co .spin{display:none;width:16px;height:16px;margin:0 4px;box-sizing:border-box;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
 .co .btn.busy .spin{display:inline-block}
@@ -243,6 +244,7 @@ const go=async()=>{if(busy)return;busy=true;btn.ariaBusy='true';btn.classList.ad
  try{const r=await post(D.pay),j=await r.json();
   if(j.expired){expire();return}
   if(j.paid){location.replace(D.order);return}
+  if(j.elsewhere){done=true;busy=false;btn.classList.remove('busy');card.dataset.e='1';err.style.color='#6b6455';err.textContent=${jsLiteral(t.elsewhere)};return}
   if(!r.ok)return fail(j.error||${jsLiteral(t.orderFailed)});
   if(j.mode==='h5'){location.href=j.url;return}
   if(j.mode==='native'){btn.style.display='none';qr.innerHTML=j.qrSvg+${jsLiteral(t.scan)};
@@ -289,18 +291,21 @@ addEventListener('pageshow',e=>{if(e.persisted){busy=false;fail('')}});`));
     } catch (error) {
       if (error instanceof WeChatPayError && error.code === "ORDERPAID") return this.json(res, 409, { paid: true });
       if (error instanceof WeChatPayError && ORDER_GONE.has(error.code)) return this.json(res, 409, { expired: true });
+      // The same number was first paid another way (H5 on a phone, Native on a desktop): WeChat refuses a repeat whose parameters differ.
+      if (error instanceof WeChatPayError && error.code === "INVALID_REQUEST" && /重入|不一致/.test(error.message)) return this.json(res, 200, { elsewhere: true });
+      // A business answer, not a server fault: a 5xx is replaced by the proxy's own page and never reaches the buyer as JSON.
       log.error("hatch_pay_order_failed", { outTradeNo, error });
-      return this.json(res, 502, { error: t.orderFailedLater });
+      return this.json(res, 409, { error: t.orderFailedLater });
     }
   }
 
-  /** An expired order is left as it is; a new one with the same Product, email, name and language takes its place. */
+  /** A pending order that cannot be paid here (expired, or started on another device) is left as it is; a new one with the same Product, email, name and language takes its place. */
   private async renew(req: http.IncomingMessage, res: http.ServerResponse, outTradeNo: string) {
     if (!this.fromMerchantPage(req)) return this.json(res, 403, { error: "forbidden" });
     const order = await this.load(outTradeNo);
     if (!order) return this.json(res, 404, { error: COPY[DEFAULT_LOCALE].noOrder });
     const t = COPY[localeOf(order.locale)];
-    if (order.status !== "pending" || this.now() < this.expiresAt(order)) return this.json(res, 409, { error: t.notExpired });
+    if (order.status !== "pending") return this.json(res, 409, { error: t.badRequest });
     if (!await this.deps.capabilities.has(order.productId, ACCESS_CODE_CAPABILITY)) return this.json(res, 403, { error: t.unsellable });
     const created = await this.deps.codes.createPending({ productId: order.productId, email: order.email, ...order.name ? { name: order.name } : {}, ...order.locale ? { locale: order.locale } : {} });
     this.json(res, 200, { url: this.orderUrl(created.outTradeNo) });

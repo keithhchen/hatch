@@ -44,10 +44,10 @@ async function withDb(body: (db: Awaited<ReturnType<typeof isolated>>) => Promis
 /** The whole pay stack against a fake WeChat: a real HTTP server for the routes, a fake server for WeChat and its OAuth. */
 async function harness(db: Awaited<ReturnType<typeof isolated>>) {
   const keys = testKeys(), mails: EmailMessage[] = [];
-  const trades = new Map<string, Record<string, unknown>>(), refusals = new Map<string, { status: number; code: string }>();
+  const trades = new Map<string, Record<string, unknown>>(), refusals = new Map<string, { status: number; code: string; message: string }>();
   const wechat = await fakeWeChat(request => {
     const refused = [...refusals].find(([path]) => request.url.startsWith(path))?.[1];
-    if (refused) return { status: refused.status, body: { code: refused.code, message: refused.code } };
+    if (refused) return { status: refused.status, body: { code: refused.code, message: refused.message } };
     if (request.url.startsWith("/v3/pay/transactions/h5")) return { body: { h5_url: "https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb?prepay_id=wx1&package=1" } };
     if (request.url.startsWith("/v3/pay/transactions/jsapi")) return { body: { prepay_id: "wx-prepay" } };
     if (request.url.startsWith("/sns/oauth2/access_token")) return { body: { openid: "oFake", access_token: "t" } };
@@ -78,7 +78,7 @@ async function harness(db: Awaited<ReturnType<typeof isolated>>) {
     tweak?.(n);
     return fetch(`${base}/notify`, { method: "POST", headers: { "content-type": "application/json", ...n.headers }, body: n.body });
   };
-  return { mails, get, create, newOrder, pay: payOrder, renew, pay_, notify, wechat: Object.assign(wechat, { fail: (path: string, status: number, code: string) => void refusals.set(path, { status, code }) }), base, trades, close: async () => { server.closeAllConnections(); server.close(); await wechat.close(); } };
+  return { mails, get, create, newOrder, pay: payOrder, renew, pay_, notify, wechat: Object.assign(wechat, { fail: (path: string, status: number, code: string, message = code) => void refusals.set(path, { status, code, message }) }), base, trades, close: async () => { server.closeAllConnections(); server.close(); await wechat.close(); } };
 }
 
 const run = (name: string, body: Parameters<typeof withDb>[0]) => connectionString ? test(name, () => withDb(body)) : test(name, { skip: "needs HATCH_TEST_DATABASE_URL" }, () => undefined);
@@ -316,7 +316,6 @@ run("expired order: past created_at + 15 minutes it shows Expired and cannot be 
     assert.deepEqual([old!.status, fresh!.status], ["pending", "pending"]);
     assert.deepEqual([fresh!.email, fresh!.name, fresh!.locale, fresh!.productId], ["a@b.co", "Ann", "ja", PRODUCT]);
     assert.notEqual(old!.code, fresh!.code);
-    assert.equal((await h.renew(next)).status, 409, "a still-valid order is not renewed");
     assert.match(await (await h.get(`/o/${next}`)).text(), /未払い/);
 
     // Paid at WeChat in time: the order is paid, whatever the clock says.
@@ -334,6 +333,24 @@ run("WeChat refusing an order it already has (another way of paying) answers exp
     const res = await h.pay(no, {}, { ...ORIGIN, "x-real-ip": "203.0.113.9" });
     assert.deepEqual([res.status, await res.json()], [409, { expired: true }]);
     assert.equal((await db.codes.order(no))!.status, "pending");
+  } finally { await h.close(); }
+});
+
+run("an order first paid by another way (H5 on a phone, then Native on a desktop): WeChat's 请求重入 refusal is `elsewhere`, other WeChat errors are 409 JSON, and renew gives this device a new order", async db => {
+  const h = await harness(db);
+  try {
+    const no = await h.newOrder();
+    const desktop = { ...ORIGIN, "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15" };
+    h.wechat.fail("/v3/pay/transactions/native", 400, "INVALID_REQUEST");
+    // The fake answers code and message alike, so the message is the code: not the re-entry refusal.
+    const plain = await h.pay(no, {}, desktop);
+    assert.deepEqual([plain.status, await plain.json()], [409, { error: "下单失败，请稍后重试" }]);
+    h.wechat.fail("/v3/pay/transactions/native", 400, "INVALID_REQUEST", "请求重入时，参数与首次请求时不一致");
+    const elsewhere = await h.pay(no, {}, desktop);
+    assert.deepEqual([elsewhere.status, await elsewhere.json()], [200, { elsewhere: true }]);
+    assert.equal((await db.codes.order(no))!.status, "pending");
+    assert.equal((await h.renew(no)).status, 200);
+    assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 2);
   } finally { await h.close(); }
 });
 

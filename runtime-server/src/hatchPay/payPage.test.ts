@@ -166,7 +166,13 @@ test("POST /pay on an order that cannot be paid: expired, paid, or refused by We
     s.trade.reject = new WeChatPayError(400, "ORDER_CLOSED", "closed", null);
     assert.deepEqual(await (await s.post(`/o/${NO}/pay`, {}, desktop)).json(), { expired: true });
     s.trade.reject = new WeChatPayError(500, "SYSTEMERROR", "down", null);
-    assert.equal((await s.post(`/o/${NO}/pay`, {}, desktop)).status, 502);
+    const down = await s.post(`/o/${NO}/pay`, {}, desktop);
+    assert.deepEqual([down.status, await down.json()], [409, { error: "下单失败，请稍后重试" }], "a business answer the proxy lets through, never a 5xx");
+    s.trade.reject = new WeChatPayError(400, "INVALID_REQUEST", "其他参数错误", null);
+    assert.equal((await s.post(`/o/${NO}/pay`, {}, desktop)).status, 409, "another INVALID_REQUEST is a plain failure");
+    s.trade.reject = new WeChatPayError(400, "INVALID_REQUEST", "请求重入时，参数与首次请求时不一致", null);
+    const elsewhere = await s.post(`/o/${NO}/pay`, {}, desktop);
+    assert.deepEqual([elsewhere.status, await elsewhere.json()], [200, { elsewhere: true }], "first paid another way, now asked by a way with other parameters");
     s.trade.reject = undefined;
     s.clock.now = new Date(s.clock.now.getTime() + 15 * 60_000);
     assert.deepEqual(await (await s.post(`/o/${NO}/pay`, {}, desktop)).json(), { expired: true });
@@ -176,13 +182,11 @@ test("POST /pay on an order that cannot be paid: expired, paid, or refused by We
   } finally { s.close(); }
 });
 
-test("POST /renew: only an expired pending order; it makes a new one with the same Product, email, name and language and leaves the old one alone", async () => {
+test("POST /renew: only a pending order (expired, or started on another device); it makes a new one with the same Product, email, name and language and leaves the old one alone", async () => {
   const s = await serve();
   try {
     s.seed({ name: "王小明", locale: "ja" });
-    assert.equal((await s.post(`/o/${NO}/renew`, {}, MERCHANT)).status, 409, "still valid");
     assert.equal(s.created.length, 0);
-    s.clock.now = new Date(s.clock.now.getTime() + 15 * 60_000);
     assert.equal((await s.post(`/o/${NO}/renew`, {}, { "content-type": "application/json" })).status, 403);
     const res = await s.post(`/o/${NO}/renew`, {}, MERCHANT);
     assert.equal(res.status, 200);
@@ -327,6 +331,22 @@ test("the page script: the confirm line polls /status; paid turns the pill to Pa
     assert.equal(already.calls.length, 0, "a paid order starts no payment");
     already.timers.at(-1)!();
     assert.equal(already.location.href, "https://gethatchapp.com/c/?code=MSC222222", "re-opening a paid order goes to the code again");
+  } finally { s.close(); }
+});
+
+test("the page script: 'started on another device' keeps the pill Unpaid, says so in the language, and offers Order again in place of the pay button", async () => {
+  const s = await serve();
+  try {
+    for (const [locale, line] of [["zh", "此订单已在其他设备上发起支付"], ["en", "This order was started on another device"], ["ja", "この注文は別の端末で支払いが開始されています"]] as const) {
+      s.seed({ locale });
+      const page = await runPageScript((await s.page()).html, { type: "navigate" }, { pay: { ok: true, json: { elsewhere: true } } });
+      assert.equal(page.err.textContent, line, locale);
+      assert.equal(page.card.dataset.s, "unpaid", "the order is still unpaid");
+      assert.equal(page.card.dataset.e, "1", "CSS swaps the pay button for the renew button");
+      assert.ok(!page.classes.has("busy"));
+    }
+    const failed = await runPageScript((await s.page()).html, { type: "navigate" }, { pay: { ok: false, json: { error: "下单失败，请稍后重试" } } });
+    assert.equal(failed.err.textContent, "下单失败，请稍后重试", "a business error is shown as the server wrote it");
   } finally { s.close(); }
 });
 
