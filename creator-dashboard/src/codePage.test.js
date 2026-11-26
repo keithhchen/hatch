@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect, landingResponse } from "../server.mjs";
-import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, isDesktop, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash } from "./codePageModel.js";
+import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, isDesktop, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash, fieldLabel, pickText } from "./codePageModel.js";
+import { codePageT } from "./codePageI18n.js";
+
+const t = (key, values) => codePageT("zh", key, values);
 
 const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
 
@@ -93,8 +96,8 @@ test("the publish step is never shown", () => {
 
 test("the feed is static: the checks first, and scoring dimensions open only as steps advance", () => {
   const steps = [{}, {}, {}];
-  assert.ok(feedPool({ steps, step: -1 })[0].startsWith("正在核对"));
-  const count = step => feedPool({ steps, step }).filter(line => line.startsWith("正在评估")).length;
+  assert.ok(feedPool({ steps, step: -1, t })[0].startsWith("正在核对"));
+  const count = step => feedPool({ steps, step, t }).filter(line => line.startsWith("正在评估")).length;
   assert.equal(count(-1), 0);
   assert.ok(count(0) > 0 && count(0) < count(2));
   assert.equal(count(2), 9);
@@ -169,9 +172,9 @@ test("the price is fen shown as yuan with two decimals", () => {
 
 test("the product form needs name, phone, email and website; markets is optional; email must look like one", () => {
   const full = { name: "A", phone: "1", email: "a@b.co", website: "x.com" };
-  assert.equal(invalidField(full), undefined);
-  assert.equal(invalidField({ ...full, phone: " " }), "请填写：电话");
-  assert.equal(invalidField({ ...full, email: "nope" }), "邮箱格式不对");
+  assert.equal(invalidField(full, t), undefined);
+  assert.equal(invalidField({ ...full, phone: " " }, t), "请填写：电话");
+  assert.equal(invalidField({ ...full, email: "nope" }, t), "邮箱格式不对");
   assert.equal(BUYER_FIELDS.find(field => field.id === "markets").required, false);
 });
 
@@ -187,10 +190,10 @@ test("answers kept for the way back are read once and forgotten", () => {
 const FILLED = { name: "A", phone: "1", email: "a@b.co", website: "example.com" };
 
 test("the steps go hook, form, pay; the form only passes when valid", () => {
-  assert.deepEqual(advance("hook", {}), { step: "form" });
-  assert.deepEqual(advance("form", { ...FILLED, website: "" }), { step: "form", error: "请填写：网址" });
-  assert.deepEqual(advance("form", { ...FILLED, email: "nope" }), { step: "form", error: "邮箱格式不对" });
-  assert.deepEqual(advance("form", FILLED), { step: "pay" });
+  assert.deepEqual(advance("hook", {}, t), { step: "form" });
+  assert.deepEqual(advance("form", { ...FILLED, website: "" }, t), { step: "form", error: "请填写：网址" });
+  assert.deepEqual(advance("form", { ...FILLED, email: "nope" }, t), { step: "form", error: "邮箱格式不对" });
+  assert.deepEqual(advance("form", FILLED, t), { step: "pay" });
 });
 
 test("the address hash names the step; pay without valid answers is the form", () => {
@@ -213,21 +216,46 @@ test("the landing endpoint carries the Agent's words from landing.json, else the
   assert.equal(bare.agent_name, "出海官网获客诊断");
   assert.equal(bare.hook, "诊断官网");
   assert.equal("cta" in bare, false);
-  assert.equal(hookCopy(bare).cta, "开始诊断");
+  assert.equal(hookCopy(bare, "zh", t).cta, "开始诊断");
+});
+
+test("the landing endpoint passes a per-language landing.json through untouched", () => {
+  const copy = { agent_name: { zh: "诊断 Agent", en: "Audit Agent" }, hook: { zh: "你好", en: "Hello" }, cta: { zh: "开始诊断", en: "Start" } };
+  const response = landingResponse("p1", { product: { name: "产品" }, creator: { name: "MSC咨询" }, price_fen: 990, landing: copy });
+  assert.deepEqual({ agent_name: response.agent_name, hook: response.hook, cta: response.cta }, copy);
 });
 
 test("waitLine counts the minutes down from the start, and falls back without one", () => {
   const startedAt = "2026-11-20T10:00:00.000Z";
-  const at = minutes => waitLine({ startedAt, now: Date.parse(startedAt) + minutes * 60000, email: "a@b.co" });
+  const at = minutes => waitLine({ startedAt, now: Date.parse(startedAt) + minutes * 60000, email: "a@b.co", t });
   assert.match(at(0), /约 10 分钟后报告会发送至 a@b.co/);
   assert.match(at(3.2), /约 7 分钟/);
   assert.match(at(9.5), /约 1 分钟/);
   assert.equal(at(12), "报告即将完成，完成后会发送至 a@b.co");
-  assert.equal(waitLine({ now: 0 }), "您可以关闭此页面，约 10 分钟后报告会发送至您的邮箱");
+  assert.equal(waitLine({ now: 0, t }), "您可以关闭此页面，约 10 分钟后报告会发送至您的邮箱");
 });
 
 test("readyLine greets by name, and without one stays plain", () => {
-  assert.equal(readyLine("Keith"), "Keith，你的诊断报告已生成");
-  assert.equal(readyLine(" "), "你的诊断报告已生成");
-  assert.equal(readyLine(undefined), "你的诊断报告已生成");
+  assert.equal(readyLine("Keith", t), "Keith，你的诊断报告已生成");
+  assert.equal(readyLine(" ", t), "你的诊断报告已生成");
+  assert.equal(readyLine(undefined, t), "你的诊断报告已生成");
+});
+
+test("the landing words are one string or one per language: the reader's, else Chinese, else any", () => {
+  const landing = { name: "产品", description: "描述", agent_name: { zh: "诊断 Agent", en: "Audit Agent" }, hook: { en: "Hello", ja: "こんにちは" }, cta: "开始诊断" };
+  const en = hookCopy(landing, "en", (key, values) => codePageT("en", key, values));
+  assert.deepEqual(en, { agentName: "Audit Agent", hook: "Hello", cta: "开始诊断" });
+  assert.equal(hookCopy(landing, "ja", t).agentName, "诊断 Agent", "no ja: falls back to zh");
+  assert.equal(hookCopy(landing, "zh", t).hook, "Hello", "no zh: any one given");
+  assert.equal(pickText("plain", "ja"), "plain");
+  assert.equal(pickText(undefined, "ja"), undefined);
+  assert.equal(hookCopy({ name: "N" }, "ja", (key, values) => codePageT("ja", key, values)).cta, "診断を始める", "no landing.json: the page's own call to action");
+});
+
+test("a Brief label given per language is picked; the well-known buyer fields read in the reader's language when the Brief only has Chinese", () => {
+  const en = (key, values) => codePageT("en", key, values);
+  assert.equal(fieldLabel({ id: "x", label: { zh: "名", en: "Name", ja: "名前" } }, "ja", en), "名前");
+  assert.equal(fieldLabel({ id: "website", label: "网址" }, "en", en), "Website URL");
+  assert.equal(fieldLabel({ id: "website", label: "网址" }, "zh", t), "网址");
+  assert.equal(fieldLabel({ id: "custom", label: "自定义" }, "en", en), "自定义");
 });

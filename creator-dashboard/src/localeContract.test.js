@@ -18,6 +18,12 @@ test("one persisted locale context controls the document language", () => {
   assert.match(coreSource, /return "en";/);
 });
 
+test("the access code pages consume the shared locale", async () => {
+  const codePageSource = await readFile(new URL("./CodePage.jsx", import.meta.url), "utf8");
+  assert.match(codePageSource, /useLocale\(\)/);
+  assert.match(codePageSource, /codePageT\(locale, key, values\)/);
+});
+
 test("Landing and Creator Studio consume the shared locale", () => {
   assert.match(landingSource, /useLocale\(\)/);
   assert.match(creatorSource, /useLocale\(\)/);
