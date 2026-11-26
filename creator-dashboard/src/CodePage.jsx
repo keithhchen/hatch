@@ -99,7 +99,7 @@ function Hook({ landing, reason, onStart, navigate }) {
       <p className="code-page__by"><strong>{agentName}</strong></p>
     </div>
     <div className="code-page__actions">
-      <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{landing ? cta : <span className="code-page__spinner" role="status" />}</button>
+      <button type="button" className={`code-page__button${landing ? "" : " code-page__button--busy"}`} aria-busy={!landing} onClick={landing ? onStart : undefined}>{landing ? cta : <span className="code-page__spinner" role="status" />}</button>
       {entry === null ? <button type="button" className="code-page__link" onClick={() => setEntry("event")}>{t("hasEventCode")}</button> : null}
       {entry === "event" ? <div className="code-page__entry">
         <CodeBox key="event" navigate={navigate} label={t("eventCode")} action={t("use")} />
@@ -180,7 +180,7 @@ function Landing({ request, navigate, reason }) {
       <div><dt>{t("field_email")}</dt><dd>{values.email?.trim()}</dd></div>
     </dl>
     {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
-    <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready || paying} onClick={pay}>{paying ? <span className="code-page__spinner" aria-hidden /> : <WeChatPayMark />}<span>{t("wechatPay")} {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
+    <button type="button" className={`code-page__button code-page__button--wechat${paying ? " code-page__button--busy" : ""}`} disabled={!ready} aria-busy={paying} onClick={paying ? undefined : pay}>{paying ? <span className="code-page__spinner" aria-hidden /> : <WeChatPayMark />}<span>{t("wechatPay")} {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
   </Card>;
 }
 

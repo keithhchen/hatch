@@ -38,7 +38,7 @@ test("the pay page is in the visitor's language by the web's locale parameter; n
     assert.match(en, /<html lang="en">/);
     assert.match(en, /<dt>Name<\/dt>/);
     assert.match(en, /<dt>Code sent to<\/dt>/);
-    assert.match(en, />Pay<\/button>/);
+    assert.match(en, />WeChat Pay ¥0\.01<\/span><\/button>/);
     assert.doesNotMatch(en, /姓名|兑换码发送至|网络错误/);
     const ja = await html({ locale: "ja", name: "A" });
     assert.match(ja, /<html lang="ja">/);

@@ -47,13 +47,13 @@ const withCode = (back: string, code: string) => { const url = new URL(back); ur
 
 /** What a visitor reads on these pages, by language. The WeChat Pay order's own description is not here: it stays Chinese, as WeChat's API wants. */
 const COPY = {
-  zh: { lang: "zh-CN", closed: "支付暂未开放", guide: "请点击右上角 ··· 选择『在浏览器打开』", openBrowser: "请在浏览器打开", invalid: "链接无效", unsellable: "不可购买", notFound: "页面不存在", failed: "出错了，请稍后重试", noAuth: "未获得授权", authFailed: "授权失败", retry: "重试", site: "网站", name: "姓名", sendTo: "兑换码发送至", pay: "支付", orderFailed: "下单失败", orderFailedLater: "下单失败，请稍后重试", notCompleted: "支付未完成", network: "网络错误，请重试", queryFailed: "查询失败，请稍后重试", checkPaid: "我已支付，查询结果", payAgain: "重新支付", mismatch: "支付金额与订单不符，请联系我们", noOrder: "订单不存在", yourCode: "你的访问码", badRequest: "请求无效", noIp: "无法获取网络地址", scan: "请用微信扫码支付", redirecting: "支付成功，正在跳转…" },
-  en: { lang: "en", closed: "Payments are not open yet", guide: "Tap ··· at the top right and choose “Open in browser”", openBrowser: "Please open this in a browser", invalid: "Invalid link", unsellable: "Not available for purchase", notFound: "Page not found", failed: "Something went wrong. Please try again later.", noAuth: "Not authorized", authFailed: "Authorization failed", retry: "Try again", site: "Website", name: "Name", sendTo: "Code sent to", pay: "Pay", orderFailed: "Could not create the order", orderFailedLater: "Could not create the order. Please try again later.", notCompleted: "Payment was not completed", network: "Network error. Please try again.", queryFailed: "Could not check the payment. Please try again later.", checkPaid: "I have paid, check the result", payAgain: "Pay again", mismatch: "The amount paid does not match the order. Please contact us.", noOrder: "Order not found", yourCode: "Your access code", badRequest: "Invalid request", noIp: "Could not read your network address", scan: "Scan with WeChat to pay", redirecting: "Payment received, redirecting…" },
-  ja: { lang: "ja", closed: "決済はまだ開始されていません", guide: "右上の ··· をタップして「ブラウザで開く」を選んでください", openBrowser: "ブラウザで開いてください", invalid: "無効なリンクです", unsellable: "購入できません", notFound: "ページが見つかりません", failed: "エラーが発生しました。しばらくしてからもう一度お試しください。", noAuth: "認証されませんでした", authFailed: "認証に失敗しました", retry: "やり直す", site: "ウェブサイト", name: "お名前", sendTo: "コードの送付先", pay: "支払う", orderFailed: "注文を作成できませんでした", orderFailedLater: "注文を作成できませんでした。しばらくしてからもう一度お試しください。", notCompleted: "支払いが完了しませんでした", network: "ネットワークエラーです。もう一度お試しください。", queryFailed: "確認に失敗しました。しばらくしてからもう一度お試しください。", checkPaid: "支払い済み、結果を確認する", payAgain: "もう一度支払う", mismatch: "お支払い金額が注文と一致しません。お問い合わせください。", noOrder: "注文が見つかりません", yourCode: "アクセスコード", badRequest: "無効なリクエストです", noIp: "ネットワークアドレスを取得できません", scan: "WeChatでスキャンして支払う", redirecting: "お支払いを確認しました。移動しています…" }
+  zh: { lang: "zh-CN", closed: "支付暂未开放", guide: "请点击右上角 ··· 选择『在浏览器打开』", openBrowser: "请在浏览器打开", invalid: "链接无效", unsellable: "不可购买", notFound: "页面不存在", failed: "出错了，请稍后重试", noAuth: "未获得授权", authFailed: "授权失败", retry: "重试", site: "网站", name: "姓名", sendTo: "兑换码发送至", wechatPay: "微信支付", orderFailed: "下单失败", orderFailedLater: "下单失败，请稍后重试", notCompleted: "支付未完成", network: "网络错误，请重试", queryFailed: "查询失败，请稍后重试", checkPaid: "我已支付，查询结果", payAgain: "重新支付", mismatch: "支付金额与订单不符，请联系我们", noOrder: "订单不存在", yourCode: "你的访问码", badRequest: "请求无效", noIp: "无法获取网络地址", scan: "请用微信扫码支付", paid: "支付成功", redirecting: "支付成功，正在跳转…" },
+  en: { lang: "en", closed: "Payments are not open yet", guide: "Tap ··· at the top right and choose “Open in browser”", openBrowser: "Please open this in a browser", invalid: "Invalid link", unsellable: "Not available for purchase", notFound: "Page not found", failed: "Something went wrong. Please try again later.", noAuth: "Not authorized", authFailed: "Authorization failed", retry: "Try again", site: "Website", name: "Name", sendTo: "Code sent to", wechatPay: "WeChat Pay", orderFailed: "Could not create the order", orderFailedLater: "Could not create the order. Please try again later.", notCompleted: "Payment was not completed", network: "Network error. Please try again.", queryFailed: "Could not check the payment. Please try again later.", checkPaid: "I have paid, check the result", payAgain: "Pay again", mismatch: "The amount paid does not match the order. Please contact us.", noOrder: "Order not found", yourCode: "Your access code", badRequest: "Invalid request", noIp: "Could not read your network address", scan: "Scan with WeChat to pay", paid: "Payment received", redirecting: "Payment received, redirecting…" },
+  ja: { lang: "ja", closed: "決済はまだ開始されていません", guide: "右上の ··· をタップして「ブラウザで開く」を選んでください", openBrowser: "ブラウザで開いてください", invalid: "無効なリンクです", unsellable: "購入できません", notFound: "ページが見つかりません", failed: "エラーが発生しました。しばらくしてからもう一度お試しください。", noAuth: "認証されませんでした", authFailed: "認証に失敗しました", retry: "やり直す", site: "ウェブサイト", name: "お名前", sendTo: "コードの送付先", wechatPay: "WeChat Pay", orderFailed: "注文を作成できませんでした", orderFailedLater: "注文を作成できませんでした。しばらくしてからもう一度お試しください。", notCompleted: "支払いが完了しませんでした", network: "ネットワークエラーです。もう一度お試しください。", queryFailed: "確認に失敗しました。しばらくしてからもう一度お試しください。", checkPaid: "支払い済み、結果を確認する", payAgain: "もう一度支払う", mismatch: "お支払い金額が注文と一致しません。お問い合わせください。", noOrder: "注文が見つかりません", yourCode: "アクセスコード", badRequest: "無効なリクエストです", noIp: "ネットワークアドレスを取得できません", scan: "WeChatでスキャンして支払う", paid: "お支払いが完了しました", redirecting: "お支払いを確認しました。移動しています…" }
 } satisfies Record<Locale, Record<string, string>>;
 
 const PAGE_HEAD = (locale: Locale) => `<!doctype html><html lang="${COPY[locale].lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hatch</title>
-<style>body{font:16px/1.6 system-ui,sans-serif;margin:0;padding:64px 24px;text-align:center}.price{font-size:44px;margin:0 0 32px}.btn{display:inline-block;font:inherit;padding:12px 40px;border:0;border-radius:8px;background:#111;color:#fff;text-decoration:none}.btn:disabled{opacity:.5}.alt{display:block;margin-top:20px;color:#555}.code{font:700 32px ui-monospace,monospace;letter-spacing:4px}#err{color:#b00020;margin-top:16px}</style></head><body>`;
+<style>body{font:16px/1.6 system-ui,sans-serif;margin:0;padding:64px 24px;text-align:center}.price{font-size:44px;margin:0 0 32px}.btn{display:inline-block;font:inherit;font-size:17px;font-weight:700;line-height:1.3;min-height:52px;box-sizing:border-box;padding:12px 40px;border:0;border-radius:14px;background:#111;color:#fff;text-decoration:none}.btn:disabled{opacity:.5}.alt{display:block;margin-top:20px;color:#555}.code{font:700 32px ui-monospace,monospace;letter-spacing:4px}#err{color:#b00020;margin-top:16px}</style></head><body>`;
 const guide = (locale: Locale) => `<svg width="72" height="72" viewBox="0 0 72 72" style="position:fixed;top:12px;right:16px" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 58C20 36 38 22 58 14M40 12l18 2-4 18"/></svg><p style="margin-top:120px;font-size:20px">${COPY[locale].guide}</p>`;
 const page = (locale: Locale, body: string, script = "") => `${PAGE_HEAD(locale)}${body}${script ? `<script>${script}</script>` : ""}</body></html>`;
 const LOGO = "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/brand/cobrand/msc-x-hatch-light.png";
@@ -69,14 +69,22 @@ main.co{max-width:420px;margin:0 auto}
 .co dl div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
 .co dt{color:var(--mute);flex:none}.co dd{margin:0;text-align:right;overflow-wrap:anywhere}
 .co .price{font-size:36px;font-weight:700;letter-spacing:-.5px;margin:18px 0 0;background:linear-gradient(90deg,#469A21,#0D7FBB);-webkit-background-clip:text;background-clip:text;color:transparent}
-.co .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:16px;padding:14px;border-radius:12px;font-size:17px;font-weight:600;cursor:pointer}
-.co .btn:disabled{opacity:.6;cursor:default}
-.co .spin{display:none;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+.co .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:16px;padding:12px 20px;cursor:pointer}
+.co #pay{border:1px solid #07c160;background:#07c160;box-shadow:0 6px 16px rgba(7,193,96,.3);transition:transform 180ms cubic-bezier(.2,.7,.2,1),box-shadow 180ms cubic-bezier(.2,.7,.2,1)}
+.co #pay:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 22px rgba(7,193,96,.4)}
+.co #pay:focus-visible{outline:3px solid rgba(7,193,96,.35);outline-offset:2px}
+.co #pay:disabled{opacity:.5;box-shadow:none;cursor:not-allowed}
+.co #pay.busy{opacity:.9;cursor:progress;pointer-events:none}
+.co #pay.busy:hover{transform:none;box-shadow:0 6px 16px rgba(7,193,96,.3)}
+.co .btn.busy .wx{display:none}
+.co .spin{display:none;width:16px;height:16px;margin:0 4px;box-sizing:border-box;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
 .co .btn.busy .spin{display:inline-block}
 @keyframes sp{to{transform:rotate(360deg)}}
 .co #err{min-height:20px;text-align:center;font-size:14px}
+.co .done .ok{display:grid;place-items:center;width:48px;height:48px;margin:0 auto 12px;border-radius:50%;background:#07c160;animation:pop .35s cubic-bezier(.2,.7,.2,1)}
+@keyframes pop{from{transform:scale(.4);opacity:0}}
 .co .done .spin2{width:32px;height:32px;margin:0 auto 12px;box-sizing:border-box;border:3px solid #d9f3e4;border-top-color:#07c160;border-radius:50%;animation:sp .8s linear infinite}
-@media (prefers-reduced-motion:reduce){.co .spin,.co .spin2{animation-duration:2s}}
+@media (prefers-reduced-motion:reduce){.co .spin,.co .spin2{animation-duration:2s}.co #pay{transition:none}.co .done .ok{animation:none}}
 .co #qr{text-align:center;margin-top:16px;font-size:14px}.co #qr svg{display:block;width:220px;height:220px;margin:0 auto 8px}
 </style>`;
 /** The site as a bare domain, or undefined when it is not a plausible one. */
@@ -89,6 +97,7 @@ export const siteDomain = (value: string | null): string | undefined => {
   } catch { return undefined; }
 };
 const buyerName = (value: string | null) => { const name = (value ?? "").replace(/\s+/g, " ").trim(); return name && name.length <= 40 ? name : undefined; };
+const WECHAT_MARK = `<svg class="wx" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M9.5 3C5.4 3 2 5.8 2 9.3c0 2 1.1 3.7 2.8 4.9l-.7 2.1 2.5-1.3c.9.3 1.8.4 2.9.4h.5a5.5 5.5 0 0 1-.3-1.7c0-3.2 3-5.8 6.7-5.8h.4C16.1 5 13.1 3 9.5 3Zm-3 3.6a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm6 0a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z"/><path fill="currentColor" d="M22 14.2c0-2.8-2.7-5-6-5s-6 2.2-6 5 2.7 5 6 5c.8 0 1.6-.1 2.3-.4l2 1.1-.6-1.8c1.5-.9 2.3-2.3 2.3-3.9Zm-7.9-.7a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Zm3.8 0a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Z"/></svg>`;
 const jsLiteral = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 export class HatchPay {
@@ -139,7 +148,7 @@ export class HatchPay {
     const product = url.searchParams.get("product") ?? "", email = (url.searchParams.get("email") ?? "").trim(), back = url.searchParams.get("back");
     return PRODUCT.test(product) && EMAIL.test(email) && isChatUrl(back) ? { product, email, back, locale: localeOf(url.searchParams.get("locale")) } : undefined;
   }
-  private payUrl(ask: { product: string; email: string; back: string; locale: Locale }) {
+  private payUrl(ask: { product: string; email: string; back: string; locale: Locale; name?: string; site?: string }) {
     return `${this.deps.publicBase}/?${new URLSearchParams(ask)}`;
   }
 
@@ -181,11 +190,13 @@ export class HatchPay {
     const info = await this.productInfo(ask.product), e = escapeHtml, t = COPY[ask.locale];
     const row = (label: string, value?: string) => value ? `<div><dt>${label}</dt><dd>${e(value)}</dd></div>` : "";
     const head = `${info.name ? `<h1>${e(info.name)}</h1>` : ""}${info.description ? `<p class="desc">${e(info.description)}</p>` : ""}`;
-    return page(ask.locale, `${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="260" height="48" alt="MSC × Hatch"><div class="card">${head}<dl>${row(t.site, order.site)}${row(t.name, order.name)}${row(t.sendTo, ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay"><span class="spin"></span>${t.pay}</button><div id="qr"></div><div id="err"></div></div></main>`, `
-const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err'),qr=document.getElementById('qr');
-const paid=u=>{btn.style.display='none';err.textContent='';qr.innerHTML='<div class="done"><div class="spin2"></div>'+${jsLiteral(t.redirecting)}+'</div>';location.href=u};
-const fail=m=>{err.textContent=m;btn.disabled=false;btn.classList.remove('busy')};
-const go=async()=>{btn.disabled=true;btn.classList.add('busy');err.textContent='';
+    return page(ask.locale, `${CHECKOUT_CSS}<main class="co"><img class="logo" src="${LOGO}" width="260" height="48" alt="MSC × Hatch"><div class="card">${head}<dl>${row(t.site, order.site)}${row(t.name, order.name)}${row(t.sendTo, ask.email)}</dl><p class="price">¥${yuan}</p><button class="btn" id="pay">${WECHAT_MARK}<span class="spin"></span><span>${t.wechatPay} ¥${yuan}</span></button><div id="qr"></div><div id="err"></div></div></main>`, `
+const ask=${jsLiteral({ ...ask, ...order.name ? { name: order.name } : {}, ...order.site ? { site: order.site } : {}, ...openid ? { openid } : {} })},btn=document.getElementById('pay'),err=document.getElementById('err'),qr=document.getElementById('qr');
+const paid=u=>{btn.style.display='none';err.textContent='';qr.innerHTML='<div class="done"><div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>'+${jsLiteral(t.paid)}+'</div>';
+ setTimeout(()=>{qr.innerHTML='<div class="done"><div class="spin2"></div>'+${jsLiteral(t.redirecting)}+'</div>';location.href=u},800)};
+let busy=false;
+const fail=m=>{err.textContent=m;busy=false;btn.disabled=false;btn.ariaBusy='false';btn.classList.remove('busy')};
+const go=async()=>{if(busy)return;busy=true;btn.ariaBusy='true';btn.classList.add('busy');err.textContent='';
  try{const r=await fetch(${jsLiteral(`${this.deps.publicBase}/order`)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ask)});
   const j=await r.json();if(!r.ok)return fail(j.error||${jsLiteral(t.orderFailed)});
   if(j.mode==='h5'){location.href=j.url;return}
@@ -219,14 +230,14 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
     const ask = this.ask(new URL(`http://x/?${new URLSearchParams({ product: String(body.product ?? ""), email: String(body.email ?? ""), back: String(body.back ?? ""), locale: String(body.locale ?? "") })}`));
     if (!ask) return this.json(res, 400, { error: t.invalid });
     if (!await this.deps.capabilities.has(ask.product, ACCESS_CODE_CAPABILITY)) return this.json(res, 403, { error: t.unsellable });
-    const name = buyerName(typeof body.name === "string" ? body.name : null);
+    const name = buyerName(typeof body.name === "string" ? body.name : null), site = siteDomain(typeof body.site === "string" ? body.site : null);
     const openid = typeof body.openid === "string" && body.openid ? body.openid : undefined;
     const payerIp = payerIpOf(req.headers);
     const native = !openid && isDesktop(req);
     if (!openid && !native && !payerIp) return this.json(res, 400, { error: t.noIp });
 
     const { code, outTradeNo } = await this.deps.codes.createPending({ productId: ask.product, email: ask.email, ...name ? { name } : {}, payChannel: openid ? "jsapi" : native ? "native" : "h5", locale });
-    const returnUrl = `${this.deps.publicBase}/return?${new URLSearchParams({ o: outTradeNo, back: ask.back, locale })}`;
+    const returnUrl = `${this.deps.publicBase}/return?${new URLSearchParams({ o: outTradeNo, back: ask.back, locale, ...site ? { site } : {} })}`;
     const order = {
       outTradeNo, description: "Hatch 兑换码", amountFen: this.deps.priceFen,
       expiresAt: new Date((this.deps.now?.() ?? new Date()).getTime() + ORDER_MINUTES * 60_000)
@@ -279,8 +290,9 @@ addEventListener('pageshow',e=>{if(e.persisted){started=true;fail('')}});`);
       : this.html(res, 200, page(locale, `<p>${t.yourCode}</p><p class="code">${escapeHtml(settled.code)}</p>`));
   }
 
-  private waiting(url: URL, locale: Locale, order: { productId: string; email: string | null }, back: string | null, note?: string) {
-    const again = isChatUrl(back) && order.email ? `<a class="alt" href="${escapeHtml(this.payUrl({ product: order.productId, email: order.email, back, locale }))}">${COPY[locale].payAgain}</a>` : "";
+  private waiting(url: URL, locale: Locale, order: { productId: string; email: string | null; name: string | null }, back: string | null, note?: string) {
+    const site = siteDomain(url.searchParams.get("site"));
+    const again = isChatUrl(back) && order.email ? `<a class="alt" href="${escapeHtml(this.payUrl({ product: order.productId, email: order.email, back, locale, ...order.name ? { name: order.name } : {}, ...site ? { site } : {} }))}">${COPY[locale].payAgain}</a>` : "";
     return page(locale, `${note ? `<p>${escapeHtml(note)}</p>` : ""}<a class="btn" href="${escapeHtml(url.pathname + url.search)}">${COPY[locale].checkPaid}</a>${again}`);
   }
 

@@ -28,6 +28,7 @@ test("the pay page script shows a spinner and the localized redirect line once p
     for (const [locale, line] of [["zh", "支付成功，正在跳转…"], ["en", "Payment received, redirecting…"], ["ja", "お支払いを確認しました。移動しています…"]]) {
       const html = await (await fetch(s.base + q({ locale }))).text();
       assert.ok(html.includes(line), locale);
+      assert.ok(html.includes(({ zh: "支付成功", en: "Payment received", ja: "お支払いが完了しました" } as Record<string, string>)[locale]!), `${locale} success line`);
       assert.match(html, /paid\(j\.returnUrl\)/);
     }
   } finally { s.close(); }
@@ -189,7 +190,7 @@ async function serveNative(tradeState: string) {
     },
     codes: {
       createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: TRADE }; },
-      order: async (o: string) => o === TRADE ? { productId: PRODUCT, email: "a@b.co" } : undefined
+      order: async (o: string) => o === TRADE ? { productId: PRODUCT, email: "a@b.co", name: (created[0]?.name as string | undefined) ?? null } : undefined
     },
     openids: {}, mailer: {}
   } as unknown as ConstructorParameters<typeof HatchPay>[0]);
@@ -224,4 +225,16 @@ test("/status says whether WeChat has the order paid; an unknown or malformed or
       assert.equal((await fetch(`${s.base}/status?o=x`)).status, 404);
     } finally { s.close(); }
   }
+});
+
+test("the pay-again link after an unpaid return carries the order site, name, email, locale and back", async () => {
+  const s = await serveNative("NOTPAY");
+  try {
+    const res = await fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "user-agent": DESKTOP }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, locale: "en", site: "https://www.Example.com/x", name: "王小明" }) });
+    const { returnUrl } = await res.json() as { returnUrl: string };
+    const waiting = await (await fetch(returnUrl.replace("https://anyteach.cn", new URL(s.base).origin))).text();
+    const href = /class="alt" href="([^"]+)"/.exec(waiting)![1]!.replaceAll("&amp;", "&");
+    const params = new URL(href).searchParams;
+    assert.deepEqual([params.get("site"), params.get("name"), params.get("email"), params.get("locale"), params.get("back")], ["example.com", "王小明", "a@b.co", "en", BACK]);
+  } finally { s.close(); }
 });
