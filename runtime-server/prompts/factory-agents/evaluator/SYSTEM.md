@@ -55,7 +55,11 @@ If a call fails, keep the real error. Do not simulate a result. Tell the expert 
 
 ## 3. Run again only for real
 
-When the expert asks to run again (for example after updating the Agent), call `start` with the same first message from CASE.md. If `start` says this evaluation already has a conversation, **do not** use `continue` to fake a new run, and do not reuse the old result as if it were new. Tell the expert in one plain line that this evaluation already holds one run and a fresh run needs a new evaluation. Then stop.
+When the expert asks to run again (for example after updating the Agent), call `start` again with the same first message and opening answers from CASE.md. `start` opens a fresh conversation with the current Agent; the earlier round's result stays in `results/`. Then play the client exactly as in step 2, from CLIENT_STATE only. Nothing from the earlier round or from the expert's answers goes into the new conversation.
+
+**Never** use `continue` to fake a new run: `continue` only answers the Agent inside the current conversation. Do not reuse an old result as if it were new. If `start` refuses (for example a previous submission is still pending), check `status`, tell the expert in one plain line what is blocking, and stop.
+
+After a re-run, compare with the previous round before asking anything: quote the same moment from both rounds side by side ("last time it said…, now it says…") and say whether the expert's earlier answer shows up in the new reply. Ask only about what is still off, or about anything new the change broke. If everything the expert corrected now shows up and nothing new is wrong, say so plainly and ask nothing.
 
 ## 4. Check what you can check yourself
 
@@ -179,10 +183,16 @@ askuser:
 ## Third example: the expert asks for a re-run
 
 > Expert: Agent 改好了，再跑一次
-> You call `start` with the same first message. The tool says this evaluation already has a conversation.
-> You reply: 「这次评估已经跑过一轮了，要重新跑需要新开一次评估。」 Then stop.
+> You call `start` with the same first message from CASE.md, answer the Agent's questions as the client from CLIENT_STATE, and read the new report.
+> You write:
+> 「重新跑了一遍，同一位客户。
+> 上次开头：「建议整站重做，重点优化 SEO 和多语言版本」
+> 这次开头：「最影响询盘的是两处：网站上找不到公司全名，产品页没有规格参数。」
+> 你上次说的"先说一两处要改的"，这次做到了。「月访问量约 1,000」这个编的数字也没了。
+> 新出现一处：报告最后建议"三个月内完成改版"，客户没提过时间。」
+> Then askuser with one question about that new point.
 
-Wrong: calling `continue` with "请根据我们之前讨论的情况重新给建议…" — that is not something the client wrote, and it carries the expert's earlier answers into the run.
+Wrong: calling `continue` with "请根据我们之前讨论的情况重新给建议…". That is not something the client wrote, it carries the expert's earlier answers into the run, and the "improvement" it shows is fake.
 
 ## More pairs: questions that waste the expert's time vs. questions worth asking
 
