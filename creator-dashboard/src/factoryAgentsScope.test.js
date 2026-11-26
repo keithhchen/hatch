@@ -124,8 +124,8 @@ test('Case Builder creates the client case and receives realism feedback', async
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/case-generation/SYSTEM.md', import.meta.url), 'utf8');
   assert.match(i18n, /'case-generation': '查看 Agent 构建的客户案例，或指出哪里不符合真实情况/);
   assert.doesNotMatch(i18n, /'case-generation': '描述一个真实客户会遇到的情境/);
-  assert.match(prompt, /Each time, you prepare one complete client case/);
-  assert.match(prompt, /Build a situation with the texture of real life and internal consistency/);
+  assert.match(prompt, /does this look like the next client who will actually show up/);
+  assert.match(prompt, /Use `publish_form` to publish one short review page/);
 });
 
 test('Factory connection errors use a floating toast and plain-language copy', async () => {

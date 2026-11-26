@@ -45,16 +45,14 @@ test("Build is updatable only by the interview, never by advanced output", async
   assert.equal(stateOf(agentEntries(definitions, [{ ...generation, status: "failed" }], [upload]), "generation"), "failed");
 });
 
-test("Evaluator is a Creator calibration loop, not a publishing or scoring loop", async () => {
+test("Evaluator shows the run to the expert, then asks; it never declares a verdict or fakes a re-run", async () => {
   const evaluator = (await initialAgentDefinitions()).find(definition => definition.role === "evaluator");
   assert.ok(evaluator);
-  assert.match(evaluator.systemPrompt, /find the few key misalignments most likely to change the next version of the Agent/);
-  assert.match(evaluator.systemPrompt, /pick 1–3 high-leverage/);
-  assert.match(evaluator.systemPrompt, /After calling askuser, do not automatically rerun the case/);
-  assert.match(evaluator.systemPrompt, /Send at most one askuser batch per real run/);
-  assert.match(evaluator.systemPrompt, /observed behavior → consequence for the client\/deliverable/);
-  assert.match(evaluator.systemPrompt, /upload a corpus, publish a Product/);
-  assert.match(evaluator.systemPrompt, /Do not write the report as a pass\/fail scoring table/);
+  assert.match(evaluator.systemPrompt, /You never decide on the expert's behalf whether the Agent is good enough/);
+  assert.match(evaluator.systemPrompt, /Every finished run ends with your questions to the expert, in the same turn/);
+  assert.match(evaluator.systemPrompt, /Answer only what was asked/);
+  assert.match(evaluator.systemPrompt, /do not\*\* use `continue` to fake a new run/);
+  assert.match(evaluator.systemPrompt, /No verdicts, no scores/);
 });
 
 test("definition repository is read dynamically for each request", async () => {
