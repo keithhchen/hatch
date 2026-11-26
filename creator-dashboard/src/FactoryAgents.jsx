@@ -49,7 +49,7 @@ import { NodeExplainer } from "./NodeExplainer.jsx";
 import { explainerNodeForRole } from "./nodeExplainers.js";
 import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { ADVANCED_STEPS, CONTENT_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEPS, CASES_STEP, CONTENT_STEP, EVALUATOR_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./webChat.css";
 import "./factoryAgents.css";
 
@@ -132,7 +132,7 @@ export function FactoryAgents({ productId, product = null, reloadProduct, tab = 
   </div></ThemeProvider>;
 }
 
-// A narrow rail of status icon + short label (full name and state in the tooltip). Cases and Evaluator are hidden from Experts.
+// A narrow rail of status icon + short label (full name and state in the tooltip).
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
   const row = (step, state, className) => {
@@ -141,7 +141,8 @@ function FactoryStepper({ states, current, onStep, t }) {
   };
   return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>
     {states.map(({ step, state }) => row(step, state))}
-    {row(INSPIRATION_STEP, undefined, "factory-stepper__aside")}
+    {row(CASES_STEP, undefined, "factory-stepper__aside")}
+    {row(EVALUATOR_STEP)}
     {row(CONTENT_STEP)}
   </ol>;
 }

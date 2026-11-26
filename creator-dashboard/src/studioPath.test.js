@@ -86,6 +86,6 @@ test("Inspiration sits after Publish but is not a step: no state, no progress; C
   assert.equal(studioStepForRoute("create", "content-creation"), "content");
   const { readFile } = await import("node:fs/promises");
   const jsx = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
-  assert.match(jsx, /row\(INSPIRATION_STEP, undefined, "factory-stepper__aside"\)/, "the Inspiration entry is a stepper item");
+  assert.match(jsx, /row\(CASES_STEP, undefined, "factory-stepper__aside"\)\}\s+\{row\(EVALUATOR_STEP\)\}\s+\{row\(CONTENT_STEP\)\}/, "the rail lists Cases, Evaluator, Content"); assert.doesNotMatch(jsx, /row\(INSPIRATION_STEP/, "Inspiration is not in the rail");
   assert.equal(INSPIRATION_STEP.items[0][1], "inspiration");
 });
