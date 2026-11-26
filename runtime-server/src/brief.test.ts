@@ -50,8 +50,20 @@ test("Product Brief draft is deterministic, text-only, and derived from Product 
   const draft = draftBriefSpecForProduct("Decision Coach", "Turn messy evidence into one clear recommendation.");
   assert.deepEqual(draft.fields.map((field) => field.id), ["goal", "context"]);
   assert.equal(draft.fields[0]?.required, true);
-  assert.match(draft.fields[0]?.label ?? "", /Decision Coach/);
-  assert.match(draft.fields[1]?.label ?? "", /messy evidence/);
+  assert.match(String(draft.fields[0]?.label), /Decision Coach/);
+  assert.match(String(draft.fields[1]?.label), /messy evidence/);
+});
+
+test("a field label may be given per language; the model is given one string in the Brief's language, else Chinese", () => {
+  const label = { zh: " 网址 ", en: "Website", ja: "URL", fr: "x" };
+  const trilingual = { contract_version: "1", fields: [{ id: "site", label, required: true }, { id: "locale", label: "Page language", required: false, type: "line" }] };
+  assert.deepEqual(normalizeBriefSpec(trilingual).fields[0]?.label, { zh: "网址", en: "Website", ja: "URL" });
+  assert.throws(() => normalizeBriefSpec({ ...trilingual, fields: [{ id: "site", label: { fr: "x" }, required: true }] }), (error: unknown) => (error as { code?: string }).code === "brief_spec_invalid");
+  const snapshot = createBriefSnapshot(trilingual, [{ field_id: "site", value: "a.com" }, { field_id: "locale", value: "ja" }]);
+  assert.equal(normalizeBriefSnapshot(snapshot).spec_digest, snapshot.spec_digest, "the stored label round-trips");
+  const shown = (text: string) => (JSON.parse(text.split("\n\n")[1]!) as { fields: Array<{ label: string }> }).fields[0]?.label;
+  assert.equal(shown(briefSnapshotPromptBlock(snapshot)), "URL");
+  assert.equal(shown(briefSnapshotPromptBlock(createBriefSnapshot({ ...trilingual, fields: [trilingual.fields[0]] }, [{ field_id: "site", value: "a.com" }]))), "网址");
 });
 
 test("an email field is validated where the Brief is submitted and read back by briefEmail", () => {

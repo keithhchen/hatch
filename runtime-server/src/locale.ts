@@ -12,3 +12,21 @@ export function normalizeLocale(value: unknown): Locale | null {
 }
 
 export const localeOf = (value: unknown): Locale => normalizeLocale(value) ?? DEFAULT_LOCALE;
+
+/** A visible text given as one string, or one per language; the web picks the reader's, a model gets `textIn`. */
+export type LocalizedText = string | Partial<Record<Locale, string>>;
+
+/** The text as given, trimmed: empty languages dropped, languages in a fixed order (so a digest of it is stable); undefined when nothing is left. */
+export function normalizeLocalizedText(value: unknown): LocalizedText | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const given = Object.fromEntries(LOCALES.flatMap(locale => {
+    const text = (value as Record<string, unknown>)[locale];
+    return typeof text === "string" && text.trim() ? [[locale, text.trim()]] : [];
+  }));
+  return Object.keys(given).length ? given : undefined;
+}
+
+/** The text in one language, else Chinese, else the first one given. */
+export const textIn = (text: LocalizedText, locale: Locale = DEFAULT_LOCALE): string =>
+  typeof text === "string" ? text : (text[locale] ?? text.zh ?? Object.values(text).find(Boolean) ?? "");

@@ -2,6 +2,7 @@ import type { AgentCorpusResolverLike, ResolvedAgentCorpus } from "../agentCorpu
 import { resolveSessionBinding, type SessionBinding } from "../chat/sessionBinding.js";
 import { AuthorizationError, type AuthIdentityResolver } from "../entitlements.js";
 import { UUID_V4_RE } from "../identity.js";
+import { textIn } from "../locale.js";
 import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import type { ApiCaller } from "./auth.js";
 import { notFound } from "./errors.js";
@@ -33,7 +34,7 @@ export function modelObject(resolved: Pick<ResolvedAgentCorpus, "corpus">): Mode
   return {
     id: modelIdOf(product.id), object: "model", created: 0, owned_by: creator.name || creator.id,
     name: product.name, description: product.description ?? "",
-    task_brief: product.brief_spec ? { fields: product.brief_spec.fields.map(({ id, label, required }) => ({ id, label, required })) } : null
+    task_brief: product.brief_spec ? { fields: product.brief_spec.fields.map(({ id, label, required }) => ({ id, label: textIn(label), required })) } : null
   };
 }
 

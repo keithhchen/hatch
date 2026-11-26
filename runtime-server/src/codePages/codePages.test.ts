@@ -116,6 +116,13 @@ test("landing: a field may be given per language; only the non-empty zh, en, ja 
   assert.deepEqual((await pages.landing(PRODUCT)).landing, { agent_name: { zh: "诊断 Agent", en: "Audit Agent" }, hook: { zh: "你好" } });
 });
 
+test("progress: a step label may be given per language, kept as given (trimmed, zh/en/ja only)", async () => {
+  const { pages, root } = await setup();
+  await writeFile(path.join(root, "runtime", "progress.json"), JSON.stringify({ steps: [{ id: "fetch", label: { zh: "抓取网站", en: " Open the site ", fr: "x" }, tools: ["fetch_url"] }] }));
+  await pages.intake(CODE, answers);
+  assert.deepEqual((await pages.status(CODE)).steps, [{ id: "fetch", label: { zh: "抓取网站", en: "Open the site" } }]);
+});
+
 test("intake: answers carrying the page's locale are accepted, and the locale is not an answer", async () => {
   const { pages } = await setup();
   assert.equal((await pages.intake(CODE, { ...answers, locale: "en" })).state, "generating");

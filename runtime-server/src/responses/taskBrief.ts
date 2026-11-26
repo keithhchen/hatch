@@ -1,4 +1,5 @@
 import { BriefValidationError, createBriefSnapshot, type BriefSnapshot, type BriefSpec } from "../brief.js";
+import { textIn } from "../locale.js";
 import { invalidRequest } from "./errors.js";
 
 /**
@@ -25,7 +26,7 @@ export function taskBriefSnapshot(spec: BriefSpec | undefined, taskBrief: unknow
     if (!(error instanceof BriefValidationError)) throw error;
     if (error.code === "brief_required_answer_missing") {
       const missing = spec!.fields.filter((field) => field.required && !given[field.id]?.toString().trim());
-      throw invalidRequest("task_brief_required", `task_brief must answer: ${missing.map((field) => `${field.id} (${field.label})`).join("; ")}`, `task_brief.${missing[0]?.id ?? ""}`);
+      throw invalidRequest("task_brief_required", `task_brief must answer: ${missing.map((field) => `${field.id} (${textIn(field.label)})`).join("; ")}`, `task_brief.${missing[0]?.id ?? ""}`);
     }
     const unknown = answers.find((answer) => !spec!.fields.some((field) => field.id === answer.field_id));
     throw invalidRequest("invalid_task_brief", unknown ? `task_brief has no field ${unknown.field_id}.` : error.message, unknown ? `task_brief.${unknown.field_id}` : "task_brief");

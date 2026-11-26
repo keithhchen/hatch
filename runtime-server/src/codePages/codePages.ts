@@ -7,7 +7,7 @@ import { BRIEF_LOCALE_FIELD, BriefValidationError, briefAnswer, briefEmail, brie
 import { ChatError } from "../chat/principal.js";
 import { conversationBinding, durableConversationId } from "../chat/sessionBinding.js";
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
-import { localeOf, type Locale } from "../locale.js";
+import { localeOf, normalizeLocalizedText, type Locale, type LocalizedText } from "../locale.js";
 
 /** What a person sees at /c/<code>: the entry, the intake form, the wait, the report, or a plain failure. */
 export type CodePageState = "entry" | "event" | "intake" | "generating" | "ready" | "failed";
@@ -23,9 +23,9 @@ export type CodePageStatus = {
   /** The buyer's name as they gave it (the Brief's `name`); known once the intake is in. */
   name?: string;
   /** Intake only: what to ask. The access code is not asked: the page's own address is it. */
-  fields?: Array<{ id: string; label: string; required: boolean; type?: string }>;
+  fields?: Array<{ id: string; label: LocalizedText; required: boolean; type?: string }>;
   /** Generating only: the steps the Product's own mapping names, and which one the Run has reached (-1: none yet). */
-  steps?: Array<{ id: string; label: string }>;
+  steps?: Array<{ id: string; label: LocalizedText }>;
   step?: number;
   /** Generating only: where the report will be mailed (the Brief's email), as the buyer gave it. */
   email?: string;
@@ -35,13 +35,13 @@ export type CodePageStatus = {
 };
 
 /** The Product's own map from what its Run does to steps a person understands: `runtime/progress.json` in its Corpus. */
-export type ProgressMap = { steps: Array<{ id: string; label: string; tools: string[] }> };
+export type ProgressMap = { steps: Array<{ id: string; label: LocalizedText; tools: string[] }> };
 
 export async function readProgressMap(corpusRoot: string | undefined): Promise<ProgressMap | undefined> {
   if (!corpusRoot) return undefined;
   try {
-    const parsed = JSON.parse(await readFile(path.join(corpusRoot, "runtime", "progress.json"), "utf8")) as ProgressMap;
-    return Array.isArray(parsed.steps) ? parsed : undefined;
+    const parsed = JSON.parse(await readFile(path.join(corpusRoot, "runtime", "progress.json"), "utf8")) as { steps?: Array<{ id: string; label: unknown; tools: string[] }> };
+    return Array.isArray(parsed.steps) ? { steps: parsed.steps.map(step => ({ ...step, label: normalizeLocalizedText(step.label) ?? "" })) } : undefined;
   } catch { return undefined; }
 }
 
@@ -49,24 +49,13 @@ export async function readProgressMap(corpusRoot: string | undefined): Promise<P
  * The Agent's own introduction on the landing: `runtime/landing.json` in its Corpus. Any field may be absent; nothing is made up for it.
  * Each field is one string, or one per language `{ zh, en, ja }`; the web picks the reader's.
  */
-export type LandingText = string | Partial<Record<"zh" | "en" | "ja", string>>;
-export type LandingCopy = { agent_name?: LandingText; hook?: LandingText; cta?: LandingText };
-
-const landingText = (value: unknown): LandingText | undefined => {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (!value || typeof value !== "object") return undefined;
-  const given = Object.fromEntries((["zh", "en", "ja"] as const).flatMap((language) => {
-    const text = (value as Record<string, unknown>)[language];
-    return typeof text === "string" && text.trim() ? [[language, text.trim()]] : [];
-  }));
-  return Object.keys(given).length ? given : undefined;
-};
+export type LandingCopy = { agent_name?: LocalizedText; hook?: LocalizedText; cta?: LocalizedText };
 
 export async function readLandingCopy(corpusRoot: string | undefined): Promise<LandingCopy | undefined> {
   if (!corpusRoot) return undefined;
   try {
     const parsed = JSON.parse(await readFile(path.join(corpusRoot, "runtime", "landing.json"), "utf8")) as Record<string, unknown>;
-    return Object.fromEntries((["agent_name", "hook", "cta"] as const).flatMap((key) => { const text = landingText(parsed[key]); return text ? [[key, text]] : []; }));
+    return Object.fromEntries((["agent_name", "hook", "cta"] as const).flatMap((key) => { const text = normalizeLocalizedText(parsed[key]); return text ? [[key, text]] : []; }));
   } catch { return undefined; }
 }
 

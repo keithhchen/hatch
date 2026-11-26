@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { normalizeLocale, type Locale } from "./locale.js";
+import { normalizeLocale, normalizeLocalizedText, textIn, type Locale, type LocalizedText } from "./locale.js";
 
 export const BRIEF_SPEC_CONTRACT_VERSION = "1" as const;
 export const MAX_BRIEF_FIELDS = 16;
@@ -21,7 +21,8 @@ export type BriefFieldType = (typeof BRIEF_FIELD_TYPES)[number];
 
 export type BriefFieldSpec = {
   id: string;
-  label: string;
+  /** One string, or one per language `{ zh, en, ja }`: the web shows the reader's, a model is given `fieldLabel`'s. */
+  label: LocalizedText;
   required: boolean;
   /** Absent means `text`, so a spec written before types existed keeps its digest. */
   type?: BriefFieldType;
@@ -116,11 +117,11 @@ export function normalizeBriefSpec(value: unknown): BriefSpec {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} has an unknown type`);
     }
     const id = typeof field.id === "string" ? field.id.trim() : "";
-    const label = typeof field.label === "string" ? field.label.trim() : "";
+    const label = normalizeLocalizedText(field.label);
     if (!FIELD_ID.test(id) || id.length > 128 || seen.has(id)) {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} has an invalid or duplicate id`);
     }
-    if (!label || label.length > MAX_BRIEF_FIELD_LABEL_CHARS || /[\u0000]/.test(label)) {
+    if (!label || [typeof label === "string" ? label : Object.values(label)].flat().some((text) => !text || text.length > MAX_BRIEF_FIELD_LABEL_CHARS || /[\u0000]/.test(text))) {
       throw new BriefValidationError("brief_spec_invalid", `BriefSpec field ${index + 1} has an invalid label`);
     }
     if (typeof field.required !== "boolean") {
@@ -177,7 +178,7 @@ export function createBriefSnapshot(
   if (missing.length) {
     throw new BriefValidationError(
       "brief_required_answer_missing",
-      `Answers required in brief_answers [{field_id, value}]: ${missing.map((field) => `${field.id} (${field.label})`).join("; ")}`
+      `Answers required in brief_answers [{field_id, value}]: ${missing.map((field) => `${field.id} (${textIn(field.label)})`).join("; ")}`
     );
   }
   const fields = spec.fields.map((field): BriefSnapshotField => ({ ...field, value: answers.get(field.id) || null }));
@@ -305,6 +306,6 @@ export function briefSnapshotPromptBlock(snapshot: BriefSnapshot): string {
     `Snapshot: ${snapshot.id}`,
     `BriefSpec digest: ${snapshot.spec_digest}`,
     "",
-    JSON.stringify({ fields: shown.fields }, null, 2)
+    JSON.stringify({ fields: shown.fields.map((field) => ({ ...field, label: textIn(field.label, briefLocale(snapshot)) })) }, null, 2)
   ].join("\n");
 }
