@@ -388,7 +388,8 @@ export class WorkbenchRuntime {
         withheldTools: await this.options.withheldTools?.(s),
       })).map(startBuild), this.options.toolSupport ?? studioToolSupport, () => this.clientOf(id).client);
       if (tools.some(tool => tool.name === "publish_form")) await provideFormReference(this.store, id);
-      if (tools.some(tool => tool.name === "publish_form")) system += `\n\n${await readFile(fileURLToPath(new URL("voice/FORM_PAGE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
+      // FORM_PAGE.md is the interview's (skills, voice samples): other roles carry their own page instructions in their stored prompt.
+      if (s.role === "voice" && tools.some(tool => tool.name === "publish_form")) system += `\n\n${await readFile(fileURLToPath(new URL("voice/FORM_PAGE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
       const messageCount = s.messages.length;
       let history = s.context;
       let input = message;

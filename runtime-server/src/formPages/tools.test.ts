@@ -36,7 +36,9 @@ test("only the interview session is granted the form tools, whatever its stored 
     const extraTools = formTools(h.forms, { accountId: ACCOUNT, productId: "p1", sessionId: "s1", taskId: async () => undefined });
     const names = async (role: string) => (await factoryAgentTools({ store, id: "s1", definition: { role, tools: ["update_todo"] }, signal: new AbortController().signal, changed: () => undefined, extraTools })).map(tool => tool.name);
     assert.deepEqual((await names("voice")).filter(name => name.endsWith("_form")).sort(), ["publish_form"]);
-    assert.deepEqual((await names("research")).filter(name => name.endsWith("_form")), []);
+    assert.deepEqual((await names("case-generation")).filter(name => name.endsWith("_form")).sort(), ["publish_form"]);
+    assert.deepEqual((await names("generation")).filter(name => name.endsWith("_form")).sort(), ["publish_form"]);
+    for (const role of ["research", "evaluator", "inspiration", "content-creation"]) assert.deepEqual((await names(role)).filter(name => name.endsWith("_form")), [], role);
   } finally { await h.close(); await rm(root, { recursive: true, force: true }); }
 });
 

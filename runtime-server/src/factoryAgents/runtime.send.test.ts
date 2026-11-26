@@ -16,7 +16,7 @@ import { WorkbenchStore } from "./store.js";
 import { emptySurfaces } from "../usage/usage.js";
 import { UsageCap, UsageCapExceeded } from "../usage/usageCap.js";
 
-type Call = { tools: Array<{ name: string; description: string }>; last: string };
+type Call = { system?: string; tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
 async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; heartbeatMs?: number; staleMs?: number; sweepMs?: number; closeMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
@@ -30,7 +30,7 @@ async function harness(options: { plan?: (call: number) => string | undefined; t
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
       const final = context.messages.at(-1);
-      calls.push({ tools: (context.tools ?? []).map(tool => ({ name: tool.name, description: tool.description })), last: JSON.stringify(final?.content) });
+      calls.push({ system: context.systemPrompt, tools: (context.tools ?? []).map(tool => ({ name: tool.name, description: tool.description })), last: JSON.stringify(final?.content) });
       const tool = options.plan?.(call);
       const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
         content: tool ? [{ type: "toolCall", id: `call-${call}`, name: tool, arguments: { directory: "input" } }] : [{ type: "text", text: `Reply ${call}` }],
@@ -91,6 +91,23 @@ test("send: while compacting, a message waits and joins afterwards", async () =>
     internals.compacting.delete(h.session.id); internals.release(h.session.id);
     await h.idle();
     assert.deepEqual(userTexts((await h.store.get(h.session.id)).messages), ["one", "during"]);
+  } finally { await h.close(); }
+});
+
+test("publish_form: the interview guide FORM_PAGE joins the system prompt of the voice role only", async () => {
+  const h = await harness();
+  try {
+    const publishForm = { name: "publish_form", label: "x", description: "x", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [], details: {} }) };
+    const runtime = h.build({ extraTools: async () => [publishForm as never] });
+    for (const role of ["voice", "generation", "case-generation"] as const) {
+      const session = await h.store.create(role);
+      const before = h.calls.length;
+      await runtime.send(session.id, h.say(role));
+      for (let i = 0; i < 400 && runtime.isRunning(session.id); i++) await new Promise(resolve => setTimeout(resolve, 10));
+      const call = h.calls.slice(before).find(c => c.tools.some(tool => tool.name === "publish_form"))!;
+      assert.ok(call, `${role} has publish_form`);
+      assert.equal(call.system!.includes("Versions disagree, please pick one"), role === "voice", role);
+    }
   } finally { await h.close(); }
 });
 
