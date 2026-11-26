@@ -127,7 +127,7 @@ function Hook({ landing, reason, onStart, navigate }) {
 
 /** /c/: the product page, three screens: the Agent's hook, the form, and the order with its payment. The hash says which; Back moves between them. */
 function Landing({ request, navigate, reason }) {
-  const { t } = useCopy();
+  const { locale, t } = useCopy();
   const [landing, setLanding] = useState(null);
   const [failed, setFailed] = useState(false);
   const [values, setValues] = useState({});
