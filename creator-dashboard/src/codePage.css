@@ -87,6 +87,7 @@
 .code-page__button--wechat:focus-visible { outline-color: rgba(7, 193, 96, .35); }
 .code-page__button--wechat span { display: grid; text-align: left; line-height: 1.2; }
 .code-page__button--wechat small { font-size: 12px; font-weight: 500; opacity: .9; }
+.code-page__button--wechat .code-page__spinner { border-color: rgba(255, 255, 255, .4); border-top-color: #fff; }
 .code-page__button--wechat:disabled .code-page__wxmark { opacity: .6; }
 @media (prefers-reduced-motion: reduce) { .code-page__spinner { animation-duration: 2s; } .code-page__feed li { animation: none; } }
 .code-page__done { display: grid; padding: 8px 0; }

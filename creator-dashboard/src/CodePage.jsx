@@ -99,7 +99,7 @@ function Hook({ landing, reason, onStart, navigate }) {
       <p className="code-page__by"><strong>{agentName}</strong></p>
     </div>
     <div className="code-page__actions">
-      <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{cta}</button>
+      <button type="button" className="code-page__button" disabled={!landing} onClick={onStart}>{landing ? cta : <span className="code-page__spinner" role="status" />}</button>
       {entry === null ? <button type="button" className="code-page__link" onClick={() => setEntry("event")}>{t("hasEventCode")}</button> : null}
       {entry === "event" ? <div className="code-page__entry">
         <CodeBox key="event" navigate={navigate} label={t("eventCode")} action={t("use")} />
@@ -123,6 +123,7 @@ function Landing({ request, navigate, reason }) {
   const [values, setValues] = useState({});
   const [error, setError] = useState(null);
   const [wanted, setWanted] = useState(() => stepFromHash(window.location.hash));
+  const [paying, setPaying] = useState(false);
   const pushed = useRef(0);
   const step = reachableStep(wanted, values);
   const path = `${window.location.pathname}${window.location.search}`;
@@ -145,8 +146,14 @@ function Landing({ request, navigate, reason }) {
     if (result.error) { setError(result.error); return; }
     go(result.step);
   };
+  useEffect(() => {
+    const reset = event => { if (event.persisted) setPaying(false); };
+    window.addEventListener("pageshow", reset);
+    return () => window.removeEventListener("pageshow", reset);
+  }, []);
   const ready = Boolean(landing?.product_id && landing.price_fen);
   const pay = () => {
+    setPaying(true);
     PendingIntake.save(window.localStorage, values);
     window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name, locale }));
   };
@@ -173,7 +180,7 @@ function Landing({ request, navigate, reason }) {
       <div><dt>{t("field_email")}</dt><dd>{values.email?.trim()}</dd></div>
     </dl>
     {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
-    <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready} onClick={pay}><WeChatPayMark /><span>{t("wechatPay")} {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
+    <button type="button" className="code-page__button code-page__button--wechat" disabled={!ready || paying} onClick={pay}>{paying ? <span className="code-page__spinner" aria-hidden /> : <WeChatPayMark />}<span>{t("wechatPay")} {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
   </Card>;
 }
 

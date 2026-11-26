@@ -22,7 +22,18 @@ async function serve(withCorpora = true) {
 }
 const q = (extra: Record<string, string> = {}) => `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK, ...extra })}`;
 
-test("pay page shows the MSC × Hatch lockup, product, order lines, price and email; site and name are escaped and validated", async () => {
+test("the pay page script shows a spinner and the localized redirect line once paid", async () => {
+  const s = await serve();
+  try {
+    for (const [locale, line] of [["zh", "支付成功，正在跳转…"], ["en", "Payment received, redirecting…"], ["ja", "お支払いを確認しました。移動しています…"]]) {
+      const html = await (await fetch(s.base + q({ locale }))).text();
+      assert.ok(html.includes(line), locale);
+      assert.match(html, /paid\(j\.returnUrl\)/);
+    }
+  } finally { s.close(); }
+});
+
+test("pay page shows the MSC × Hatch lockup,product, order lines, price and email; site and name are escaped and validated", async () => {
   const s = await serve();
   try {
     const res = await fetch(s.base + q({ site: "https://www.Example.com/path?x=1", name: "<b>陈</b>" }));

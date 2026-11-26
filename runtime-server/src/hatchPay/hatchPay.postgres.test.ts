@@ -172,7 +172,7 @@ run("pay page: a browser gets the price; the OAuth return (kept for a later JSAP
     const browser = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 Safari" });
     assert.equal(browser.status, 200);
     const html = await browser.text();
-    assert.match(html, /¥9\.9/);
+    assert.match(html, /¥9\.90/);
     assert.doesNotMatch(html, /"openid":/);
     assert.equal((await h.get("/?product=x&email=bad&back=https://evil.example")).status, 400);
 
@@ -210,7 +210,7 @@ run("WeChat's browser gets only the guide out of it: no OAuth redirect, no order
 
     const safari = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1" });
     assert.equal(safari.status, 200);
-    assert.match(await safari.text(), /¥9\.9/);
+    assert.match(await safari.text(), /¥9\.90/);
     const order = await h.order({}, { ...ORIGIN, "user-agent": "Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile", "x-real-ip": "203.0.113.9" });
     assert.equal(((await order.json()) as { mode: string }).mode, "h5");
   } finally { await h.close(); }
