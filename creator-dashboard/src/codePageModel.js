@@ -1,5 +1,7 @@
 // Pure rules of the access code page (/c/<code>): routes, the pay link, how far the steps have come. No DOM, no network.
 
+import { localized } from "./artifactForm.js";
+
 const CODE_ROUTE = /^\/c(?:\/([A-Za-z0-9_-]{4,64}))?\/?$/;
 export const PAY_URL = "https://anyteach.cn/hatch-pay/";
 
@@ -53,20 +55,17 @@ export function createStatusPoller({ read, onStatus, onError, every = 8000, maxB
 /** The Product's own map without a publish step: the page ends at writing the report, whatever the map still lists. */
 export const visibleSteps = steps => (steps ?? []).filter(step => step.id !== "publish" && step.label !== "发布");
 
-const CHECKS = Object.freeze([
-  "像海外买家一样打开官网首页", "询盘表单能不能顺利提交", "手机端与电脑端的打开速度", "HTTPS 证书是否有效", "Google 地图上的商家信息",
-  "服务器所在的地区", "英文文案是否通顺清楚", "产品页有没有足够的证据", "资质与认证展示", "联系方式是否好找"
-]);
-const DIMENSIONS = Object.freeze([
-  "首屏 3 秒", "技术与性能", "信息架构", "内容与英文", "信任与证明", "转化路径", "SEO 与 AI 搜索", "设计与品牌", "可持续与社会影响"
-]);
+const CHECK_COUNT = 10;
+const DIMENSION_COUNT = 9;
+const keys = (prefix, count) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
 
 /**
  * The lines of the wait: the checks of an audit, then the scoring dimensions, opening up as the steps advance. The checks and dimensions are what is being looked at ("正在核对"), never a claim that one is done.
+ * `t` is the page's translator (key, values) in the reader's language.
  */
-export function feedPool({ steps, step }) {
-  const shown = Math.max(0, step ?? -1) < 0 ? 0 : Math.ceil(DIMENSIONS.length * Math.min(1, (step + 1) / Math.max(1, steps?.length ?? 1)));
-  return [...CHECKS.map(item => `正在核对${item}`), ...DIMENSIONS.slice(0, shown).map(item => `正在评估「${item}」`)];
+export function feedPool({ steps, step, t }) {
+  const shown = Math.max(0, step ?? -1) < 0 ? 0 : Math.ceil(DIMENSION_COUNT * Math.min(1, (step + 1) / Math.max(1, steps?.length ?? 1)));
+  return [...keys("check", CHECK_COUNT).map(key => t("checking", { item: t(key) })), ...keys("dim", DIMENSION_COUNT).slice(0, shown).map(key => t("scoring", { item: t(key) }))];
 }
 
 /** `size` consecutive lines of the pool starting at `tick`, wrapping around. */
@@ -96,21 +95,29 @@ export const missingField = (fields, values) => fields.find(field => field.requi
 
 /** The product page's form, in the Brief's own field ids: what the audit needs from the buyer before it can start. */
 export const BUYER_FIELDS = Object.freeze([
-  { id: "name", label: "姓名", type: "line", autoComplete: "name", required: true },
-  { id: "phone", label: "电话", type: "tel", autoComplete: "tel", required: true },
-  { id: "email", label: "邮箱", type: "email", autoComplete: "email", required: true },
-  { id: "website", label: "网址", type: "url", autoComplete: "url", required: true },
-  { id: "markets", label: "出海的国家和地区", type: "line", autoComplete: "off", required: false }
+  { id: "name", type: "line", autoComplete: "name", required: true },
+  { id: "phone", type: "tel", autoComplete: "tel", required: true },
+  { id: "email", type: "email", autoComplete: "email", required: true },
+  { id: "website", type: "url", autoComplete: "url", required: true },
+  { id: "markets", type: "line", autoComplete: "off", required: false }
 ]);
+
+/**
+ * A Brief field's label for the reader: one given per language is picked (`localized`, as the web chat does); a plain one is the Expert's own
+ * text, except that the well-known buyer fields read in the reader's language when it is not Chinese.
+ */
+export const fieldLabel = (field, locale, t) => typeof field.label !== "string"
+  ? localized(field.label, locale)
+  : locale !== "zh" && BUYER_FIELDS.some(known => known.id === field.id) ? t(`field_${field.id}`) : field.label;
 
 /** The price as the buyer reads it: fen to ¥ with two decimals. */
 export const formatPrice = fen => `¥${(fen / 100).toFixed(2)}`;
 
 /** What the buyer sees first: a missing or malformed field, by its label. */
-export function invalidField(values) {
+export function invalidField(values, t) {
   const missing = missingField(BUYER_FIELDS, values);
-  if (missing) return `请填写：${missing.label}`;
-  if (!/^[^\s@]+@[^\s@]+$/.test(String(values.email).trim())) return "邮箱格式不对";
+  if (missing) return t("missingField", { field: t(`field_${missing.id}`) });
+  if (!/^[^\s@]+@[^\s@]+$/.test(String(values.email).trim())) return t("emailInvalid");
   return undefined;
 }
 
@@ -138,34 +145,37 @@ export const stepFromHash = hash => LANDING_STEPS.find(step => `#${step}` === ha
 export const stepHash = step => (step === "hook" ? "" : `#${step}`);
 
 /** The screen to show for a wanted one: the pay step only exists once the answers are valid (a reload on #pay has none, so it is the form). */
-export const reachableStep = (wanted, values) => (wanted === "pay" && invalidField(values) ? "form" : wanted);
+export const reachableStep = (wanted, values) => (wanted === "pay" && invalidField(values, key => key) ? "form" : wanted);
 
 /** What "next" does: the hook goes to the form; the form goes to pay once valid, else says what is wrong. */
-export function advance(step, values) {
+export function advance(step, values, t) {
   if (step === "hook") return { step: "form" };
-  const error = invalidField(values);
+  const error = invalidField(values, t);
   return error ? { step: "form", error } : { step: "pay" };
 }
 
+/** A landing text, which is one string or one per language: the reader's, else Chinese, else any given. */
+export const pickText = (text, locale) => typeof text === "string" || text === undefined ? text : (text[locale] ?? text.zh ?? Object.values(text).find(Boolean));
+
 /** The hook's words: the Product's own landing.json, or the Product's name and description when it has none. Nothing is made up. */
-export const hookCopy = landing => ({
-  agentName: landing?.agent_name ?? landing?.name,
-  hook: landing?.hook ?? landing?.description ?? landing?.name,
-  cta: landing?.cta ?? "开始诊断"
+export const hookCopy = (landing, locale, t) => ({
+  agentName: pickText(landing?.agent_name, locale) ?? landing?.name,
+  hook: pickText(landing?.hook, locale) ?? landing?.description ?? landing?.name,
+  cta: pickText(landing?.cta, locale) ?? t("startDiagnosis")
 });
 
 /** How long a report takes, in minutes: the countdown starts here. */
 export const GENERATION_MINUTES = 10;
 
 /** The wait line: whole minutes left (10, 9 … 1) counted from `startedAt`; "即将完成" past the estimate; the static estimate when the start is unknown. */
-export function waitLine({ startedAt, now, email }) {
-  const to = `发送至${email ? ` ${email}` : "您的邮箱"}`;
+export function waitLine({ startedAt, now, email, t }) {
+  const dest = email ? t("sentTo", { email }) : t("sentToYou");
   const started = Date.parse(startedAt ?? "");
-  if (Number.isNaN(started)) return `您可以关闭此页面，约 ${GENERATION_MINUTES} 分钟后报告会${to}`;
+  if (Number.isNaN(started)) return t("waitMinutes", { minutes: GENERATION_MINUTES, dest });
   const elapsed = (now - started) / 60000;
-  if (elapsed >= GENERATION_MINUTES) return `报告即将完成，完成后会${to}`;
-  return `您可以关闭此页面，约 ${Math.max(1, Math.ceil(GENERATION_MINUTES - elapsed))} 分钟后报告会${to}`;
+  if (elapsed >= GENERATION_MINUTES) return t("waitSoon", { dest });
+  return t("waitMinutes", { minutes: Math.max(1, Math.ceil(GENERATION_MINUTES - elapsed)), dest });
 }
 
 /** The ready state's headline: the buyer by name when known. */
-export const readyLine = name => `${String(name ?? "").trim() ? `${String(name).trim()}，` : ""}你的诊断报告已生成`;
+export const readyLine = (name, t) => String(name ?? "").trim() ? t("ready", { name: String(name).trim() }) : t("readyPlain");
