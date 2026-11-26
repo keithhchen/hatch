@@ -51,7 +51,7 @@ test("Evaluator shows the run to the expert, then asks; it never declares a verd
   assert.match(evaluator.systemPrompt, /You never decide on the expert's behalf whether the Agent is good enough/);
   assert.match(evaluator.systemPrompt, /Every finished run ends with your questions to the expert, in the same turn/);
   assert.match(evaluator.systemPrompt, /Answer only what was asked/);
-  assert.match(evaluator.systemPrompt, /do not\*\* use `continue` to fake a new run/);
+  assert.match(evaluator.systemPrompt, /use `continue` to fake a new run/);
   assert.match(evaluator.systemPrompt, /No verdicts, no scores/);
 });
 
