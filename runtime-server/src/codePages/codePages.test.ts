@@ -109,6 +109,17 @@ test("landing: the Agent's own introduction is read from runtime/landing.json, a
   assert.equal((await pages.landing(PRODUCT)).landing, undefined);
 });
 
+test("landing: a field may be given per language; only the non-empty zh, en, ja strings are kept", async () => {
+  const { pages, root } = await setup();
+  await writeFile(path.join(root, "runtime", "landing.json"), JSON.stringify({ agent_name: { zh: "诊断 Agent", en: " Audit Agent ", fr: "x", ja: "" }, hook: { zh: "你好" }, cta: {} }));
+  assert.deepEqual((await pages.landing(PRODUCT)).landing, { agent_name: { zh: "诊断 Agent", en: "Audit Agent" }, hook: { zh: "你好" } });
+});
+
+test("intake: answers carrying the page's locale are accepted, and the locale is not an answer", async () => {
+  const { pages } = await setup();
+  assert.equal((await pages.intake(CODE, { ...answers, locale: "en" })).state, "generating");
+});
+
 test("intake: an active code gets the Brief's fields, without the code itself", async () => {
   const { pages } = await setup();
   const status = await pages.status(CODE.toLowerCase());

@@ -44,15 +44,28 @@ export async function readProgressMap(corpusRoot: string | undefined): Promise<P
   } catch { return undefined; }
 }
 
-/** The Agent's own introduction on the landing: `runtime/landing.json` in its Corpus. Any field may be absent; nothing is made up for it. */
-export type LandingCopy = { agent_name?: string; hook?: string; cta?: string };
+/**
+ * The Agent's own introduction on the landing: `runtime/landing.json` in its Corpus. Any field may be absent; nothing is made up for it.
+ * Each field is one string, or one per language `{ zh, en, ja }`; the web picks the reader's.
+ */
+export type LandingText = string | Partial<Record<"zh" | "en" | "ja", string>>;
+export type LandingCopy = { agent_name?: LandingText; hook?: LandingText; cta?: LandingText };
+
+const landingText = (value: unknown): LandingText | undefined => {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (!value || typeof value !== "object") return undefined;
+  const given = Object.fromEntries((["zh", "en", "ja"] as const).flatMap((language) => {
+    const text = (value as Record<string, unknown>)[language];
+    return typeof text === "string" && text.trim() ? [[language, text.trim()]] : [];
+  }));
+  return Object.keys(given).length ? given : undefined;
+};
 
 export async function readLandingCopy(corpusRoot: string | undefined): Promise<LandingCopy | undefined> {
   if (!corpusRoot) return undefined;
   try {
     const parsed = JSON.parse(await readFile(path.join(corpusRoot, "runtime", "landing.json"), "utf8")) as Record<string, unknown>;
-    const text = (key: string) => typeof parsed[key] === "string" && (parsed[key] as string).trim() ? { [key]: (parsed[key] as string).trim() } : {};
-    return { ...text("agent_name"), ...text("hook"), ...text("cta") };
+    return Object.fromEntries((["agent_name", "hook", "cta"] as const).flatMap((key) => { const text = landingText(parsed[key]); return text ? [[key, text]] : []; }));
   } catch { return undefined; }
 }
 
