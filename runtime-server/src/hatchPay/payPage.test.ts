@@ -78,11 +78,11 @@ test("siteDomain keeps only a plausible domain", () => {
 /** Runs the page's own script against a stub DOM; returns how many orders it created and the page's state. */
 async function runPageScript(html: string, nav: { type: string }, orderResponse: { ok: boolean; json: unknown } = { ok: true, json: { mode: "h5", url: "https://wx.example/pay" } }) {
   const script = /<script>([\s\S]*)<\/script>/.exec(html)![1]!;
-  const classes = new Set<string>(), el = (extra = {}) => ({ disabled: false, textContent: "", classList: { add: (c: string) => classes.add(c), remove: (c: string) => classes.delete(c) }, ...extra });
+  const classes = new Set<string>(), el = (extra = {}) => ({ disabled: false, textContent: "", innerHTML: "", style: {} as Record<string, string>, classList: { add: (c: string) => classes.add(c), remove: (c: string) => classes.delete(c) }, ...extra });
   const btn = el(), err = el(), listeners: Record<string, (e: { persisted: boolean }) => void> = {};
   const location = { href: "" }; let orders = 0;
   const context = {
-    document: { getElementById: (id: string) => id === "pay" ? btn : err }, location,
+    document: { getElementById: (id: string) => id === "pay" ? btn : err }, location, setTimeout: () => 0,
     performance: { getEntriesByType: () => [nav] }, addEventListener: (name: string, fn: (e: { persisted: boolean }) => void) => { listeners[name] = fn; },
     fetch: async () => { orders++; return { ok: orderResponse.ok, json: async () => orderResponse.json }; }
   };
@@ -96,6 +96,9 @@ test("auto-start: a fresh load creates one order and redirects; back navigation 
   try {
     const html = await (await fetch(s.base + q())).text();
 
+    const page = await runPageScript(await (await fetch(s.base + q({ o: TRADE }))).text(), { type: "navigate" });
+    assert.equal(page.classes.has("busy"), false, "the button stays free");
+    assert.match(page.err.innerHTML, /mini.*正在确认支付结果/);
     const fresh = await runPageScript(html, { type: "navigate" });
     assert.equal(fresh.orders(), 1, "one order on load");
     assert.equal(fresh.location.href, "https://wx.example/pay");
@@ -186,7 +189,7 @@ async function serveNative(tradeState: string) {
     capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
     wechat: {
       ready: () => true, createNativeOrder: async () => ({ codeUrl: "weixin://wxpay/bizpayurl?pr=abc" }), createH5Order: async () => ({ h5Url: "https://wx.example/pay?a=1" }),
-      queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState })
+      queryOrder: async (outTradeNo: string) => { if (tradeState === "THROW") throw new Error("down"); return { outTradeNo, tradeState }; }
     },
     codes: {
       createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: TRADE }; },
@@ -227,14 +230,36 @@ test("/status says whether WeChat has the order paid; an unknown or malformed or
   }
 });
 
-test("the pay-again link after an unpaid return carries the order site, name, email, locale and back", async () => {
-  const s = await serveNative("NOTPAY");
+test("an unpaid return goes back to the pay page with o, site, name, email, locale and back; the query failing does the same", async () => {
+  for (const state of ["NOTPAY", "THROW"]) {
+    const s = await serveNative(state);
+    try {
+      const res = await fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "user-agent": DESKTOP }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, locale: "en", site: "https://www.Example.com/x", name: "王小明" }) });
+      const { returnUrl } = await res.json() as { returnUrl: string };
+      const back = await fetch(returnUrl.replace("https://anyteach.cn", new URL(s.base).origin), { redirect: "manual" });
+      assert.equal(back.status, 302);
+      const params = new URL(back.headers.get("location")!).searchParams;
+      assert.deepEqual([params.get("o"), params.get("site"), params.get("name"), params.get("email"), params.get("locale"), params.get("back")], [TRADE, "example.com", "王小明", "a@b.co", "en", BACK]);
+    } finally { s.close(); }
+  }
+});
+
+test("the pay page with an order id confirms it: free button, status line, status polling, the return URL for paid; no auto-start", async () => {
+  const s = await serve();
   try {
-    const res = await fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "user-agent": DESKTOP }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, locale: "en", site: "https://www.Example.com/x", name: "王小明" }) });
-    const { returnUrl } = await res.json() as { returnUrl: string };
-    const waiting = await (await fetch(returnUrl.replace("https://anyteach.cn", new URL(s.base).origin))).text();
-    const href = /class="alt" href="([^"]+)"/.exec(waiting)![1]!.replaceAll("&amp;", "&");
-    const params = new URL(href).searchParams;
-    assert.deepEqual([params.get("site"), params.get("name"), params.get("email"), params.get("locale"), params.get("back")], ["example.com", "王小明", "a@b.co", "en", BACK]);
+    for (const [locale, line] of [["zh", "正在确认支付结果…"], ["en", "Confirming your payment…"], ["ja", "お支払いを確認しています…"]]) {
+      const html = await (await fetch(s.base + q({ locale, o: TRADE, site: "example.com" }))).text();
+      assert.ok(html.includes(line), locale);
+      assert.match(html, /cf=\{"statusUrl":"https:\/\/anyteach\.cn\/hatch-pay\/status\?o=hpb+","returnUrl":"https:\/\/anyteach\.cn\/hatch-pay\/return\?o=hpb+&back=[^"]*site=example\.com"\}/);
+      assert.doesNotMatch(html.slice(html.indexOf("if(cf){"), html.indexOf("else if(!ask.openid")), /busy/, "the button is not locked while confirming");
+      assert.match(html, /else if\(!ask\.openid/, "a fresh order starts only without an order id");
+    }
+    const page = await runPageScript(await (await fetch(s.base + q({ o: TRADE }))).text(), { type: "navigate" });
+    assert.equal(page.classes.has("busy"), false, "the button stays free");
+    assert.match(page.err.innerHTML, /mini.*正在确认支付结果/);
+    const fresh = await (await fetch(s.base + q())).text();
+    assert.match(fresh, /cf=null/);
+    const bad = await (await fetch(s.base + q({ o: "nope" }))).text();
+    assert.match(bad, /cf=null/, "an invalid order id is ignored");
   } finally { s.close(); }
 });

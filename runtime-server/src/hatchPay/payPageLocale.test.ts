@@ -72,9 +72,9 @@ test("the order keeps the visitor's language with the pending code, its way back
     assert.deepEqual(await refused.json(), { error: "無効なリンクです" });
 
     // The return page speaks the language of its link; the mail, the one stored with the order.
-    const waiting = await (await fetch(`${s.base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK, locale: "en" })}`)).text();
-    assert.match(waiting, /I have paid, check the result/);
-    assert.match(waiting, /locale=en/, "re-pay keeps the language");
+    const unpaid = await fetch(`${s.base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK, locale: "en" })}`, { redirect: "manual" });
+    assert.equal(unpaid.status, 302);
+    assert.match(unpaid.headers.get("location")!, /locale=en/, "the pay page keeps the language");
     s.trade.state = "SUCCESS";
     await fetch(`${s.base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK, locale: "en" })}`, { redirect: "manual" });
     assert.deepEqual(s.mailed, [{ code: "MSC222222", productId: PRODUCT, to: "a@b.co", locale: "ja" }]);

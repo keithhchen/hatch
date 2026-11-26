@@ -237,15 +237,16 @@ const startOrder = async (h: Awaited<ReturnType<typeof harness>>) => {
   return new URL(new URL(body.url).searchParams.get("redirect_url")!).searchParams.get("o")!;
 };
 
-run("return page: not paid shows the query and re-pay buttons; paid redirects to the chat with the code and mails it once", async db => {
+run("return page: not paid goes back to the pay page to confirm; paid redirects to the chat with the code and mails it once", async db => {
   const h = await harness(db);
   try {
     const outTradeNo = await startOrder(h);
     const waiting = await h.get(returnPath(outTradeNo));
-    assert.equal(waiting.status, 200);
-    const html = await waiting.text();
-    assert.match(html, /我已支付，查询结果/);
-    assert.match(html, /重新支付/);
+    assert.equal(waiting.status, 302);
+    const back = new URL(waiting.headers.get("location")!);
+    assert.equal(back.origin + back.pathname, "https://anyteach.cn/hatch-pay/");
+    assert.equal(back.searchParams.get("o"), outTradeNo);
+    assert.equal(back.searchParams.get("email"), "a@b.co");
     assert.equal(h.mails.length, 0);
 
     h.pay(outTradeNo);
@@ -283,7 +284,7 @@ run("return page: a back of https://gethatchapp.com/c/ gets ?code= appended", as
   } finally { await h.close(); }
 });
 
-run("return page: a wrong back shows the code instead; unknown orders and WeChat outages are reported, not faked", async db => {
+run("return page: a wrong back shows the code instead; unknown orders are reported, and a WeChat outage sends the buyer to confirm, not to a fake result", async db => {
   const h = await harness(db);
   try {
     const outTradeNo = await startOrder(h);
@@ -297,7 +298,7 @@ run("return page: a wrong back shows the code instead; unknown orders and WeChat
     h.trades.set("x", {});
     const other = await startOrder(h);
     await h.wechat.close();
-    assert.equal((await h.get(returnPath(other))).status, 502);
+    assert.equal((await h.get(returnPath(other))).status, 302);
   } finally { await h.close(); }
 });
 
