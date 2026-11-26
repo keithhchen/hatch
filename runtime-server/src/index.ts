@@ -36,7 +36,8 @@ import {
   renderSkillsSection,
   visibleSkillsForSession
 } from "./skills.js";
-import { briefAccessCode, briefAnswer, briefEmail, type BriefSpec } from "./brief.js";
+import { briefAccessCode, briefAnswer, briefEmail, briefLocale, type BriefSpec } from "./brief.js";
+import { DEFAULT_LOCALE } from "./locale.js";
 import { readCorpusEmailTemplate } from "./agentBox/reportEmail.js";
 import type { ReportEmailContext } from "./agentBox/tools.js";
 import { createOutputGuardFromEnvironment, PassThroughOutputGuard, type OutputGuard } from "./outputGuard.js";
@@ -260,15 +261,17 @@ export async function reportEmailContext(conversation: ConversationRecord, bindi
   const expert = binding.agentCorpus?.creator.name;
   // The code's own page is where the report is found again: the mail carries it, with the code.
   const code = briefAccessCode(conversation.briefSnapshot);
+  const locale = briefLocale(conversation.briefSnapshot) ?? DEFAULT_LOCALE;
   return {
     recipient,
+    locale,
     chatUrl: `${origin}/chat/product/${binding.productId}/conversation/${conversation.publicId}`,
     ...code ? { code, codeUrl: `${origin}/c/${encodeURIComponent(code)}` } : {},
     productName: binding.agentCorpus?.product.name ?? "Hatch",
     ...expert && expert !== "Expert" ? { expertName: expert } : {},
     ...briefAnswer(conversation.briefSnapshot, "name") ? { name: briefAnswer(conversation.briefSnapshot, "name")! } : {},
     ...briefAnswer(conversation.briefSnapshot, "website") ? { website: briefAnswer(conversation.briefSnapshot, "website")! } : {},
-    ...(template => template ? { template } : {})(await readCorpusEmailTemplate(binding.agentCorpusRoot))
+    ...(template => template ? { template } : {})(await readCorpusEmailTemplate(binding.agentCorpusRoot, locale))
   };
 }
 

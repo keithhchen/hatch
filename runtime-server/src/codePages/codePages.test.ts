@@ -7,6 +7,7 @@ import { afterEach, test } from "node:test";
 import type { AccessCodes } from "../accessCodes/accessCodes.js";
 import { AUDIT_SPEC, MemoryAccessCodes, PRODUCT, gateOver } from "../accessGate.testkit.js";
 import { ACCESS_CODE_CAPABILITY, AccessGate } from "../accessGate.js";
+import { briefLocale } from "../brief.js";
 import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
 import type { AgentCorpus, AgentCorpusResolver, AgentCorpusResolverLike } from "../agentCorpus.js";
 import { ChatService, RunRegistry } from "../chat/chatService.js";
@@ -129,6 +130,41 @@ test("intake submit: the code is spent and the Run starts, once, even for a doub
   const runs = await repository.listRuns(conversation.id);
   assert.equal(runs.length, 1);
   assert.equal(runs[0]!.clientMessageId, codeIntakeKey(CODE));
+});
+
+const localeOfBrief = (conversation: { briefSnapshot?: { fields: Array<{ id: string; value: string | null }> } } | undefined) => conversation?.briefSnapshot?.fields.find((field) => field.id === "locale")?.value;
+
+test("intake locale: the visitor's language is kept on the Brief, never as an answer; zh when missing or unknown", async () => {
+  const { pages, conversationOf } = await setup();
+  await pages.intake(CODE, { ...answers, locale: "ja-JP" });
+  const conversation = (await conversationOf(CODE))!;
+  assert.equal(localeOfBrief(conversation), "ja");
+  assert.equal(briefLocale(conversation.briefSnapshot), "ja");
+  assert.equal(conversation.briefSnapshot?.fields.find((field) => field.id === "name")?.value, "A");
+  assert.ok(!JSON.stringify(conversation.briefSnapshot?.fields.filter((field) => field.id !== "locale")).includes("ja-JP"), "the locale is not any answer");
+  for (const locale of [undefined, "fr", 5]) {
+    const t = await setup();
+    await t.pages.intake(CODE, locale === undefined ? answers : { ...answers, locale });
+    assert.equal(localeOfBrief((await t.conversationOf(CODE))!), "zh", String(locale));
+  }
+});
+
+test("intake locale: a second submit keeps the first locale and starts no second Run", async () => {
+  const { pages, conversationOf, repository } = await setup();
+  await pages.intake(CODE, { ...answers, locale: "en" });
+  await pages.intake(CODE, { ...answers, locale: "ja" });
+  const conversation = (await conversationOf(CODE))!;
+  assert.equal(localeOfBrief(conversation), "en");
+  assert.equal((await repository.listRuns(conversation.id)).length, 1);
+});
+
+test("every error a code page can answer has a stable code", async () => {
+  const { pages } = await setup();
+  const codeOf = async (promise: Promise<unknown>) => ((await promise.then(() => undefined, (error) => error)) as { code?: string }).code;
+  assert.equal(await codeOf(pages.intake("MSC999999", answers)), "access_code_not_found");
+  assert.equal(await codeOf(pages.intake("MSC000002", answers)), "access_code_not_paid");
+  assert.equal(await codeOf(pages.intake(CODE, { ...answers, website: "" })), "invalid_brief");
+  assert.equal(await codeOf(pages.issue(CODE)), "access_code_not_found");
 });
 
 test("event code: shared by a room, never spent; entering it issues a free code of its own, whose intake runs as usual", async () => {
