@@ -90,3 +90,36 @@ test("stopping evaluation aborts an outstanding shared-client HTTP request", { t
     assert.equal((await store.get(s.id)).hatch, undefined);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
 });
+
+test("HTool start re-runs in a fresh conversation, keeps earlier results, and refuses while pending", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-rerun-unit-"));
+  const requestIds: string[] = [];
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url!, "http://localhost");
+    const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+    res.setHeader("content-type", "application/json");
+    if (url.pathname === "/v1/conversations") { requestIds.push(body.client_request_id); res.end(JSON.stringify({ conversation: { id: `conv_${requestIds.length}` } })); return; }
+    const conv = url.pathname.split("/")[3];
+    res.end(JSON.stringify({ run: { id: `run_${conv}`, status: "completed" }, reply: `# Reply from ${conv}\n` }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const store = new WorkbenchStore(root); const s = await store.create("evaluator");
+    const tool = hatchTool(store, s.id, () => {}, { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, { HATCH_FACTORY_RUNTIME_URL: `http://127.0.0.1:${address.port}/v1/runtime`, HATCH_FACTORY_CREATOR_TOKEN: "t" });
+    await tool.execute("a", { operation: "start", message: "Task" });
+    await tool.execute("b", { operation: "start", message: "Task again" });
+    assert.deepEqual(requestIds, [`factory-${s.id}`, `factory-${s.id}-b`]);
+    const state = await store.get(s.id);
+    assert.equal(state.hatch?.conversationId, "conv_2");
+    assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Reply from conv_2\n");
+    assert.equal((await store.read(s.id, "output/results/run_conv_1.md")).bytes.toString(), "# Reply from conv_1\n");
+    await store.update(s.id, x => { x.hatch!.pending = true; });
+    await assert.rejects(tool.execute("c", { operation: "start", message: "Again" }), /pending/);
+    assert.equal(requestIds.length, 2);
+  } finally {
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

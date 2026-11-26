@@ -30,7 +30,7 @@ function runtimeHttp(runtimeUrl: string, token: string, productId: string, signa
 export function hatchTool(store: WorkbenchStore, id: string, changed: () => void, scope: FactoryProductScope, env: NodeJS.ProcessEnv = process.env): AgentTool {
   const product = Object.freeze({ creatorId: scope.creatorId, productId: scope.productId });
   return {
-    name: "hatch_tool", label: "运行 Hatch Agent", description: "Call the existing authenticated Hatch server Runtime, with NO LocalRunner/local tools. Host fixes the target Agent. start/continue send only client-visible text/materials. status/read/tool_detail inspect the real conversation; read_asset downloads a real referenced output asset for inspection. No rubric or private client-state files may be sent. Runtime output is saved read-only as RESULT.md/results/*.md. Never retry a pending submission without inspecting status.",
+    name: "hatch_tool", label: "运行 Hatch Agent", description: "Call the existing authenticated Hatch server Runtime, with NO LocalRunner/local tools. Host fixes the target Agent. start opens a new real conversation (use it to re-run the case after the Agent changed); continue replies in the latest one. Both send only client-visible text/materials. status/read/tool_detail inspect the real conversation; read_asset downloads a real referenced output asset for inspection. No rubric or private client-state files may be sent. Runtime output is saved read-only as RESULT.md/results/*.md. Never retry a pending submission without inspecting status.",
     parameters: Type.Object({ operation: Type.Union([Type.Literal("start"), Type.Literal("continue"), Type.Literal("status"), Type.Literal("read"), Type.Literal("tool_detail"), Type.Literal("read_asset"), Type.Literal("cancel")]), message: Type.Optional(Type.String({ maxLength: 100000, description: "Required for start and continue: the actual customer message. brief_answers and material_paths do not replace this message." })), material_paths: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })), brief_answers: Type.Optional(Type.Array(Type.Object({ field_id: Type.String(), value: Type.String() }))), asset_id: Type.Optional(Type.String()), tool_call_id: Type.Optional(Type.String()) }),
     execute: async (callId, raw, signal) => {
       const args = raw as { operation: string; message?: string; material_paths?: string[]; tool_call_id?: string; asset_id?: string; brief_answers?: Array<{ field_id: string; value: string }> };
@@ -75,7 +75,6 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
       }
       if (!args.message?.trim()) throw new Error("start/continue require message: the actual customer request or reply. brief_answers and material_paths do not replace it.");
       if (session.hatch?.pending) throw new Error("Previous target submission is pending or uncertain; inspect status before continuing");
-      if (args.operation === "start" && session.hatch) throw new Error("This evaluation already has a real conversation; use continue or create a new evaluation workspace for another attempt");
       if (args.operation === "continue" && !session.hatch) throw new Error("Start the target conversation first");
       let message = args.message;
       for (const material of args.material_paths ?? []) {
@@ -85,9 +84,10 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
         message += `\n\n--- Client material: ${material} ---\n${bytes.toString("utf8")}`;
       }
       if (Buffer.byteLength(message) > 400000) throw new Error("Client materials exceed one message budget");
-      let conversationId = session.hatch?.conversationId;
+      // start always opens a fresh conversation (a re-run after the Agent changed); continue stays on the latest one.
+      let conversationId = args.operation === "start" ? undefined : session.hatch?.conversationId;
       if (!conversationId) {
-        const response = await http.json("POST", "/v1/conversations", {}, { client_request_id: `factory-${id}`, title: `Factory evaluation ${session.title}`, brief_answers: args.brief_answers ?? [] });
+        const response = await http.json("POST", "/v1/conversations", {}, { client_request_id: session.hatch ? `factory-${id}-${callId}` : `factory-${id}`, title: `Factory evaluation ${session.title}`, brief_answers: args.brief_answers ?? [] });
         if (!response.conversation?.id) throw new Error("Runtime did not return a real conversation ID");
         conversationId = response.conversation.id as string;
         await store.update(id, s => { s.hatch = { conversationId: conversationId! }; });
