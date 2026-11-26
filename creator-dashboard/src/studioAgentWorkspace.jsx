@@ -10,6 +10,7 @@ import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { TelegramBotSetup } from "./TelegramBotSetup.jsx";
 import { creatorProductPath } from "./creatorRoutes.js";
+import { localized } from "./artifactForm.js";
 import { isProductLive } from "./studioPath.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import {
@@ -222,19 +223,19 @@ function nextFieldId(fields) {
 }
 
 function BriefSpecForm({ product, productId, request, t, onSaved }) {
-  const initial = useMemo(() => arrayOf(product.brief_spec?.fields).map((field) => ({ id: String(field.id), label: String(field.label ?? ""), required: field.required === true, ...field.type ? { type: field.type } : {} })), [product.brief_spec]);
+  const initial = useMemo(() => arrayOf(product.brief_spec?.fields).map((field) => ({ id: String(field.id), label: typeof field.label === "object" && field.label ? field.label : String(field.label ?? ""), required: field.required === true, ...field.type ? { type: field.type } : {} })), [product.brief_spec]);
   const [fields, setFields] = useState(initial);
   const [state, setState] = useState({ busy: false, error: "", saved: false });
   useEffect(() => { setFields(initial); }, [initial]);
   const dirty = JSON.stringify(fields) !== JSON.stringify(initial);
-  const valid = fields.length >= 1 && fields.length <= FIELD_LIMIT && fields.every((field) => field.label.trim() && field.label.trim().length <= 500);
+  const valid = fields.length >= 1 && fields.length <= FIELD_LIMIT && fields.every((field) => typeof field.label === "object" || field.label.trim() && field.label.trim().length <= 500);
   const update = (index, change) => setFields((current) => current.map((field, position) => position === index ? { ...field, ...change } : field));
   async function save(event) {
     event.preventDefault();
     if (!dirty || !valid) return;
     setState({ busy: true, error: "", saved: false });
     try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/brief-spec`, { method: "PUT", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ brief_spec: { contract_version: "1", fields: fields.map((field) => ({ id: field.id, label: field.label.trim(), required: field.required, ...field.type ? { type: field.type } : {} })) }, expected_updated_at: product.updated_at }) });
+      await request(`/v1/creator/products/${encodeURIComponent(productId)}/brief-spec`, { method: "PUT", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ brief_spec: { contract_version: "1", fields: fields.map((field) => ({ id: field.id, label: typeof field.label === "string" ? field.label.trim() : field.label, required: field.required, ...field.type ? { type: field.type } : {} })) }, expected_updated_at: product.updated_at }) });
       setState({ busy: false, error: "", saved: true });
       onSaved();
     } catch (error) { setState({ busy: false, error: friendlyError(error, t), saved: false }); }
@@ -246,7 +247,7 @@ function BriefSpecForm({ product, productId, request, t, onSaved }) {
     {state.saved && !dirty ? <SuccessNotice>{t("sxSaved")}</SuccessNotice> : null}
     {fields.length ? <ol className="sx-brief">{fields.map((field, index) => <li key={field.id}>
       <span className="sx-brief__n" aria-hidden="true">{index + 1}</span>
-      <Input aria-label={t("sxBriefQuestion", index + 1)} value={field.label} maxLength={500} onChange={(event) => update(index, { label: event.target.value })} placeholder={t("sxBriefPlaceholder")} />
+      <Input aria-label={t("sxBriefQuestion", index + 1)} value={typeof field.label === "string" ? field.label : localized(field.label, "zh")} readOnly={typeof field.label !== "string"} maxLength={500} onChange={(event) => update(index, { label: event.target.value })} placeholder={t("sxBriefPlaceholder")} />
       <label className="sx-check"><input type="checkbox" checked={field.required} onChange={(event) => update(index, { required: event.target.checked })} /><span>{t("sxBriefRequired")}</span></label>
       <button type="button" className="sx-icon-btn" aria-label={t("sxBriefRemove", index + 1)} disabled={fields.length <= 1} onClick={() => setFields((current) => current.filter((_, position) => position !== index))}><Trash2 aria-hidden="true" /></button>
     </li>)}</ol> : <p className="sx-quiet">{t("sxBriefEmpty")}</p>}

@@ -17,10 +17,10 @@ export const CodeRoute = Object.freeze({
 
 /**
  * Where buying a code starts: the pay page for the Product and the buyer's email, which sends the buyer back to `back` with `?code=`
- * once paid. The landing is where they come back to, and it opens the code's own page.
+ * once paid, in the reader's `locale` (the pay pages read the same parameter). The landing is where they come back to, and it opens the code's own page.
  */
-export function accessCodePayUrl({ productId, email, origin, site, name }) {
-  const params = new URLSearchParams({ product: productId, email: email.trim(), back: `${origin}${CodeRoute.landingPath()}`, site: String(site ?? "").trim(), name: String(name ?? "").trim() });
+export function accessCodePayUrl({ productId, email, origin, site, name, locale }) {
+  const params = new URLSearchParams({ product: productId, email: email.trim(), back: `${origin}${CodeRoute.landingPath()}`, site: String(site ?? "").trim(), name: String(name ?? "").trim(), locale });
   return `${PAY_URL}?${params}`;
 }
 
@@ -53,7 +53,7 @@ export function createStatusPoller({ read, onStatus, onError, every = 8000, maxB
 }
 
 /** The Product's own map without a publish step: the page ends at writing the report, whatever the map still lists. */
-export const visibleSteps = steps => (steps ?? []).filter(step => step.id !== "publish" && step.label !== "发布");
+export const visibleSteps = steps => (steps ?? []).filter(step => step.id !== "publish");
 
 const CHECK_COUNT = 10;
 const DIMENSION_COUNT = 9;
@@ -102,13 +102,8 @@ export const BUYER_FIELDS = Object.freeze([
   { id: "markets", type: "line", autoComplete: "off", required: false }
 ]);
 
-/**
- * A Brief field's label for the reader: one given per language is picked (`localized`, as the web chat does); a plain one is the Expert's own
- * text, except that the well-known buyer fields read in the reader's language when it is not Chinese.
- */
-export const fieldLabel = (field, locale, t) => typeof field.label !== "string"
-  ? localized(field.label, locale)
-  : locale !== "zh" && BUYER_FIELDS.some(known => known.id === field.id) ? t(`field_${field.id}`) : field.label;
+/** A Brief field's label for the reader: the Expert's own text, one per language when they gave it so (`localized`, as the web chat does). */
+export const fieldLabel = (field, locale) => localized(field.label, locale);
 
 /** The price as the buyer reads it: fen to ¥ with two decimals. */
 export const formatPrice = fen => `¥${(fen / 100).toFixed(2)}`;

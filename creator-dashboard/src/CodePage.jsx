@@ -5,7 +5,7 @@ import CoBrandLockup from "./CoBrandLockup.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import { codePageErrorText, codePageT } from "./codePageI18n.js";
-import { BUYER_FIELDS, CodeRoute, advance, fieldLabel, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, advance, fieldLabel, pickText, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, isDesktop, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -160,7 +160,7 @@ function Landing({ request, navigate, reason }) {
   const pay = () => {
     if (isDesktop({ userAgent: window.navigator.userAgent, maxTouchPoints: window.navigator.maxTouchPoints })) { setScan(true); return; }
     PendingIntake.save(window.localStorage, values);
-    window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name }));
+    window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name, locale }));
   };
   if (failed) return <Card><p className="code-page__error" role="alert">{t("unreachable")}</p></Card>;
   if (step === "hook") return <Hook landing={landing} reason={reason} onStart={next} navigate={navigate} />;
@@ -217,12 +217,12 @@ function Intake({ status, code, request, onStatus }) {
   const submit = event => {
     event.preventDefault();
     const missing = missingField(status.fields, values);
-    if (missing) { setError(t("missingField", { field: fieldLabel(missing, locale, t) })); return; }
+    if (missing) { setError(t("missingField", { field: fieldLabel(missing, locale) })); return; }
     void send(values);
   };
   if (sending) return <Card><div className="web-chat__loading code-page__sending" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>{t("starting")}</span></div></Card>;
   return <Card><Header product={status.product} website={values.website} /><form onSubmit={submit} noValidate>
-    {status.fields.map((field, index) => <Field key={field.id} field={field} label={fieldLabel(field, locale, t)} autoFocus={index === 0} value={values[field.id] ?? ""} onChange={value => setValues(current => ({ ...current, [field.id]: value }))} />)}
+    {status.fields.map((field, index) => <Field key={field.id} field={field} label={fieldLabel(field, locale)} autoFocus={index === 0} value={values[field.id] ?? ""} onChange={value => setValues(current => ({ ...current, [field.id]: value }))} />)}
     {error ? <p className="code-page__error" role="alert">{error}</p> : null}
     <button type="submit" className="code-page__button">{t("startDiagnosis")}</button>
   </form></Card>;
@@ -251,8 +251,8 @@ function NewReport({ navigate }) {
 
 /** The wait: the steps of the Product's own map, marked by what the Run has really done. Without a map, only the wait. */
 function Generating({ status, navigate }) {
-  const { t } = useCopy();
-  const steps = stepStates(visibleSteps(status.steps), status.step);
+  const { locale, t } = useCopy();
+  const steps = stepStates(visibleSteps(status.steps).map(step => ({ ...step, label: pickText(step.label, locale) })), status.step);
   const [tick, setTick] = useState(0);
   useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), FEED_MS); return () => clearInterval(timer); }, []);
   const lines = feedWindow(feedPool({ steps, step: status.step, t }), tick);

@@ -91,7 +91,7 @@ test("the website is shown as a domain", () => {
 test("the publish step is never shown", () => {
   const steps = [{ id: "fetch", label: "抓取网站" }, { id: "write", label: "撰写报告" }, { id: "publish", label: "发布" }];
   assert.deepEqual(visibleSteps(steps).map(step => step.id), ["fetch", "write"]);
-  assert.deepEqual(visibleSteps([{ id: "x", label: "发布" }]), []);
+  assert.deepEqual(visibleSteps([{ id: "publish", label: { zh: "发布", en: "Publish", ja: "公開" } }]), []);
 });
 
 test("the feed is static: the checks first, and scoring dimensions open only as steps advance", () => {
@@ -252,10 +252,12 @@ test("the landing words are one string or one per language: the reader's, else C
   assert.equal(hookCopy({ name: "N" }, "ja", (key, values) => codePageT("ja", key, values)).cta, "診断を始める", "no landing.json: the page's own call to action");
 });
 
-test("a Brief label given per language is picked; the well-known buyer fields read in the reader's language when the Brief only has Chinese", () => {
-  const en = (key, values) => codePageT("en", key, values);
-  assert.equal(fieldLabel({ id: "x", label: { zh: "名", en: "Name", ja: "名前" } }, "ja", en), "名前");
-  assert.equal(fieldLabel({ id: "website", label: "网址" }, "en", en), "Website URL");
-  assert.equal(fieldLabel({ id: "website", label: "网址" }, "zh", t), "网址");
-  assert.equal(fieldLabel({ id: "custom", label: "自定义" }, "en", en), "自定义");
+test("a Brief label comes only from the spec: the one in the reader's language, else the plain one", () => {
+  assert.equal(fieldLabel({ id: "x", label: { zh: "名", en: "Name", ja: "名前" } }, "ja"), "名前");
+  assert.equal(fieldLabel({ id: "website", label: "网址" }, "en"), "网址", "no id-keyed translation: the spec is the only source");
+  assert.equal(fieldLabel({ id: "x", label: { zh: "名", en: "Name" } }, "ja"), "Name");
+});
+
+test("the pay link carries the reader's locale", () => {
+  assert.equal(new URL(accessCodePayUrl({ productId: PRODUCT, email: "a@b.co", origin: "https://gethatchapp.com", locale: "ja" })).searchParams.get("locale"), "ja");
 });
