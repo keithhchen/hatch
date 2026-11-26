@@ -44,8 +44,8 @@ const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const newCode = () => `MSC${Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("")}`;
 const normalize = (code: string) => code.trim().toUpperCase();
 
-type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; name: string | null; locale: Locale | null; used_by_conversation_id: string | null; outcome: CodeOutcome | null; attempts: number };
-const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, name: row.name, locale: row.locale, status: row.status, source: row.source });
+type Row = { code: string; product_id: string; status: AccessCodeStatus; source: AccessCodeSource; email: string | null; name: string | null; locale: Locale | null; used_by_conversation_id: string | null; outcome: CodeOutcome | null; attempts: number; out_trade_no: string | null; amount_fen: number | null; created_at: Date };
+const orderOf = (row: Row): AccessCodeOrder => ({ code: row.code, productId: row.product_id, email: row.email, name: row.name, locale: row.locale, status: row.status, source: row.source, outTradeNo: row.out_trade_no, amountFen: row.amount_fen, createdAt: row.created_at });
 
 export class PostgresAccessCodes implements AccessCodes {
   /** `priceFen` is what a bought code costs: stored on the order, and the only amount that activates it. Without it codes can be redeemed, not sold. */
@@ -80,7 +80,7 @@ export class PostgresAccessCodes implements AccessCodes {
   async activatePaid(input: { outTradeNo: string; transactionId: string; amountFen: number }): Promise<Activation | undefined> {
     const won = await this.db.query<Row>(
       `UPDATE hatch_access_codes SET status = 'active', transaction_id = $2, paid_at = now()
-       WHERE out_trade_no = $1 AND status = 'pending' AND amount_fen = $3 RETURNING code, product_id, status, source, email, name, locale, used_by_conversation_id`,
+       WHERE out_trade_no = $1 AND status = 'pending' AND amount_fen = $3 RETURNING *`,
       [input.outTradeNo, input.transactionId, input.amountFen]);
     if (won.rows[0]) return { ...orderOf(won.rows[0]), activated: true };
     const order = await this.order(input.outTradeNo);

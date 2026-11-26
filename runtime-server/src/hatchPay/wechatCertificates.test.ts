@@ -127,7 +127,7 @@ test("a failed fetch at startup is retried; the pay routes answer 503 until the 
       healthy = true;
       for (let i = 0; i < 100 && !wechatPay.ready(); i++) await new Promise(r => setTimeout(r, 20));
       assert.equal(wechatPay.ready(), true);
-      assert.equal((await fetch(`${base}/`)).status, 400, "open: the (invalid) request is now judged on its merits");
+      assert.equal((await fetch(`${base}/return`)).status, 400, "open: the (invalid) request is now judged on its merits");
     } finally { server.closeAllConnections(); server.close(); }
   } finally { await wechat.close(); }
 });

@@ -1,82 +1,61 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
-import { HatchPay, handleHatchPayRoute } from "./routes.js";
+import { MERCHANT, NO, PRODUCT, serve } from "./orderPage.testkit.js";
 
-const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
-const BACK = `https://gethatchapp.com/p/${PRODUCT}`;
+const GATHER = { origin: "https://gethatchapp.com", "content-type": "application/json" };
 
-async function serve() {
-  const created: Array<Record<string, unknown>> = [], mailed: Array<Record<string, unknown>> = [], trade = { state: "NOTPAY" };
-  const pay = new HatchPay({
-    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
-    wechat: {
-      ready: () => true, createH5Order: async () => ({ h5Url: "https://wx.example/pay?a=1" }),
-      queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState: trade.state, transactionId: "42", amountFen: 1 })
-    },
-    codes: {
-      createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: `hp${"a".repeat(24)}` }; },
-      order: async () => ({ productId: PRODUCT, email: "a@b.co", locale: "ja" }),
-      activatePaid: async () => ({ code: "MSC222222", productId: PRODUCT, email: "a@b.co", locale: "ja", status: "active", source: "paid", activated: true })
-    },
-    openids: {}, mailer: { send: async (input: Record<string, unknown>) => { mailed.push(input); } }
-  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
-  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
-  return { base, created, mailed, trade, close: () => { server.closeAllConnections(); server.close(); } };
-}
-const q = (extra: Record<string, string> = {}) => `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK, ...extra })}`;
-
-test("the pay page is in the visitor's language by the web's locale parameter; none or unknown is Chinese", async () => {
+test("an order page is in the language stored with the order; none stored is Chinese; the URL's locale does not matter", async () => {
   const s = await serve();
   try {
-    const html = async (extra: Record<string, string>) => (await fetch(`${s.base}/${q(extra)}`)).text();
-    const en = await html({ locale: "en", name: "Ann" });
-    assert.match(en, /<html lang="en">/);
-    assert.match(en, /<dt>Name<\/dt>/);
-    assert.match(en, /<dt>Code sent to<\/dt>/);
-    assert.match(en, />WeChat Pay ¥0\.01<\/span><\/button>/);
-    assert.doesNotMatch(en, /姓名|兑换码发送至|网络错误/);
-    const ja = await html({ locale: "ja", name: "A" });
-    assert.match(ja, /<html lang="ja">/);
-    assert.match(ja, /<dt>お名前<\/dt>/);
-    assert.match(ja, /ネットワークエラーです/, "the page script's messages are in the language too");
-    assert.match(ja, /"locale":"ja"/, "the order POST carries the language");
-    for (const extra of [{}, { locale: "fr" }] as Array<Record<string, string>>) {
-      const zh = await html({ ...extra, name: "A" });
-      assert.match(zh, /<html lang="zh-CN">/);
-      assert.match(zh, /<dt>姓名<\/dt>/);
+    const labels: Record<string, [string, RegExp[], RegExp[]]> = {
+      zh: ["zh-CN", [/<dt>订单号<\/dt>/, /<dt>邮箱<\/dt>/, />待支付</, />微信支付 ¥9\.90<\/span><\/button>/, /重新下单/, /网络错误/], [/Order no\./]],
+      en: ["en", [/<dt>Order no\.<\/dt>/, /<dt>Email<\/dt>/, />Unpaid</, />WeChat Pay ¥9\.90<\/span><\/button>/, /Order again/, /Network error/], [/订单号|网络错误/]],
+      ja: ["ja", [/<dt>注文番号<\/dt>/, /<dt>メール<\/dt>/, />未払い</, /ネットワークエラーです/, /注文し直す/], [/订单号/]]
+    };
+    for (const [locale, [lang, present, absent]] of Object.entries(labels)) {
+      s.seed({ locale: locale as "zh" | "en" | "ja" });
+      const { html } = await s.page(`/o/${NO}?locale=${locale === "zh" ? "ja" : "zh"}`);
+      assert.match(html, new RegExp(`<html lang="${lang}">`), locale);
+      for (const pattern of present) assert.match(html, pattern, `${locale} ${pattern}`);
+      for (const pattern of absent) assert.doesNotMatch(html, pattern, `${locale} ${pattern}`);
     }
-    assert.match(await (await fetch(`${s.base}/?locale=en`)).text(), /Invalid link/);
+    s.seed({ locale: null });
+    assert.match((await s.page()).html, /<html lang="zh-CN">/);
+    // Pill texts and the paid line travel in the page's own script, in the same language.
+    s.seed({ locale: "en" });
+    const en = (await s.page()).html;
+    assert.match(en, /"unpaid":"Unpaid","paid":"Paid","expired":"Expired"/);
+    assert.match(en, /Payment received, redirecting…/);
+    s.seed({ locale: "ja" });
+    assert.match((await s.page()).html, /"unpaid":"未払い","paid":"支払い済み","expired":"期限切れ"/);
     assert.match(await (await fetch(`${s.base}/nowhere?locale=ja`)).text(), /ページが見つかりません/);
   } finally { s.close(); }
 });
 
-test("the order keeps the visitor's language with the pending code, its way back carries it, and the paid mail gets the stored one", async () => {
+test("an order keeps the visitor's language from /c; a renewed order and the paid mail keep the stored one", async () => {
   const s = await serve();
   try {
-    const order = (body: Record<string, unknown>) => fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4", "user-agent": "iPhone Mobile" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, ...body }) });
-    const placed = await order({ locale: "en" });
-    assert.equal(placed.status, 200);
-    assert.equal(s.created[0]!.locale, "en");
-    assert.match(decodeURIComponent(((await placed.json()) as { url: string }).url), /locale=en/, "the return URL keeps the language");
-    await order({});
-    assert.equal(s.created[1]!.locale, "zh");
-    await order({ locale: "xx" });
-    assert.equal(s.created[2]!.locale, "zh");
-    const refused = await order({ locale: "ja", email: "nope" });
+    await s.post("/new", { product: PRODUCT, email: "a@b.co", locale: "en" }, GATHER);
+    await s.post("/new", { product: PRODUCT, email: "a@b.co" }, GATHER);
+    await s.post("/new", { product: PRODUCT, email: "a@b.co", locale: "xx" }, GATHER);
+    assert.deepEqual(s.created.map(input => input.locale), ["en", "zh", "zh"]);
+    const refused = await s.post("/new", { product: PRODUCT, email: "nope", locale: "ja" }, GATHER);
     assert.equal(refused.status, 400);
-    assert.deepEqual(await refused.json(), { error: "無効なリンクです" });
+    assert.deepEqual(await refused.json(), { error: { code: "invalid_order", message: "無効なリンクです" } });
+    const [first] = [...s.orders.keys()];
+    assert.match((await s.page(`/o/${first}`)).html, /<html lang="en">/);
 
-    // The return page speaks the language of its link; the mail, the one stored with the order.
-    const unpaid = await fetch(`${s.base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK, locale: "en" })}`, { redirect: "manual" });
-    assert.equal(unpaid.status, 302);
-    assert.match(unpaid.headers.get("location")!, /locale=en/, "the pay page keeps the language");
+    s.seed({ locale: "ja" });
     s.trade.state = "SUCCESS";
-    await fetch(`${s.base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK, locale: "en" })}`, { redirect: "manual" });
-    assert.deepEqual(s.mailed, [{ code: "MSC222222", productId: PRODUCT, to: "a@b.co", locale: "ja" }]);
+    await s.page();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(s.mailed.length, 1);
+    assert.equal(s.mailed[0]!.locale, "ja", "the mail is in the order's language");
+
+    s.seed({ outTradeNo: `hp${"d".repeat(24)}`, locale: "ja" });
+    s.clock.now = new Date(s.clock.now.getTime() + 15 * 60_000);
+    s.trade.state = "NOTPAY";
+    await s.post(`/o/hp${"d".repeat(24)}/renew`, {}, MERCHANT);
+    assert.equal(s.created.at(-1)!.locale, "ja");
   } finally { s.close(); }
 });

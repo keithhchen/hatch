@@ -1,9 +1,8 @@
-// Pure rules of the access code page (/c/<code>): routes, the pay link, how far the steps have come. No DOM, no network.
+// Pure rules of the access code page (/c/<code>): routes, the pay order request, how far the steps have come. No DOM, no network.
 
 import { localized } from "./artifactForm.js";
 
 const CODE_ROUTE = /^\/c(?:\/([A-Za-z0-9_-]{4,64}))?\/?$/;
-export const PAY_URL = "https://anyteach.cn/hatch-pay/";
 
 export const CodeRoute = Object.freeze({
   /** `/c` and `/c/` are the landing; `/c/<code>` is that code's page. */
@@ -15,14 +14,8 @@ export const CodeRoute = Object.freeze({
   codePath: code => `/c/${encodeURIComponent(code)}`
 });
 
-/**
- * Where buying a code starts: the pay page for the Product and the buyer's email, which sends the buyer back to `back` with `?code=`
- * once paid, in the reader's `locale` (the pay pages read the same parameter). The landing is where they come back to, and it opens the code's own page.
- */
-export function accessCodePayUrl({ productId, email, origin, site, name, locale }) {
-  const params = new URLSearchParams({ product: productId, email: email.trim(), back: `${origin}${CodeRoute.landingPath()}`, site: String(site ?? "").trim(), name: String(name ?? "").trim(), locale });
-  return `${PAY_URL}?${params}`;
-}
+/** The body of `POST /hatch-pay/new`: the Product, the buyer's contact and the reader's locale; the answer's `url` is the order page. */
+export const payOrderRequest = ({ productId, email, name, locale }) => ({ product: productId, email: email.trim(), name: String(name ?? "").trim(), locale });
 
 /** The diagnosed website as a domain: no scheme, no www, no path. Whatever the buyer typed that is not a URL is shown trimmed. */
 export function siteDomain(value) {

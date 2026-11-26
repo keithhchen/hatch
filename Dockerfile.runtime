@@ -52,6 +52,7 @@ RUN apt-get update \
 COPY --from=build /workspace/runtime-server/dist ./dist
 COPY runtime-server/scripts/convert_to_markdown.py ./scripts/convert_to_markdown.py
 COPY runtime-server/prompts ./prompts
+COPY runtime-server/fonts ./fonts
 # Audit report stylesheet and script, served at /report-assets/vN/ (reportAssets.ts resolves them next to dist).
 COPY runtime-server/report-assets ./report-assets
 COPY runtime-server/scripts/transfer-creator-product.mjs ./scripts/transfer-creator-product.mjs

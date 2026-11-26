@@ -1,265 +1,343 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
-import test, { mock } from "node:test";
+import test from "node:test";
 import vm from "node:vm";
-import { InMemoryProductCapabilities } from "../agentBox/capabilities.js";
-import { HatchPay, handleHatchPayRoute, siteDomain } from "./routes.js";
+import { MERCHANT, NO, PHONE, PRODUCT, DESKTOP, pageData, serve } from "./orderPage.testkit.js";
+import { WeChatPayError } from "./wechatPay.js";
 
-const PRODUCT = "159c0f12-6e23-4512-af7b-928833d199d7";
-const BACK = `https://gethatchapp.com/p/${PRODUCT}`;
-const corpora = { resolveByProduct: async () => ({ corpus: { creator: { name: "MSC咨询" }, product: { name: "出海官网获客诊断", description: "一份说清官网为什么没有询盘的诊断" } } }) };
+const GATHER = { origin: "https://gethatchapp.com", "content-type": "application/json" };
+const NEW = { product: PRODUCT, email: " a@b.co ", name: " 王小明 ", locale: "en" };
 
-async function serve(withCorpora = true) {
-  const pay = new HatchPay({
-    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
-    wechat: { ready: () => true }, codes: {}, openids: {}, mailer: {}, ...withCorpora ? { corpora } : {}
-  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
-  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay/`;
-  return { base, close: () => { server.closeAllConnections(); server.close(); } };
-}
-const q = (extra: Record<string, string> = {}) => `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK, ...extra })}`;
-
-test("the pay page script shows a spinner and the localized redirect line once paid", async () => {
+test("POST /new makes a pending order for /c: only from Hatch's pages, validated, no WeChat call; returns the order page's URL", async () => {
   const s = await serve();
   try {
-    for (const [locale, line] of [["zh", "支付成功，正在跳转…"], ["en", "Payment received, redirecting…"], ["ja", "お支払いを確認しました。移動しています…"]]) {
-      const html = await (await fetch(s.base + q({ locale }))).text();
-      assert.ok(html.includes(line), locale);
-      assert.ok(html.includes(({ zh: "支付成功", en: "Payment received", ja: "お支払いが完了しました" } as Record<string, string>)[locale]!), `${locale} success line`);
-      assert.match(html, /paid\(j\.returnUrl\)/);
-    }
+    assert.equal((await s.post("/new", NEW, { "content-type": "application/json" })).status, 403);
+    assert.equal((await s.post("/new", NEW, MERCHANT)).status, 403, "anyteach.cn's own pages do not make orders");
+    assert.equal((await s.post("/new", NEW, { origin: "https://gethatchapp.com.evil.example", "content-type": "application/json" })).status, 403);
+    assert.equal((await s.post("/new", { ...NEW, email: "nope" }, GATHER)).status, 400);
+    assert.equal((await s.post("/new", { ...NEW, product: "x" }, GATHER)).status, 400);
+    assert.equal((await s.post("/new", { ...NEW, product: "11111111-2222-4333-8444-555555555555" }, GATHER)).status, 403, "no access_code capability");
+    assert.equal(s.created.length, 0);
+
+    const res = await s.post("/new", NEW, GATHER);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { order_no: string; url: string };
+    assert.match(body.order_no, /^hp[0-9a-f]{24}$/);
+    assert.equal(body.url, `https://anyteach.cn/hatch-pay/o/${body.order_no}`);
+    assert.deepEqual(s.created, [{ productId: PRODUCT, email: "a@b.co", name: "王小明", locale: "en" }], "trimmed, and no pay channel yet");
+    assert.deepEqual([s.made.native.length, s.made.h5.length], [0, 0], "WeChat was never asked");
+
+    await s.post("/new", { product: PRODUCT, email: "a@b.co", name: "x".repeat(41), locale: "xx" }, GATHER);
+    assert.deepEqual(s.created[1], { productId: PRODUCT, email: "a@b.co", locale: "zh" }, "an over-long name is dropped, an unknown language is Chinese");
+    const refused = await s.post("/new", { ...NEW, email: "nope" }, GATHER);
+    assert.deepEqual(await refused.json(), { error: { code: "invalid_order", message: "Invalid link" } });
   } finally { s.close(); }
 });
 
-test("pay page shows the MSC × Hatch lockup,product, order lines, price and email; site and name are escaped and validated", async () => {
+test("a pending order's page: lockup, product, the order number with Unpaid, the email, the price; no website or name rows; auto-start", async () => {
   const s = await serve();
   try {
-    const res = await fetch(s.base + q({ site: "https://www.Example.com/path?x=1", name: "<b>陈</b>" }));
-    const html = await res.text();
+    s.seed({ name: "<b>陈</b>" });
+    const { res, html } = await s.page();
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("referrer-policy"), "origin");
-    assert.match(html, /hatch-downloads\.oss-cn-shanghai\.aliyuncs\.com\/brand\/cobrand\/msc-x-hatch-light\.png/);
-    assert.match(html, /出海官网获客诊断/);
-    assert.match(html, /alt="MSC × Hatch"/);
+    assert.match(html, /hatch-downloads\.oss-cn-shanghai\.aliyuncs\.com\/brand\/msc\/msc-logo-black\.png/);
+    assert.match(html, /gethatchapp\.com\/assets\/web\/hatch-lockup\.svg/);
+    assert.match(html, /aria-label="MSC × Hatch"/);
+    assert.match(html, /<h1>出海官网获客诊断<\/h1>/);
     assert.doesNotMatch(html, /MSC咨询/, "the lockup carries the expert");
-    assert.match(html, /一份说清官网为什么没有询盘的诊断/);
-    assert.match(html, /<dd>example\.com<\/dd>/, "the site is a bare domain");
-    assert.match(html, /<dd>&lt;b&gt;陈&lt;\/b&gt;<\/dd>/, "the name is escaped");
-    assert.doesNotMatch(html, /<b>陈/);
-    assert.match(html, /¥0\.01/);
-    assert.match(html, /<dd>a@b\.co<\/dd>/);
-    assert.match(html, /class="spin"/);
-
-    const bare = await (await fetch(s.base + q())).text();
-    assert.doesNotMatch(bare, /网站|姓名/, "absent site and name omit their lines");
-    const bad = await (await fetch(s.base + q({ site: "javascript:alert(1)", name: "x".repeat(41) }))).text();
-    assert.doesNotMatch(bad, /网站|姓名|alert/, "an invalid site or an over-long name is dropped");
+    assert.match(html, new RegExp(`<dt>订单号</dt><dd><span class="no" id="no">${NO}</span>`));
+    assert.match(html, /<span class="pill" id="pill">待支付<\/span>/);
+    assert.match(html, /<dt>邮箱<\/dt><dd>a@b\.co<\/dd>/);
+    assert.match(html, /¥9\.90/);
+    assert.doesNotMatch(html, /网站|姓名|兑换码发送至|陈|MSC222222/, "no site or name row, and the access code is never shown");
+    assert.match(html, /data-s="unpaid"/);
+    assert.deepEqual(pageData(html), { s: "unpaid", pay: `https://anyteach.cn/hatch-pay/o/${NO}/pay`, renew: `https://anyteach.cn/hatch-pay/o/${NO}/renew`, status: `https://anyteach.cn/hatch-pay/status?o=${NO}`, order: `https://anyteach.cn/hatch-pay/o/${NO}`, left: 15 * 60_000, url: null, conf: false, auto: true });
+    assert.match(html, /@font-face\{font-family:"DM Sans Variable".*https:\/\/anyteach\.cn\/hatch-pay\/font\/dm-sans-latin-wght-normal\.woff2/);
+    assert.match(html, /prefers-reduced-motion:reduce/);
+    // Reading an order changes nothing: no WeChat order, no new row.
+    assert.deepEqual([s.made.native.length, s.made.h5.length, s.orders.size], [0, 0, 1]);
   } finally { s.close(); }
 });
 
-test("without a Product Corpus the card still shows the price and order, with no invented product details", async () => {
-  const s = await serve(false);
+test("without a Product Corpus the card still shows the order and price, with no invented product name", async () => {
+  const s = await serve({ withCorpora: false });
   try {
-    const html = await (await fetch(s.base + q({ site: "example.com" }))).text();
-    assert.match(html, /¥0\.01/);
+    s.seed();
+    const { html } = await s.page();
+    assert.match(html, /¥9\.90/);
     assert.doesNotMatch(html, /<h1>/);
   } finally { s.close(); }
 });
 
-test("siteDomain keeps only a plausible domain", () => {
-  assert.equal(siteDomain("example.com"), "example.com");
-  assert.equal(siteDomain("http://WWW.Foo.co.uk:8080/a"), "foo.co.uk");
-  for (const bad of ["", null, "localhost", "a b", "javascript:alert(1)", "http://1"]) assert.equal(siteDomain(bad), undefined, String(bad));
+test("an unknown or malformed order is a 404 page and asks WeChat nothing", async () => {
+  const s = await serve();
+  try {
+    assert.equal((await s.page(`/o/hp${"c".repeat(24)}`)).res.status, 404);
+    assert.equal((await s.page("/o/nope")).res.status, 404);
+    assert.equal((await s.page(`/o/${NO}/other`)).res.status, 404);
+    assert.equal((await s.page("/?product=x")).res.status, 404, "the query-parameter pay page is gone");
+  } finally { s.close(); }
 });
 
-/** Runs the page's own script against a stub DOM; returns how many orders it created and the page's state. */
-async function runPageScript(html: string, nav: { type: string }, orderResponse: { ok: boolean; json: unknown } = { ok: true, json: { mode: "h5", url: "https://wx.example/pay" } }) {
+test("?r=1 (back from WeChat's cashier) shows the confirm line and does not auto-start; the same order is shown every time", async () => {
+  const s = await serve();
+  try {
+    s.seed();
+    const back = pageData((await s.page(`/o/${NO}?r=1`)).html);
+    assert.deepEqual([back.conf, back.auto, back.s], [true, false, "unpaid"]);
+    const again = (await s.page()).html, other = (await s.page(`/o/${NO}`, { "user-agent": PHONE })).html;
+    assert.equal(again.replace(/\s/g, ""), other.replace(/\s/g, ""), "another browser sees the same order");
+  } finally { s.close(); }
+});
+
+test("a paid order: WeChat's SUCCESS settles it once; the page says Paid and goes to /c with the code; a reload settles nothing more", async () => {
+  const s = await serve();
+  try {
+    s.seed({ name: "王小明" });
+    s.trade.state = "SUCCESS";
+    const first = await s.page();
+    const data = pageData(first.html);
+    assert.deepEqual([data.s, data.url, data.auto], ["paid", "https://gethatchapp.com/c/?code=MSC222222", false]);
+    assert.match(first.html, /<span class="pill" id="pill">已支付<\/span>/);
+    assert.equal(s.orders.get(NO)!.status, "active");
+    await s.page(); await s.page(`/o/${NO}?r=1`);
+    assert.deepEqual(s.activations, [NO], "activated once");
+    // Later the order is already paid: no WeChat question at all.
+    s.trade.state = "NOTPAY";
+    assert.equal(pageData((await s.page()).html).s, "paid");
+    s.orders.get(NO)!.status = "used";
+    assert.equal(pageData((await s.page()).html).s, "paid");
+  } finally { s.close(); }
+});
+
+test("an expired order (15 minutes after it was made, not paid at WeChat): the pill says Expired and the pay button is not offered", async () => {
+  const s = await serve();
+  try {
+    s.seed();
+    s.clock.now = new Date(s.clock.now.getTime() + 15 * 60_000);
+    const { html } = await s.page();
+    assert.match(html, /data-s="expired"/);
+    assert.match(html, /<span class="pill" id="pill">已过期<\/span>/);
+    assert.deepEqual([pageData(html).s, pageData(html).auto, pageData(html).left], ["expired", false, 0]);
+    assert.match(html, /\[data-s=expired\] #pay/);
+    // Paid at WeChat in time: not expired, whatever the clock says.
+    s.trade.state = "SUCCESS";
+    assert.equal(pageData((await s.page()).html).s, "paid");
+  } finally { s.close(); }
+});
+
+test("POST /pay makes the WeChat order for THIS number: same out_trade_no, same amount, same deterministic expiry on every call", async () => {
+  const s = await serve();
+  try {
+    s.seed();
+    const desktop = { ...MERCHANT, "user-agent": DESKTOP };
+    const a = await (await s.post(`/o/${NO}/pay`, {}, desktop)).json() as Record<string, string>;
+    s.clock.now = new Date(s.clock.now.getTime() + 5 * 60_000);
+    const b = await (await s.post(`/o/${NO}/pay`, {}, desktop)).json() as Record<string, string>;
+    assert.deepEqual([a.mode, b.mode], ["native", "native"]);
+    assert.match(a.qrSvg!, /^<svg /);
+    assert.equal(s.made.native.length, 2);
+    assert.deepEqual(s.made.native[0], { outTradeNo: NO, description: "Hatch 兑换码", amountFen: 990, expiresAt: new Date("2026-11-27T10:15:00Z") });
+    assert.deepEqual(s.made.native[1], s.made.native[0], "a repeat is the same request, not 'now + 15 minutes'");
+    assert.equal(s.orders.size, 1, "paying makes no new order");
+
+    const phone = await (await s.post(`/o/${NO}/pay`, {}, { ...MERCHANT, "user-agent": PHONE, "x-real-ip": "198.51.100.4" })).json() as { mode: string; url: string };
+    assert.equal(phone.mode, "h5");
+    assert.equal(new URL(phone.url).searchParams.get("redirect_url"), `https://anyteach.cn/hatch-pay/o/${NO}?r=1`, "WeChat's cashier returns to the same order");
+    assert.deepEqual(s.made.h5[0], { ...s.made.native[0], payerIp: "198.51.100.4" });
+    assert.equal((await s.post(`/o/${NO}/pay`, {}, { ...MERCHANT, "user-agent": PHONE })).status, 400, "no address, no H5 order");
+    assert.equal((await s.post(`/o/${NO}/pay`, {}, { "content-type": "application/json" })).status, 403, "only from the merchant's page");
+    assert.equal((await s.post(`/o/hp${"c".repeat(24)}/pay`, {}, MERCHANT)).status, 404);
+
+    const jsapi = await (await s.post(`/o/${NO}/pay`, { openid: "oX" }, MERCHANT)).json() as { mode: string };
+    assert.equal(jsapi.mode, "jsapi");
+    assert.equal(s.made.jsapi[0]!.openid, "oX");
+  } finally { s.close(); }
+});
+
+test("POST /pay on an order that cannot be paid: expired, paid, or refused by WeChat as used or closed, all without a new order; other WeChat errors are retryable", async () => {
+  const s = await serve();
+  try {
+    s.seed();
+    const desktop = { ...MERCHANT, "user-agent": DESKTOP };
+    s.trade.reject = new WeChatPayError(400, "OUT_TRADE_NO_USED", "used", null);
+    const used = await s.post(`/o/${NO}/pay`, {}, desktop);
+    assert.deepEqual([used.status, await used.json()], [409, { expired: true }]);
+    s.trade.reject = new WeChatPayError(400, "ORDER_CLOSED", "closed", null);
+    assert.deepEqual(await (await s.post(`/o/${NO}/pay`, {}, desktop)).json(), { expired: true });
+    s.trade.reject = new WeChatPayError(500, "SYSTEMERROR", "down", null);
+    assert.equal((await s.post(`/o/${NO}/pay`, {}, desktop)).status, 502);
+    s.trade.reject = undefined;
+    s.clock.now = new Date(s.clock.now.getTime() + 15 * 60_000);
+    assert.deepEqual(await (await s.post(`/o/${NO}/pay`, {}, desktop)).json(), { expired: true });
+    s.orders.get(NO)!.status = "active";
+    assert.deepEqual(await (await s.post(`/o/${NO}/pay`, {}, desktop)).json(), { paid: true });
+    assert.equal(s.orders.size, 1);
+  } finally { s.close(); }
+});
+
+test("POST /renew: only an expired pending order; it makes a new one with the same Product, email, name and language and leaves the old one alone", async () => {
+  const s = await serve();
+  try {
+    s.seed({ name: "王小明", locale: "ja" });
+    assert.equal((await s.post(`/o/${NO}/renew`, {}, MERCHANT)).status, 409, "still valid");
+    assert.equal(s.created.length, 0);
+    s.clock.now = new Date(s.clock.now.getTime() + 15 * 60_000);
+    assert.equal((await s.post(`/o/${NO}/renew`, {}, { "content-type": "application/json" })).status, 403);
+    const res = await s.post(`/o/${NO}/renew`, {}, MERCHANT);
+    assert.equal(res.status, 200);
+    const { url } = await res.json() as { url: string };
+    const created = [...s.orders.keys()].find(key => key !== NO)!;
+    assert.equal(url, `https://anyteach.cn/hatch-pay/o/${created}`);
+    assert.deepEqual(s.created, [{ productId: PRODUCT, email: "a@b.co", name: "王小明", locale: "ja" }]);
+    assert.deepEqual([s.orders.get(NO)!.status, s.orders.get(NO)!.code], ["pending", "MSC222222"], "the old order is untouched");
+    assert.equal(pageData((await s.page(`/o/${created}`)).html).s, "unpaid", "the new order is a fresh one");
+    s.orders.get(NO)!.status = "active";
+    assert.equal((await s.post(`/o/${NO}/renew`, {}, MERCHANT)).status, 409, "a paid order is not renewed");
+    assert.equal((await s.post(`/o/hp${"c".repeat(24)}/renew`, {}, MERCHANT)).status, 404);
+  } finally { s.close(); }
+});
+
+test("/return (orders made before the order page) is a 302 to the order's page with ?r=1", async () => {
+  const s = await serve();
+  try {
+    const res = await fetch(`${s.base}/return?${new URLSearchParams({ o: NO, back: "https://gethatchapp.com/c/", locale: "en" })}`, { redirect: "manual" });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), `https://anyteach.cn/hatch-pay/o/${NO}?r=1`);
+    assert.equal((await fetch(`${s.base}/return?o=bogus`, { redirect: "manual" })).status, 400);
+  } finally { s.close(); }
+});
+
+test("/status says whether WeChat has the order paid and, when it does, settles it (idempotently) and says where to go; unknown is 404", async () => {
+  const s = await serve();
+  try {
+    s.seed();
+    const status = async (o = NO) => fetch(`${s.base}/status?o=${o}`);
+    assert.deepEqual(await (await status()).json(), { paid: false });
+    s.trade.state = "SUCCESS";
+    assert.deepEqual(await (await status()).json(), { paid: true, url: "https://gethatchapp.com/c/?code=MSC222222" });
+    await status();
+    assert.deepEqual(s.activations, [NO]);
+    assert.equal((await status(`hp${"c".repeat(24)}`)).status, 404);
+    assert.equal((await status("x")).status, 404);
+  } finally { s.close(); }
+});
+
+test("the font is served same-origin: woff2, cached for a year, only that file", async () => {
+  const s = await serve();
+  try {
+    const res = await fetch(`${s.base}/font/dm-sans-latin-wght-normal.woff2`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "font/woff2");
+    assert.equal(res.headers.get("cache-control"), "public, max-age=31536000, immutable");
+    assert.equal(new TextDecoder().decode((await res.arrayBuffer()).slice(0, 4)), "wOF2");
+    assert.equal((await fetch(`${s.base}/font/other.woff2`)).status, 404);
+  } finally { s.close(); }
+});
+
+test("WeChat's browser gets only the guide out of it, in the order's language: no order page, no WeChat call", async () => {
+  const s = await serve();
+  try {
+    s.seed({ locale: "en" });
+    const { html } = await s.page(`/o/${NO}`, { "user-agent": "Mozilla/5.0 (iPhone) MicroMessenger/8.0" });
+    assert.match(html, /Open in browser/);
+    assert.doesNotMatch(html, /<button|订单号/);
+    assert.equal((await s.post(`/o/${NO}/pay`, {}, { ...MERCHANT, "user-agent": "MicroMessenger/8.0" })).status, 403);
+    assert.deepEqual([s.made.native.length, s.made.h5.length], [0, 0]);
+  } finally { s.close(); }
+});
+
+/** Runs the page's own script against a stub DOM. `answers` are the JSON the server gives to /pay, /status and /renew. */
+async function runPageScript(html: string, nav: { type: string }, answers: { pay?: { ok: boolean; json: unknown }; status?: unknown; renew?: { ok: boolean; json: unknown } } = {}) {
   const script = /<script>([\s\S]*)<\/script>/.exec(html)![1]!;
-  const classes = new Set<string>(), el = (extra = {}) => ({ disabled: false, textContent: "", innerHTML: "", style: {} as Record<string, string>, classList: { add: (c: string) => classes.add(c), remove: (c: string) => classes.delete(c) }, ...extra });
-  const btn = el(), err = el(), listeners: Record<string, (e: { persisted: boolean }) => void> = {};
-  const location = { href: "" }; let orders = 0;
+  const timers: Array<() => void> = [], calls: string[] = [];
+  const classes = new Set<string>();
+  const el = (extra: Record<string, unknown> = {}) => ({ disabled: false, textContent: "", innerHTML: "", style: {} as Record<string, string>, dataset: {} as Record<string, string>, classList: { add: (c: string) => classes.add(c), remove: (c: string) => classes.delete(c), contains: (c: string) => classes.has(c) }, ...extra });
+  const els: Record<string, ReturnType<typeof el>> = { card: el({ dataset: { s: /data-s="(\w+)"/.exec(html)![1]! } }), pay: el(), err: el(), qr: el(), pill: el(), renew: el(), cp: el(), no: el({ textContent: NO }) };
+  const listeners: Record<string, (e: { persisted: boolean }) => void> = {}, location = { href: "", replace: (u: string) => { location.href = u; } };
+  const copied: string[] = [];
   const context = {
-    document: { getElementById: (id: string) => id === "pay" ? btn : err }, location, setTimeout: () => 0,
+    document: { getElementById: (id: string) => els[id] }, location, setTimeout: (fn: () => void) => { timers.push(fn); return timers.length; }, setInterval: () => 0, clearInterval: () => undefined,
+    navigator: { clipboard: { writeText: async (text: string) => { copied.push(text); } } },
     performance: { getEntriesByType: () => [nav] }, addEventListener: (name: string, fn: (e: { persisted: boolean }) => void) => { listeners[name] = fn; },
-    fetch: async () => { orders++; return { ok: orderResponse.ok, json: async () => orderResponse.json }; }
+    fetch: async (url: string) => {
+      calls.push(url);
+      const answer = url.endsWith("/pay") ? answers.pay ?? { ok: true, json: { mode: "h5", url: "https://wx.example/pay" } } : url.endsWith("/renew") ? answers.renew ?? { ok: true, json: { url: "https://anyteach.cn/hatch-pay/o/hpnew" } } : { ok: true, json: answers.status ?? { paid: false } };
+      return { ok: answer.ok, json: async () => answer.json };
+    }
   };
   vm.runInNewContext(script, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { orders: () => orders, btn, err, classes, location, pageshow: (persisted: boolean) => listeners.pageshow!({ persisted }), click: () => (btn as unknown as { onclick: () => Promise<void> }).onclick() };
+  const { pay, err, card, pill, renew, cp } = els;
+  return { els, pay, err, card, pill, renew, cp, location, calls, timers, copied, classes, pageshow: (persisted: boolean) => listeners.pageshow!({ persisted }), click: () => (pay as unknown as { onclick: () => Promise<void> }).onclick(), renewClick: () => (renew as unknown as { onclick: () => Promise<void> }).onclick(), copyClick: () => (cp as unknown as { onclick: () => void }).onclick() };
 }
 
-test("auto-start: a fresh load creates one order and redirects; back navigation and bfcache restore do not create another", async () => {
+test("the page script: a fresh load starts one payment and goes to WeChat; back navigation, ?r=1 and a bfcache restore start none; the button is a manual retry", async () => {
   const s = await serve();
   try {
-    const html = await (await fetch(s.base + q())).text();
-
-    const page = await runPageScript(await (await fetch(s.base + q({ o: TRADE }))).text(), { type: "navigate" });
-    assert.equal(page.classes.has("busy"), false, "the button stays free");
-    assert.match(page.err.innerHTML, /mini.*正在确认支付结果/);
+    s.seed();
+    const html = (await s.page()).html;
     const fresh = await runPageScript(html, { type: "navigate" });
-    assert.equal(fresh.orders(), 1, "one order on load");
+    assert.deepEqual(fresh.calls, [`https://anyteach.cn/hatch-pay/o/${NO}/pay`], "one POST on load, to this order's pay URL");
     assert.equal(fresh.location.href, "https://wx.example/pay");
     assert.ok(fresh.classes.has("busy"), "the spinner stays until the redirect");
-    fresh.pageshow(false);
-    assert.equal(fresh.orders(), 1, "a pageshow that is not a restore starts nothing");
     fresh.pageshow(true);
-    assert.equal(fresh.orders(), 1, "a bfcache restore does not start an order");
-    assert.equal(fresh.btn.disabled, false, "and shows the button");
+    assert.equal(fresh.calls.length, 1, "a bfcache restore does not start a payment");
     assert.ok(!fresh.classes.has("busy"));
     await fresh.click();
-    assert.equal(fresh.orders(), 2, "the button is a manual retry");
+    assert.equal(fresh.calls.length, 2);
 
-    const back = await runPageScript(html, { type: "back_forward" });
-    assert.equal(back.orders(), 0, "back navigation shows the button, creates no order");
-    assert.equal(back.btn.disabled, false);
+    assert.equal((await runPageScript(html, { type: "back_forward" })).calls.length, 0);
+    const returned = await runPageScript((await s.page(`/o/${NO}?r=1`)).html, { type: "navigate" });
+    assert.ok(!returned.calls.some(url => url.endsWith("/pay")), "?r=1 never auto-starts");
+    assert.match(returned.err.innerHTML, /mini.*正在确认支付结果/);
+    assert.ok(!returned.classes.has("busy"), "the button stays free");
 
-    const failed = await runPageScript(html, { type: "navigate" }, { ok: false, json: { error: "下单失败" } });
-    assert.equal(failed.orders(), 1);
+    const failed = await runPageScript(html, { type: "navigate" }, { pay: { ok: false, json: { error: "下单失败" } } });
     assert.equal(failed.err.textContent, "下单失败");
-    assert.equal(failed.btn.disabled, false, "a failed auto-start re-enables the button");
     assert.ok(!failed.classes.has("busy"));
   } finally { s.close(); }
 });
 
-test("the order stores the buyer's name with the pending code; an invalid name is dropped; the paid order's mail gets it", async () => {
-  const created: Array<Record<string, unknown>> = [], mailed: Array<Record<string, unknown>> = [];
-  const pay = new HatchPay({
-    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
-    wechat: {
-      ready: () => true, createH5Order: async () => ({ h5Url: "https://wx.example/pay?a=1" }),
-      queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState: "SUCCESS", transactionId: "42", amountFen: 1 })
-    },
-    codes: {
-      createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: `hp${"a".repeat(24)}` }; },
-      order: async () => ({ productId: PRODUCT, email: "a@b.co" }),
-      activatePaid: async () => ({ code: "MSC222222", productId: PRODUCT, email: "a@b.co", name: "王小明", status: "active", source: "paid", activated: true })
-    },
-    openids: {}, mailer: { send: async (input: Record<string, unknown>) => { mailed.push(input); } }
-  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
-  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
-  const order = (name: unknown) => fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4", "user-agent": "iPhone Mobile" }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, name }) });
+test("the page script: the confirm line polls /status; paid turns the pill to Paid and goes to /c with the code; the order expiring shows Expired and Order again", async () => {
+  const s = await serve();
   try {
-    assert.equal((await order(" 王小明 ")).status, 200);
-    assert.equal(created[0]!.name, "王小明");
-    assert.equal((await order("x".repeat(41))).status, 200);
-    assert.equal("name" in created[1]!, false, "an over-long name is not stored");
-    assert.equal((await order(undefined)).status, 200);
-    assert.equal("name" in created[2]!, false);
-    await fetch(`${base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK })}`, { redirect: "manual" });
-    assert.deepEqual(mailed, [{ code: "MSC222222", productId: PRODUCT, to: "a@b.co", name: "王小明" }]);
-  } finally { server.closeAllConnections(); server.close(); }
-});
+    s.seed();
+    const confirm = await runPageScript((await s.page(`/o/${NO}?r=1`)).html, { type: "navigate" }, { status: { paid: true, url: "https://gethatchapp.com/c/?code=MSC222222" } });
+    assert.equal(confirm.calls[0], `https://anyteach.cn/hatch-pay/status?o=${NO}`);
+    assert.equal(confirm.card.dataset.s, "paid");
+    assert.equal(confirm.pill.textContent, "已支付");
+    assert.match(confirm.els.qr!.innerHTML, /支付成功/);
+    confirm.timers.at(-1)!();
+    assert.equal(confirm.location.href, "https://gethatchapp.com/c/?code=MSC222222");
 
-test("the code email is sent in the background: the return page does not wait for it, and its final failure is logged", async () => {
-  const errors = mock.method(console, "error", () => undefined);
-  let fail!: (error: Error) => void;
-  const pay = new HatchPay({
-    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
-    wechat: { ready: () => true, queryOrder: async (outTradeNo: string) => ({ outTradeNo, tradeState: "SUCCESS", transactionId: "42", amountFen: 1 }) },
-    codes: {
-      order: async () => ({ productId: PRODUCT, email: "a@b.co" }),
-      activatePaid: async () => ({ code: "MSC999999", productId: PRODUCT, email: "a@b.co", status: "active", source: "paid", activated: true })
-    },
-    openids: {}, mailer: { send: () => new Promise<void>((_, reject) => { fail = reject; }) }
-  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
-  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
-  try {
-    const res = await fetch(`${base}/return?${new URLSearchParams({ o: `hp${"a".repeat(24)}`, back: BACK })}`, { redirect: "manual" });
-    assert.equal(res.status, 302, "answered while the mail is still being sent");
-    fail(new Error("gave up"));
-    await new Promise(resolve => setImmediate(resolve));
-    assert.ok(errors.mock.calls.some(c => String(c.arguments[0]).includes("hatch_pay_email_failed")));
-  } finally { errors.mock.restore(); server.closeAllConnections(); server.close(); }
-});
+    const fresh = await runPageScript((await s.page()).html, { type: "back_forward" });
+    fresh.timers[0]!();
+    assert.deepEqual([fresh.card.dataset.s, fresh.pill.textContent], ["expired", "已过期"], "the clock running out expires the page");
 
-const DESKTOP = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
-const PHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148 Safari/604.1";
-const TRADE = `hp${"b".repeat(24)}`;
+    const gone = await runPageScript((await s.page()).html, { type: "navigate" }, { pay: { ok: false, json: { expired: true } } });
+    assert.deepEqual([gone.card.dataset.s, gone.pill.textContent], ["expired", "已过期"], "WeChat refusing the order expires it too");
 
-async function serveNative(tradeState: string) {
-  const created: Array<Record<string, unknown>> = [];
-  const pay = new HatchPay({
-    capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), publicBase: "https://anyteach.cn/hatch-pay", priceFen: 1,
-    wechat: {
-      ready: () => true, createNativeOrder: async () => ({ codeUrl: "weixin://wxpay/bizpayurl?pr=abc" }), createH5Order: async () => ({ h5Url: "https://wx.example/pay?a=1" }),
-      queryOrder: async (outTradeNo: string) => { if (tradeState === "THROW") throw new Error("down"); return { outTradeNo, tradeState }; }
-    },
-    codes: {
-      createPending: async (input: Record<string, unknown>) => { created.push(input); return { code: "MSC222222", outTradeNo: TRADE }; },
-      order: async (o: string) => o === TRADE ? { productId: PRODUCT, email: "a@b.co", name: (created[0]?.name as string | undefined) ?? null } : undefined
-    },
-    openids: {}, mailer: {}
-  } as unknown as ConstructorParameters<typeof HatchPay>[0]);
-  const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), pay));
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
-  const order = (userAgent: string) => fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "x-real-ip": "198.51.100.4", "user-agent": userAgent }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK }) });
-  return { base, created, order, close: () => { server.closeAllConnections(); server.close(); } };
-}
-
-test("a desktop browser gets a Native order with the QR as SVG; a phone still gets H5", async () => {
-  const s = await serveNative("NOTPAY");
-  try {
-    const desktop = await (await s.order(DESKTOP)).json() as Record<string, string>;
-    assert.equal(desktop.mode, "native");
-    assert.match(desktop.qrSvg!, /^<svg /);
-    assert.equal(desktop.statusUrl, `https://anyteach.cn/hatch-pay/status?o=${TRADE}`);
-    assert.match(desktop.returnUrl!, new RegExp(`/return\\?o=${TRADE}`));
-    assert.equal(s.created[0]!.payChannel, "native");
-    const phone = await (await s.order(PHONE)).json() as Record<string, string>;
-    assert.equal(phone.mode, "h5");
-    assert.equal(s.created[1]!.payChannel, "h5");
+    await fresh.renewClick();
+    assert.deepEqual(fresh.calls.at(-1), `https://anyteach.cn/hatch-pay/o/${NO}/renew`);
+    assert.equal(fresh.location.href, "https://anyteach.cn/hatch-pay/o/hpnew");
+    s.trade.state = "SUCCESS";
+    const already = await runPageScript((await s.page()).html, { type: "navigate" });
+    assert.equal(already.card.dataset.s, "paid");
+    assert.equal(already.calls.length, 0, "a paid order starts no payment");
+    already.timers.at(-1)!();
+    assert.equal(already.location.href, "https://gethatchapp.com/c/?code=MSC222222", "re-opening a paid order goes to the code again");
   } finally { s.close(); }
 });
 
-test("/status says whether WeChat has the order paid; an unknown or malformed order is 404", async () => {
-  for (const [state, paid] of [["NOTPAY", false], ["SUCCESS", true]] as const) {
-    const s = await serveNative(state);
-    try {
-      assert.deepEqual(await (await fetch(`${s.base}/status?o=${TRADE}`)).json(), { paid });
-      assert.equal((await fetch(`${s.base}/status?o=hp${"c".repeat(24)}`)).status, 404);
-      assert.equal((await fetch(`${s.base}/status?o=x`)).status, 404);
-    } finally { s.close(); }
-  }
-});
-
-test("an unpaid return goes back to the pay page with o, site, name, email, locale and back; the query failing does the same", async () => {
-  for (const state of ["NOTPAY", "THROW"]) {
-    const s = await serveNative(state);
-    try {
-      const res = await fetch(`${s.base}/order`, { method: "POST", headers: { "content-type": "application/json", origin: "https://anyteach.cn", "user-agent": DESKTOP }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, locale: "en", site: "https://www.Example.com/x", name: "王小明" }) });
-      const { returnUrl } = await res.json() as { returnUrl: string };
-      const back = await fetch(returnUrl.replace("https://anyteach.cn", new URL(s.base).origin), { redirect: "manual" });
-      assert.equal(back.status, 302);
-      const params = new URL(back.headers.get("location")!).searchParams;
-      assert.deepEqual([params.get("o"), params.get("site"), params.get("name"), params.get("email"), params.get("locale"), params.get("back")], [TRADE, "example.com", "王小明", "a@b.co", "en", BACK]);
-    } finally { s.close(); }
-  }
-});
-
-test("the pay page with an order id confirms it: free button, status line, status polling, the return URL for paid; no auto-start", async () => {
+test("the page script: the copy button copies the order number and says so", async () => {
   const s = await serve();
   try {
-    for (const [locale, line] of [["zh", "正在确认支付结果…"], ["en", "Confirming your payment…"], ["ja", "お支払いを確認しています…"]]) {
-      const html = await (await fetch(s.base + q({ locale, o: TRADE, site: "example.com" }))).text();
-      assert.ok(html.includes(line), locale);
-      assert.match(html, /cf=\{"statusUrl":"https:\/\/anyteach\.cn\/hatch-pay\/status\?o=hpb+","returnUrl":"https:\/\/anyteach\.cn\/hatch-pay\/return\?o=hpb+&back=[^"]*site=example\.com"\}/);
-      assert.doesNotMatch(html.slice(html.indexOf("if(cf){"), html.indexOf("else if(!ask.openid")), /busy/, "the button is not locked while confirming");
-      assert.match(html, /else if\(!ask\.openid/, "a fresh order starts only without an order id");
-    }
-    const page = await runPageScript(await (await fetch(s.base + q({ o: TRADE }))).text(), { type: "navigate" });
-    assert.equal(page.classes.has("busy"), false, "the button stays free");
-    assert.match(page.err.innerHTML, /mini.*正在确认支付结果/);
-    const fresh = await (await fetch(s.base + q())).text();
-    assert.match(fresh, /cf=null/);
-    const bad = await (await fetch(s.base + q({ o: "nope" }))).text();
-    assert.match(bad, /cf=null/, "an invalid order id is ignored");
+    s.seed();
+    const page = await runPageScript((await s.page()).html, { type: "back_forward" });
+    page.copyClick();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(page.copied, [NO]);
+    assert.equal(page.cp.textContent, "已复制");
   } finally { s.close(); }
 });

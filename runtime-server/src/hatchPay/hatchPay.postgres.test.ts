@@ -22,8 +22,9 @@ const mailer = (sender: EmailSender) => new AccessCodeMailer({
   prompts: { get: async name => name.endsWith("-subject") ? "码 {{code}}" : "<p>{{product_name}} {{amount}} <a href=\"{{code_url}}\">{{code}}</a></p>" } satisfies PromptRows,
   products: { describe: async () => ({ productName: "网站诊断" }) } satisfies ProductMailInfos
 });
-/** A phone: a desktop browser gets a Native order, not H5. */
+/** A phone: a desktop browser gets a Native QR, not H5. */
 const ORIGIN = { origin: "https://anyteach.cn", "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148" };
+const FROM_C = { origin: "https://gethatchapp.com" };
 
 async function isolated() {
   const schema = `paycodes_test_${randomUUID().replaceAll("-", "")}`;
@@ -43,8 +44,10 @@ async function withDb(body: (db: Awaited<ReturnType<typeof isolated>>) => Promis
 /** The whole pay stack against a fake WeChat: a real HTTP server for the routes, a fake server for WeChat and its OAuth. */
 async function harness(db: Awaited<ReturnType<typeof isolated>>) {
   const keys = testKeys(), mails: EmailMessage[] = [];
-  const trades = new Map<string, Record<string, unknown>>();
+  const trades = new Map<string, Record<string, unknown>>(), refusals = new Map<string, { status: number; code: string }>();
   const wechat = await fakeWeChat(request => {
+    const refused = [...refusals].find(([path]) => request.url.startsWith(path))?.[1];
+    if (refused) return { status: refused.status, body: { code: refused.code, message: refused.code } };
     if (request.url.startsWith("/v3/pay/transactions/h5")) return { body: { h5_url: "https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb?prepay_id=wx1&package=1" } };
     if (request.url.startsWith("/v3/pay/transactions/jsapi")) return { body: { prepay_id: "wx-prepay" } };
     if (request.url.startsWith("/sns/oauth2/access_token")) return { body: { openid: "oFake", access_token: "t" } };
@@ -62,8 +65,12 @@ async function harness(db: Awaited<ReturnType<typeof isolated>>) {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay`;
   const get = (path: string, headers: Record<string, string> = {}) => fetch(base + path, { redirect: "manual", headers });
-  const order = async (body: Record<string, unknown>, headers: Record<string, string> = ORIGIN) =>
-    fetch(`${base}/order`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", back: BACK, ...body }) });
+  const create = async (body: Record<string, unknown>, headers: Record<string, string> = FROM_C) =>
+    fetch(`${base}/new`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ product: PRODUCT, email: "a@b.co", ...body }) });
+  const newOrder = async (body: Record<string, unknown> = {}) => ((await (await create(body)).json()) as { order_no: string }).order_no;
+  const payOrder = (no: string, body: Record<string, unknown> = {}, headers: Record<string, string> = ORIGIN) =>
+    fetch(`${base}/o/${no}/pay`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const renew = (no: string) => fetch(`${base}/o/${no}/renew`, { method: "POST", headers: { "content-type": "application/json", ...ORIGIN }, body: "{}" });
   const pay_ = (outTradeNo: string, extra: Record<string, unknown> = {}) =>
     trades.set(outTradeNo, { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: `42${outTradeNo}`, mchid: "1639838957", amount: { total: 990 }, ...extra });
   const notify = (transaction: Record<string, unknown>, tweak?: (n: ReturnType<typeof signedNotification>) => void) => {
@@ -71,7 +78,7 @@ async function harness(db: Awaited<ReturnType<typeof isolated>>) {
     tweak?.(n);
     return fetch(`${base}/notify`, { method: "POST", headers: { "content-type": "application/json", ...n.headers }, body: n.body });
   };
-  return { mails, get, order, pay: pay_, notify, wechat, base, trades, close: async () => { server.closeAllConnections(); server.close(); await wechat.close(); } };
+  return { mails, get, create, newOrder, pay: payOrder, renew, pay_, notify, wechat: Object.assign(wechat, { fail: (path: string, status: number, code: string) => void refusals.set(path, { status, code }) }), base, trades, close: async () => { server.closeAllConnections(); server.close(); await wechat.close(); } };
 }
 
 const run = (name: string, body: Parameters<typeof withDb>[0]) => connectionString ? test(name, () => withDb(body)) : test(name, { skip: "needs HATCH_TEST_DATABASE_URL" }, () => undefined);
@@ -135,195 +142,235 @@ run("activatePaid twice at once activates once; a repeat and a wrong amount acti
   assert.equal(await db.codes.activatePaid({ outTradeNo: "hpunknown", transactionId: "1", amountFen: 990 }), undefined);
 });
 
-run("order creation: only from the merchant's page; H5 sends the first forwarded hop and returns to /return", async db => {
+run("order creation: /new only from Hatch's pages; the pending order keeps email, name and language and asks WeChat nothing", async db => {
   const h = await harness(db);
   try {
-    assert.equal((await h.order({}, {})).status, 403);
-    assert.equal((await h.order({}, { origin: "https://evil.example" })).status, 403);
-    assert.equal((await h.order({}, { referer: "https://anyteach.cn.evil.example/x" })).status, 403);
-    assert.equal((await h.order({ back: "https://evil.example/p" })).status, 400);
+    assert.equal((await h.create({}, {})).status, 403);
+    assert.equal((await h.create({}, { origin: "https://evil.example" })).status, 403);
+    assert.equal((await h.create({}, { origin: "https://anyteach.cn" })).status, 403);
+    assert.equal((await h.create({ email: "nope" })).status, 400);
+    assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 0);
 
-    const response = await h.order({}, { ...ORIGIN, "x-forwarded-for": "203.0.113.9, 10.0.0.1" });
+    const no = await h.newOrder({ name: " 王小明 ", locale: "en" });
+    assert.match(no, /^hp[0-9a-f]{24}$/);
+    const order = (await db.codes.order(no))!;
+    assert.deepEqual([order.status, order.email, order.name, order.locale, order.amountFen], ["pending", "a@b.co", "王小明", "en", 990]);
+    assert.ok(Math.abs(order.createdAt.getTime() - Date.now()) < 10_000);
+    assert.equal(h.wechat.requests.length, 0, "creating an order never calls WeChat");
+    assert.equal((await db.pool.query("SELECT pay_channel FROM hatch_access_codes")).rows[0].pay_channel, null);
+  } finally { await h.close(); }
+});
+
+run("paying an order: H5 sends the first forwarded hop and returns to the same order; a repeat is the same WeChat order with the same expiry", async db => {
+  const h = await harness(db);
+  try {
+    const no = await h.newOrder();
+    assert.equal((await h.pay(no, {}, {})).status, 403, "only from the merchant's page");
+    assert.equal((await h.pay(no, {}, { referer: "https://anyteach.cn.evil.example/x" })).status, 403);
+    assert.equal((await h.pay(no, {}, { ...ORIGIN })).status, 400, "no forwarded address, no H5 order");
+
+    const response = await h.pay(no, {}, { ...ORIGIN, "x-forwarded-for": "203.0.113.9, 10.0.0.1" });
     assert.equal(response.status, 200);
     const body = await response.json() as { mode: string; url: string };
     assert.equal(body.mode, "h5");
-    const sent = JSON.parse(h.wechat.requests.find(r => r.url === "/v3/pay/transactions/h5")!.body);
-    assert.equal(sent.scene_info.payer_client_ip, "203.0.113.9");
-    const redirect = new URL(new URL(body.url).searchParams.get("redirect_url")!);
-    assert.equal(redirect.origin + redirect.pathname, "https://anyteach.cn/hatch-pay/return");
-    assert.match(redirect.searchParams.get("o")!, /^hp[0-9a-f]{24}$/);
-    assert.ok(Math.abs(Date.parse(sent.time_expire) - (Date.now() + 15 * 60_000)) < 10_000);
+    const sent = () => h.wechat.requests.filter(r => r.url === "/v3/pay/transactions/h5").map(r => JSON.parse(r.body));
+    assert.equal(sent()[0].scene_info.payer_client_ip, "203.0.113.9");
+    assert.equal(sent()[0].out_trade_no, no);
+    assert.equal(sent()[0].amount.total, 990);
+    assert.equal(new URL(body.url).searchParams.get("redirect_url"), `https://anyteach.cn/hatch-pay/o/${no}?r=1`);
+    const createdAt = (await db.codes.order(no))!.createdAt.getTime();
+    assert.equal(Date.parse(sent()[0].time_expire), Math.floor((createdAt + 15 * 60_000) / 1000) * 1000, "created_at + 15 minutes, to the second");
 
-    assert.equal((await h.order({})).status, 400, "no forwarded address, no H5 order");
+    assert.equal((await h.pay(no, {}, { ...ORIGIN, "x-forwarded-for": "203.0.113.9" })).status, 200);
+    assert.equal(sent()[1].time_expire, sent()[0].time_expire);
+    assert.equal(sent()[1].out_trade_no, no);
+    assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 1, "paying twice made no second order");
 
-    const lastIp = () => JSON.parse(h.wechat.requests.filter(r => r.url === "/v3/pay/transactions/h5").at(-1)!.body).scene_info.payer_client_ip;
-    assert.equal((await h.order({}, { ...ORIGIN, "x-real-ip": "2001:db8::7", "x-forwarded-for": "203.0.113.9" })).status, 200);
-    assert.equal(lastIp(), "2001:db8::7", "X-Real-IP wins over X-Forwarded-For");
-    assert.equal((await h.order({}, { ...ORIGIN, "x-real-ip": "not-an-ip", "x-forwarded-for": "198.51.100.4" })).status, 200);
-    assert.equal(lastIp(), "198.51.100.4", "an invalid X-Real-IP falls back");
-    assert.equal((await h.order({}, { ...ORIGIN, "x-real-ip": "bogus" })).status, 400, "an invalid address is no address");
+    assert.equal((await h.pay(no, {}, { ...ORIGIN, "x-real-ip": "2001:db8::7", "x-forwarded-for": "203.0.113.9" })).status, 200);
+    assert.equal(sent()[2].scene_info.payer_client_ip, "2001:db8::7", "X-Real-IP wins over X-Forwarded-For");
+    assert.equal((await h.pay(no, {}, { ...ORIGIN, "x-real-ip": "bogus" })).status, 400, "an invalid address is no address");
   } finally { await h.close(); }
 });
 
-run("pay page: a browser gets the price; the OAuth return (kept for a later JSAPI flow) carries the openid into a JSAPI order", async db => {
+run("order page: a browser gets the price and the order number; an unknown order is 404; the OAuth return (kept for a later JSAPI flow) carries the openid into a JSAPI payment of the same order", async db => {
   const h = await harness(db);
   try {
-    const query = `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK })}`;
-    const browser = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 Safari" });
+    const no = await h.newOrder();
+    const browser = await h.get(`/o/${no}`, { "user-agent": "Mozilla/5.0 Safari" });
     assert.equal(browser.status, 200);
     const html = await browser.text();
     assert.match(html, /¥9\.90/);
+    assert.match(html, new RegExp(no));
     assert.doesNotMatch(html, /"openid":/);
-    assert.equal((await h.get("/?product=x&email=bad&back=https://evil.example")).status, 400);
+    assert.equal((await h.get(`/o/hp${"0".repeat(24)}`)).status, 404);
+    assert.equal((await h.get("/?product=x&email=bad&back=https://evil.example")).status, 404, "the old query-parameter pay page is gone");
 
-    const oauth = await h.get(`/oauth${query}&code=CODE&state=hatchpay`);
+    const oauth = await h.get(`/oauth?o=${no}&code=CODE&state=hatchpay`);
     assert.equal(oauth.status, 200);
     assert.match(await oauth.text(), /"openid":"oFake"/);
-    assert.equal((await h.get(`/oauth${query}`)).status, 400, "no code: not authorized");
+    assert.equal((await h.get(`/oauth?o=${no}`)).status, 400, "no code: not authorized");
 
-    const order = await h.order({ openid: "oFake" });
-    const body = await order.json() as { mode: string; params: { package: string; paySign: string }; returnUrl: string };
+    const body = await (await h.pay(no, { openid: "oFake" })).json() as { mode: string; params: { package: string; paySign: string } };
     assert.equal(body.mode, "jsapi");
     assert.equal(body.params.package, "prepay_id=wx-prepay");
     assert.ok(body.params.paySign);
-    assert.equal(JSON.parse(h.wechat.requests.find(r => r.url === "/v3/pay/transactions/jsapi")!.body).payer.openid, "oFake");
-    assert.match(body.returnUrl, /^https:\/\/anyteach\.cn\/hatch-pay\/return\?o=hp/);
+    const sent = JSON.parse(h.wechat.requests.find(r => r.url === "/v3/pay/transactions/jsapi")!.body);
+    assert.deepEqual([sent.payer.openid, sent.out_trade_no], ["oFake", no]);
   } finally { await h.close(); }
 });
 
-run("WeChat's browser gets only the guide out of it: no OAuth redirect, no order, no WeChat call; a phone browser still gets the H5 flow", async db => {
+run("WeChat's browser gets only the guide out of it, in the order's language: no payment, no WeChat call; a phone browser still gets the H5 flow", async db => {
   const h = await harness(db);
   try {
-    const query = `?${new URLSearchParams({ product: PRODUCT, email: "a@b.co", back: BACK })}`;
+    const no = await h.newOrder({ locale: "en" });
     const wechatUa = { "user-agent": "Mozilla/5.0 (iPhone) MicroMessenger/8.0" };
-    for (const path of [`/${query}`, `/oauth${query}&code=CODE`, `/return?o=hp${"0".repeat(24)}`]) {
+    for (const path of [`/o/${no}`, `/oauth?o=${no}&code=CODE`, `/return?o=${no}`]) {
       const res = await h.get(path, wechatUa);
       assert.equal(res.status, 200, path);
-      assert.equal(res.headers.get("location"), null, "no OAuth redirect");
+      assert.equal(res.headers.get("location"), null);
       const html = await res.text();
-      assert.match(html, /在浏览器打开/);
+      assert.match(html, path.startsWith("/o/") ? /Open in browser/ : /在浏览器打开/, "the order's own language where the link names the order");
       assert.doesNotMatch(html, /openid|<button/);
     }
-    assert.equal((await h.order({ openid: "oFake" }, { ...ORIGIN, ...wechatUa, "x-real-ip": "203.0.113.9" })).status, 403);
+    assert.equal((await h.pay(no, { openid: "oFake" }, { ...ORIGIN, ...wechatUa, "x-real-ip": "203.0.113.9" })).status, 403);
     assert.equal(h.wechat.requests.length, 0, "WeChat was never asked");
-    assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 0, "no order was made");
 
-    const safari = await h.get(`/${query}`, { "user-agent": "Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1" });
-    assert.equal(safari.status, 200);
+    const safari = await h.get(`/o/${no}`, { "user-agent": "Mozilla/5.0 (iPhone) Version/17 Mobile Safari/604.1" });
     assert.match(await safari.text(), /¥9\.90/);
-    const order = await h.order({}, { ...ORIGIN, "user-agent": "Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile", "x-real-ip": "203.0.113.9" });
-    assert.equal(((await order.json()) as { mode: string }).mode, "h5");
+    const paid = await h.pay(no, {}, { ...ORIGIN, "user-agent": "Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile", "x-real-ip": "203.0.113.9" });
+    assert.equal(((await paid.json()) as { mode: string }).mode, "h5");
   } finally { await h.close(); }
 });
 
-run("a Product without the access_code capability cannot be bought: page, OAuth return and order all refuse", async db => {
+run("a Product without the access_code capability cannot be bought: /new refuses and no pending code is made", async db => {
   const h = await harness(db);
   try {
-    const other = "11111111-2222-4333-8444-555555555555";
-    const query = `?${new URLSearchParams({ product: other, email: "a@b.co", back: BACK })}`;
-    const page = await h.get(`/${query}`);
-    assert.equal(page.status, 403);
-    assert.match(await page.text(), /不可购买/);
-    assert.equal((await h.get(`/oauth${query}&code=CODE`)).status, 403);
-    assert.equal((await h.order({ product: other }, { ...ORIGIN, "x-real-ip": "203.0.113.9" })).status, 403);
-    assert.equal(h.wechat.requests.length, 0, "WeChat was never asked");
+    assert.equal((await h.create({ product: "11111111-2222-4333-8444-555555555555" })).status, 403);
+    assert.equal(h.wechat.requests.length, 0);
     assert.equal((await db.pool.query("SELECT 1 FROM hatch_access_codes")).rows.length, 0, "no pending code was made");
   } finally { await h.close(); }
 });
 
-const returnPath = (outTradeNo: string, back = BACK) => `/return?${new URLSearchParams({ o: outTradeNo, back })}`;
-const startOrder = async (h: Awaited<ReturnType<typeof harness>>) => {
-  const body = await (await h.order({}, { ...ORIGIN, "x-forwarded-for": "203.0.113.9" })).json() as { url: string };
-  return new URL(new URL(body.url).searchParams.get("redirect_url")!).searchParams.get("o")!;
-};
-
-run("return page: not paid goes back to the pay page to confirm; paid redirects to the chat with the code and mails it once", async db => {
+run("order page: unpaid shows Unpaid and the code is not redeemable; paid settles once, mails once, goes to /c with the code, and the code is then redeemable", async db => {
   const h = await harness(db);
   try {
-    const outTradeNo = await startOrder(h);
-    const waiting = await h.get(returnPath(outTradeNo));
-    assert.equal(waiting.status, 302);
-    const back = new URL(waiting.headers.get("location")!);
-    assert.equal(back.origin + back.pathname, "https://anyteach.cn/hatch-pay/");
-    assert.equal(back.searchParams.get("o"), outTradeNo);
-    assert.equal(back.searchParams.get("email"), "a@b.co");
+    const no = await h.newOrder();
+    const waiting = await (await h.get(`/o/${no}?r=1`)).text();
+    assert.match(waiting, /待支付/);
+    assert.match(waiting, /"conf":true,"auto":false/);
+    const { code } = await db.pool.query("SELECT code FROM hatch_access_codes").then(r => r.rows[0] as { code: string });
+    assert.doesNotMatch(waiting, new RegExp(code), "the pending code is not on the page");
+    assert.deepEqual(await db.codes.redeem({ code, productId: PRODUCT, conversationId: "c1" }), { ok: false, reason: "not_paid" }, "a pending code is not usable");
     assert.equal(h.mails.length, 0);
 
-    h.pay(outTradeNo);
-    const paid = await h.get(returnPath(outTradeNo));
-    assert.equal(paid.status, 302);
-    const location = new URL(paid.headers.get("location")!);
-    assert.equal(location.origin + location.pathname, BACK);
-    const code = location.searchParams.get("code")!;
-    assert.match(code, /^MSC[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
+    h.pay_(no);
+    const paid = await (await h.get(`/o/${no}`)).text();
+    assert.match(paid, /已支付/);
+    assert.ok(paid.includes(`"url":"https://gethatchapp.com/c/?code=${code}"`));
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(h.mails.length, 1);
     assert.equal(h.mails[0]!.to, "a@b.co");
-    assert.match(h.mails[0]!.text, new RegExp(code));
     assert.match(h.mails[0]!.text, new RegExp(`https://gethatchapp.com/c/${code}`));
     assert.equal(h.mails[0]!.subject, `码 ${code}`);
     assert.match(h.mails[0]!.html, /网站诊断 9\.90/);
 
-    // Back on the page again: the same code, no second mail.
-    const again = await h.get(returnPath(outTradeNo));
-    assert.equal(new URL(again.headers.get("location")!).searchParams.get("code"), code);
+    // Reopened, reloaded, or in a second browser: the same paid order, the same code, no second mail.
+    for (let i = 0; i < 3; i++) assert.ok((await (await h.get(`/o/${no}`, { "user-agent": `Browser ${i}` })).text()).includes(`code=${code}`));
     assert.equal(h.mails.length, 1);
     assert.deepEqual(await db.codes.redeem({ code, productId: PRODUCT, conversationId: "c1" }), { ok: true });
   } finally { await h.close(); }
 });
 
-run("return page: a back of https://gethatchapp.com/c/ gets ?code= appended", async db => {
+run("order page and /status and notify at once on a paid order: one activation, one email", async db => {
   const h = await harness(db);
   try {
-    const CODE_PAGE = "https://gethatchapp.com/c/";
-    const body = await (await h.order({ back: CODE_PAGE }, { ...ORIGIN, "x-real-ip": "203.0.113.9" })).json() as { url: string };
-    const outTradeNo = new URL(new URL(body.url).searchParams.get("redirect_url")!).searchParams.get("o")!;
-    h.pay(outTradeNo);
-    const paid = await h.get(returnPath(outTradeNo, CODE_PAGE));
-    assert.equal(paid.status, 302);
-    assert.match(paid.headers.get("location")!, /^https:\/\/gethatchapp\.com\/c\/\?code=MSC[2-9A-Z]{6}$/);
+    const no = await h.newOrder();
+    h.pay_(no);
+    const transaction = { trade_state: "SUCCESS", out_trade_no: no, transaction_id: `42${no}`, mchid: "1639838957", amount: { total: 990 } };
+    const answers = await Promise.all([h.get(`/o/${no}`), h.get(`/o/${no}`), h.get(`/status?o=${no}`), h.notify(transaction), h.notify(transaction)]);
+    assert.ok(answers.every(a => a.status === 200 || a.status === 204));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.mails.length, 1);
+    assert.equal((await db.codes.order(no))!.status, "active");
+    assert.deepEqual(await (await h.get(`/status?o=${no}`)).json(), { paid: true, url: `https://gethatchapp.com/c/?code=${(await db.codes.order(no))!.code}` });
   } finally { await h.close(); }
 });
 
-run("return page: a wrong back shows the code instead; unknown orders are reported, and a WeChat outage sends the buyer to confirm, not to a fake result", async db => {
+run("expired order: past created_at + 15 minutes it shows Expired and cannot be paid; renew makes a new pending order and leaves the old one alone", async db => {
   const h = await harness(db);
   try {
-    const outTradeNo = await startOrder(h);
-    h.pay(outTradeNo);
-    const noBack = await h.get(returnPath(outTradeNo, "https://evil.example/"));
-    assert.equal(noBack.status, 200);
-    assert.match(await noBack.text(), /MSC[2-9A-Z]{6}/);
-    assert.equal((await h.get("/return?o=hp000000000000000000000000")).status, 404);
+    const no = await h.newOrder({ name: "Ann", locale: "ja" });
+    await db.pool.query("UPDATE hatch_access_codes SET created_at = now() - interval '16 minutes' WHERE out_trade_no = $1", [no]);
+    const html = await (await h.get(`/o/${no}`)).text();
+    assert.match(html, /期限切れ/);
+    assert.match(html, /"s":"expired","pay"/);
+    const pay = await h.pay(no, {}, { ...ORIGIN, "x-real-ip": "203.0.113.9" });
+    assert.deepEqual([pay.status, await pay.json()], [409, { expired: true }]);
+    assert.equal(h.wechat.requests.filter(r => /transactions\/(h5|native|jsapi)/.test(r.url)).length, 0, "WeChat was not asked to take an expired order");
+
+    const renewed = await h.renew(no);
+    assert.equal(renewed.status, 200);
+    const next = new URL(((await renewed.json()) as { url: string }).url).pathname.split("/").pop()!;
+    assert.notEqual(next, no);
+    const [old, fresh] = [await db.codes.order(no), await db.codes.order(next)];
+    assert.deepEqual([old!.status, fresh!.status], ["pending", "pending"]);
+    assert.deepEqual([fresh!.email, fresh!.name, fresh!.locale, fresh!.productId], ["a@b.co", "Ann", "ja", PRODUCT]);
+    assert.notEqual(old!.code, fresh!.code);
+    assert.equal((await h.renew(next)).status, 409, "a still-valid order is not renewed");
+    assert.match(await (await h.get(`/o/${next}`)).text(), /未払い/);
+
+    // Paid at WeChat in time: the order is paid, whatever the clock says.
+    h.pay_(no);
+    assert.match(await (await h.get(`/o/${no}`)).text(), /支払い済み/);
+    assert.equal((await h.renew(no)).status, 409, "a paid order is not renewed");
+  } finally { await h.close(); }
+});
+
+run("WeChat refusing an order it already has (another way of paying) answers expired; the order itself is untouched", async db => {
+  const h = await harness(db);
+  try {
+    const no = await h.newOrder();
+    h.wechat.fail("/v3/pay/transactions/h5", 400, "OUT_TRADE_NO_USED");
+    const res = await h.pay(no, {}, { ...ORIGIN, "x-real-ip": "203.0.113.9" });
+    assert.deepEqual([res.status, await res.json()], [409, { expired: true }]);
+    assert.equal((await db.codes.order(no))!.status, "pending");
+  } finally { await h.close(); }
+});
+
+run("/return (orders made before the order page) redirects to the order's page", async db => {
+  const h = await harness(db);
+  try {
+    const no = await h.newOrder();
+    const res = await h.get(`/return?${new URLSearchParams({ o: no, back: BACK })}`);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), `https://anyteach.cn/hatch-pay/o/${no}?r=1`);
     assert.equal((await h.get("/return?o=bogus")).status, 400);
-
-    h.trades.set("x", {});
-    const other = await startOrder(h);
-    await h.wechat.close();
-    assert.equal((await h.get(returnPath(other))).status, 302);
   } finally { await h.close(); }
 });
 
-run("return page: a payment of the wrong amount activates nothing", async db => {
+run("a payment of the wrong amount activates nothing", async db => {
   const h = await harness(db);
   try {
-    const outTradeNo = await startOrder(h);
-    h.pay(outTradeNo, { amount: { total: 1 } });
-    assert.equal((await h.get(returnPath(outTradeNo))).status, 409);
+    const no = await h.newOrder();
+    h.pay_(no, { amount: { total: 1 } });
+    assert.equal((await h.get(`/o/${no}`)).status, 409);
     assert.equal(h.mails.length, 0);
+    assert.equal((await db.codes.order(no))!.status, "pending");
   } finally { await h.close(); }
 });
 
-run("notify: twice at once and again after the return page, still exactly one activation and one email", async db => {
+run("notify: twice at once and again after the order page, still exactly one activation and one email", async db => {
   const h = await harness(db);
   try {
-    const outTradeNo = await startOrder(h);
-    const transaction = { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: "42000", mchid: "1639838957", amount: { total: 990 } };
+    const no = await h.newOrder();
+    const transaction = { trade_state: "SUCCESS", out_trade_no: no, transaction_id: "42000", mchid: "1639838957", amount: { total: 990 } };
     const answers = await Promise.all([h.notify(transaction), h.notify(transaction)]);
     assert.deepEqual(answers.map(a => a.status), [204, 204]);
     assert.equal(h.mails.length, 1);
     assert.match(h.mails[0]!.text, /https:\/\/gethatchapp\.com\/c\/MSC[2-9A-Z]{6}/);
 
-    h.pay(outTradeNo);
-    assert.equal((await h.get(returnPath(outTradeNo))).status, 302);
+    h.pay_(no);
+    assert.equal((await h.get(`/o/${no}`)).status, 200);
     assert.equal((await h.notify(transaction)).status, 204);
     assert.equal(h.mails.length, 1);
   } finally { await h.close(); }
@@ -332,25 +379,25 @@ run("notify: twice at once and again after the return page, still exactly one ac
 run("notify: a probe, a bad signature and a failed payment change nothing", async db => {
   const h = await harness(db);
   try {
-    const outTradeNo = await startOrder(h);
-    const transaction = { trade_state: "SUCCESS", out_trade_no: outTradeNo, transaction_id: "42000", amount: { total: 990 } };
+    const no = await h.newOrder();
+    const transaction = { trade_state: "SUCCESS", out_trade_no: no, transaction_id: "42000", amount: { total: 990 } };
     const probe = await h.notify(transaction, n => { n.headers["wechatpay-signature"] = `WECHATPAY/SIGNTEST/${n.headers["wechatpay-signature"]}`; });
     assert.equal(probe.status, 401);
     const forged = await h.notify(transaction, n => { n.body = n.body.replace("evt", "evx"); });
     assert.equal(forged.status, 401);
     assert.equal(h.mails.length, 0);
-    assert.equal((await db.codes.order(outTradeNo))!.status, "pending");
+    assert.equal((await db.codes.order(no))!.status, "pending");
 
     assert.equal((await h.notify({ ...transaction, trade_state: "PAYERROR" })).status, 204);
-    assert.equal((await db.codes.order(outTradeNo))!.status, "pending");
+    assert.equal((await db.codes.order(no))!.status, "pending");
   } finally { await h.close(); }
 });
 
 run("an email that fails does not undo the activation", async db => {
   const h = await harness(db);
   try {
-    const outTradeNo = await startOrder(h);
-    h.pay(outTradeNo);
+    const no = await h.newOrder();
+    h.pay_(no);
     // The harness' sender is replaced by a failing one through a second HatchPay on the same codes.
     const failing = new HatchPay({
       capabilities: new InMemoryProductCapabilities([[PRODUCT, "access_code"]]), codes: db.codes, publicBase: "https://anyteach.cn/hatch-pay", priceFen: 990,
@@ -361,9 +408,9 @@ run("an email that fails does not undo the activation", async db => {
     const server = http.createServer((req, res) => void handleHatchPayRoute(req, res, new URL(req.url!, "http://x"), failing));
     await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
     try {
-      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay${returnPath(outTradeNo)}`, { redirect: "manual" });
-      assert.equal(response.status, 302);
-      assert.equal((await db.codes.order(outTradeNo))!.status, "active");
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/hatch-pay/o/${no}`);
+      assert.equal(response.status, 200);
+      assert.equal((await db.codes.order(no))!.status, "active");
     } finally { server.closeAllConnections(); server.close(); }
   } finally { await h.close(); }
 });

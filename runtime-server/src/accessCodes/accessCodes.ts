@@ -17,7 +17,7 @@ export type DueCode = { code: string; productId: string; conversationId: string;
 export type AccessCodeView = { code: string; productId: string; status: AccessCodeStatus; source: AccessCodeSource; usedByConversationId: string | null };
 
 /** The order behind a bought code, as the payment flow needs it. */
-export type AccessCodeOrder = { code: string; productId: string; email: string | null; name: string | null; locale: Locale | null; status: AccessCodeStatus; source: AccessCodeSource };
+export type AccessCodeOrder = { code: string; productId: string; email: string | null; name: string | null; locale: Locale | null; status: AccessCodeStatus; source: AccessCodeSource; outTradeNo: string | null; amountFen: number | null; createdAt: Date };
 
 export type Activation = AccessCodeOrder & {
   /** True only for the call that moved the code from pending to active: that caller sends the email. */

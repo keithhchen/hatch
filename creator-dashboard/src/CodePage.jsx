@@ -5,7 +5,7 @@ import CoBrandLockup from "./CoBrandLockup.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import { codePageErrorText, codePageT } from "./codePageI18n.js";
-import { BUYER_FIELDS, CodeRoute, advance, fieldLabel, pickText, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, accessCodePayUrl, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
+import { BUYER_FIELDS, CodeRoute, advance, fieldLabel, pickText, hookCopy, reachableStep, stepFromHash, stepHash, PendingIntake, payOrderRequest, createStatusPoller, feedPool, feedWindow, formatPrice, inWeChat, intakeAnswers, invalidField, missingField, siteDomain, stepStates, waitLine, readyLine, typedCode, visibleSteps } from "./codePageModel.js";
 import "./webChat.css";
 import "./artifact.css";
 import "./codePage.css";
@@ -152,10 +152,13 @@ function Landing({ request, navigate, reason }) {
     return () => window.removeEventListener("pageshow", reset);
   }, []);
   const ready = Boolean(landing?.product_id && landing.price_fen);
-  const pay = () => {
+  const pay = async () => {
     setPaying(true);
     PendingIntake.save(window.localStorage, values);
-    window.location.assign(accessCodePayUrl({ productId: landing.product_id, email: values.email, origin: window.location.origin, site: values.website, name: values.name, locale }));
+    try {
+      const order = await request("/hatch-pay/new", { method: "POST", body: JSON.stringify(payOrderRequest({ productId: landing.product_id, email: values.email, name: values.name, locale })) });
+      window.location.assign(order.url);
+    } catch (cause) { setError(codePageErrorText(cause, locale, "submitFailed")); setPaying(false); }
   };
   if (failed) return <Card><p className="code-page__error" role="alert">{t("unreachable")}</p></Card>;
   if (step === "hook") return <Hook landing={landing} reason={reason} onStart={next} navigate={navigate} />;
@@ -180,6 +183,7 @@ function Landing({ request, navigate, reason }) {
       <div><dt>{t("field_email")}</dt><dd>{values.email?.trim()}</dd></div>
     </dl>
     {landing?.price_fen ? <p className="code-page__price">{formatPrice(landing.price_fen)}</p> : null}
+    {error ? <p className="code-page__error" role="alert">{error}</p> : null}
     <button type="button" className={`code-page__button code-page__button--wechat${paying ? " code-page__button--busy" : ""}`} disabled={!ready} aria-busy={paying} onClick={paying ? undefined : pay}>{paying ? <span className="code-page__spinner" aria-hidden /> : <WeChatPayMark />}<span>{t("wechatPay")} {landing?.price_fen ? formatPrice(landing.price_fen) : ""}</span></button>
   </Card>;
 }

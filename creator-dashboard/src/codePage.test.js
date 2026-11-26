@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { accessCodeRedirect, landingResponse } from "../server.mjs";
-import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, accessCodePayUrl, inWeChat, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash, fieldLabel, pickText } from "./codePageModel.js";
+import { BUYER_FIELDS, PendingIntake, createStatusPoller, feedPool, feedWindow, siteDomain, visibleSteps, formatPrice, invalidField, CodeRoute, payOrderRequest, inWeChat, intakeAnswers, missingField, stepStates, waitLine, readyLine, typedCode, advance, hookCopy, reachableStep, stepFromHash, stepHash, fieldLabel, pickText } from "./codePageModel.js";
 import { codePageT } from "./codePageI18n.js";
 
 const t = (key, values) => codePageT("zh", key, values);
@@ -17,13 +17,9 @@ test("the landing is /c/ and a code's page is /c/<code>; nothing else is theirs"
   assert.equal(CodeRoute.codePath("MSC123456"), "/c/MSC123456");
 });
 
-test("the pay link names the Product and the email, and comes back to the landing", () => {
-  const url = new URL(accessCodePayUrl({ productId: PRODUCT, email: " buyer+x@example.com ", origin: "https://gethatchapp.com" }));
-  assert.equal(`${url.origin}${url.pathname}`, "https://anyteach.cn/hatch-pay/");
-  assert.equal(url.searchParams.get("product"), PRODUCT);
-  assert.equal(url.searchParams.get("email"), "buyer+x@example.com");
-  assert.equal(url.searchParams.get("back"), "https://gethatchapp.com/c/");
-  assert.match(url.search, /back=https%3A%2F%2Fgethatchapp\.com%2Fc%2F/);
+test("the pay order request names the Product, trimmed contact and locale", () => {
+  assert.deepEqual(payOrderRequest({ productId: PRODUCT, email: " buyer+x@example.com ", name: " 王 ", locale: "ja" }), { product: PRODUCT, email: "buyer+x@example.com", name: "王", locale: "ja" });
+  assert.equal(payOrderRequest({ productId: PRODUCT, email: "a@b.co", locale: "zh" }).name, "");
 });
 
 test("WeChat's in-app browser is told by its user agent; phone browsers are not", () => {
@@ -61,13 +57,6 @@ test("back from paying, /c/?code= goes to that code's page: any case, trimmed; a
   assert.equal(accessCodeRedirect("/c/", "../../etc"), null);
   assert.equal(accessCodeRedirect("/c/MSC123456", "MSC123456"), null);
   assert.equal(accessCodeRedirect("/chat/product/x", "MSC123456"), null);
-});
-
-test("the pay link also carries the website and the name", () => {
-  const url = new URL(accessCodePayUrl({ productId: PRODUCT, email: "a@b.co", origin: "https://gethatchapp.com", site: " https://x.com ", name: " 王 " }));
-  assert.equal(url.searchParams.get("site"), "https://x.com");
-  assert.equal(url.searchParams.get("name"), "王");
-  assert.equal(url.searchParams.get("product"), PRODUCT);
 });
 
 test("the website is shown as a domain", () => {
@@ -246,6 +235,3 @@ test("a Brief label comes only from the spec: the one in the reader's language, 
   assert.equal(fieldLabel({ id: "x", label: { zh: "名", en: "Name" } }, "ja"), "Name");
 });
 
-test("the pay link carries the reader's locale", () => {
-  assert.equal(new URL(accessCodePayUrl({ productId: PRODUCT, email: "a@b.co", origin: "https://gethatchapp.com", locale: "ja" })).searchParams.get("locale"), "ja");
-});
