@@ -2,6 +2,7 @@ import type http from "node:http";
 import type { AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCorpus.js";
 import { creatorAgentView } from "../chat/creatorAgentCatalog.js";
 import { GUEST_PREFIX } from "../chat/principal.js";
+import { isUuidV4 } from "../identity.js";
 import { resolveAuthIdentity } from "../chat/sessionBinding.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
 import type { ConversationRepository } from "../conversationRepository.js";
@@ -37,6 +38,13 @@ export async function handleProductAgentRequest(req: http.IncomingMessage, res: 
  * `GET /v1/creator/audience[?product_id=]`: who opened conversations with the signed-in creator's Agents, as counts. A person who signed in is
  * named by account id (the Dashboard knows the name); a visitor and an IM contact are only counted as such.
  */
+/** Only a real account id is an account; guests, IM contacts and event-code owners (`code:`) are not (they show as guests), and the dashboard resolves names for accounts only. */
+export function audienceIdentity(ownerId: string): { kind: "guest" | "im" } | { kind: "account"; account_id: string } {
+  if (ownerId.startsWith(GUEST_PREFIX)) return { kind: "guest" };
+  if (ownerId.startsWith("contact:")) return { kind: "im" };
+  return isUuidV4(ownerId) ? { kind: "account", account_id: ownerId } : { kind: "guest" };
+}
+
 export async function handleAudienceRequest(req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: ProductRouteDeps, signal?: AbortSignal): Promise<boolean> {
   if (url.pathname !== "/v1/creator/audience") return false;
   if (req.method !== "GET") throw new ConversationHttpError(405, "method_not_allowed", "Use GET.");
@@ -50,7 +58,7 @@ export async function handleAudienceRequest(req: http.IncomingMessage, res: http
   writeJsonBounded(res, 200, {
     audience: rows.map((row) => ({
       product_id: row.productId,
-      ...(row.ownerAccountId.startsWith(GUEST_PREFIX) ? { kind: "guest" } : row.ownerAccountId.startsWith("contact:") ? { kind: "im" } : { kind: "account", account_id: row.ownerAccountId }),
+      ...audienceIdentity(row.ownerAccountId),
       conversations: row.conversations, messages: row.messages, first_at: row.firstAt, last_at: row.lastAt
     }))
   }, deps.maxHttpResponseBytes);
