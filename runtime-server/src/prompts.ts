@@ -8,6 +8,16 @@ export const PROMPT_FILES = {
   /** The report email every Product without its own template sends: the HTML and its subject line, with {{placeholders}}. */
   "report-email-default": "report-email/REPORT.html",
   "report-email-default-subject": "report-email/SUBJECT.txt",
+  /** The same email for a visitor who chose English or Japanese on the code page; Chinese is the one above. */
+  "report-email-default-en": "report-email/REPORT.en.html",
+  "report-email-default-subject-en": "report-email/SUBJECT.en.txt",
+  "report-email-default-ja": "report-email/REPORT.ja.html",
+  "report-email-default-subject-ja": "report-email/SUBJECT.ja.txt",
+  /** The access code email for a visitor who chose English or Japanese; the Chinese one is a row made by hand (see hatchPay/codeMail.ts). */
+  "access-code-email-default-en": "access-code-email/CODE.en.html",
+  "access-code-email-default-subject-en": "access-code-email/CODE.subject.en.txt",
+  "access-code-email-default-ja": "access-code-email/CODE.ja.html",
+  "access-code-email-default-subject-ja": "access-code-email/CODE.subject.ja.txt",
   /** What a Product with the `deliverable_html` capability says, as the user, when a Run ended and no HTML report is published yet. */
   "deliverable-followup": "deliverable/FOLLOWUP.md"
 } as const;

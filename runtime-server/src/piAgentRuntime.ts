@@ -14,6 +14,7 @@ import {
   type OutboundMessage,
   type RunStart
 } from "./protocol.js";
+import { briefLocale } from "./brief.js";
 import type { ActivatedSkill } from "./store.js";
 import { persistToolMessage, restoreToolMessage } from "./toolMessage.js";
 import {
@@ -332,8 +333,8 @@ export class PiAgentRuntime implements AgentRuntime {
             ctx.turnReminder
               ? ctx.turnReminder(new Date())
               : ctx.clientAttributes
-                ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
-                : runtimeReplyReminder(new Date(), input.time_zone)
+                ? `${runtimeReplyReminder(new Date(), input.time_zone, briefLocale(ctx.briefSnapshot))}\n${renderSystemReminder(ctx.clientAttributes())}`
+                : runtimeReplyReminder(new Date(), input.time_zone, briefLocale(ctx.briefSnapshot))
           ].join("\n"))
         ];
       }

@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AccessGate } from "../accessGate.js";
 import type { AgentCorpusResolverLike } from "../agentCorpus.js";
-import { BriefValidationError, briefAnswer, briefEmail, createBriefSnapshot, type BriefSpec } from "../brief.js";
+import { BRIEF_LOCALE_FIELD, BriefValidationError, briefAnswer, briefEmail, briefLocale, createBriefSnapshot, type BriefSpec } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
 import { conversationBinding, durableConversationId } from "../chat/sessionBinding.js";
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
+import { localeOf, type Locale } from "../locale.js";
 
 /** What a person sees at /c/<code>: the entry, the intake form, the wait, the report, or a plain failure. */
 export type CodePageState = "entry" | "event" | "intake" | "generating" | "ready" | "failed";
@@ -69,11 +70,16 @@ export async function readLandingCopy(corpusRoot: string | undefined): Promise<L
   } catch { return undefined; }
 }
 
-/** The Brief of the intake's answers, with the code in its access code field; a bad answer is the buyer's to fix. */
-function briefOf(spec: BriefSpec, answers: Record<string, unknown>, code: string) {
+/**
+ * The Brief of the intake's answers, with the code in its access code field and the visitor's language in a `locale` field of its own
+ * (the Brief is where a conversation keeps what its visitor gave, so whoever needs the language reads it back from there); a bad answer
+ * is the buyer's to fix.
+ */
+function briefOf(spec: BriefSpec, answers: Record<string, unknown>, code: string, locale: Locale) {
   const codeField = spec.fields.find((field) => field.type === "access_code");
-  const given = spec.fields.filter((field) => field.type !== "access_code").map((field) => ({ field_id: field.id, value: typeof answers[field.id] === "string" ? answers[field.id] as string : "" }));
-  try { return createBriefSnapshot(spec, [...given, ...codeField ? [{ field_id: codeField.id, value: code }] : []]); }
+  const given = spec.fields.filter((field) => field.type !== "access_code" && field.id !== BRIEF_LOCALE_FIELD).map((field) => ({ field_id: field.id, value: typeof answers[field.id] === "string" ? answers[field.id] as string : "" }));
+  const withLocale: BriefSpec = { ...spec, fields: [...spec.fields.filter((field) => field.id !== BRIEF_LOCALE_FIELD), { id: BRIEF_LOCALE_FIELD, label: "Page language", required: false, type: "line" }] };
+  try { return createBriefSnapshot(withLocale, [...given, { field_id: BRIEF_LOCALE_FIELD, value: locale }, ...codeField ? [{ field_id: codeField.id, value: code }] : []]); }
   catch (error) { throw error instanceof BriefValidationError ? new ChatError("invalid_brief", error.message, 400) : error; }
 }
 
@@ -178,9 +184,11 @@ export class CodePages {
   /**
    * The intake of an active code: its answers become the Brief, the code is spent for the conversation, and the Run starts. Spending comes
    * first, before any model call; every step is keyed by the code, so a second submit (a double click, a retry) finds the same conversation
-   * and replays the same Run.
+   * and replays the same Run. `body` is the field answers plus the visitor's `locale` (zh, en or ja; zh when missing): the locale is not an
+   * answer, it goes to the Brief's locale field, and a second submit finds the conversation the first made, so the first locale stays.
    */
-  async intake(rawCode: string, answers: Record<string, unknown>): Promise<CodePageStatus> {
+  async intake(rawCode: string, body: Record<string, unknown>): Promise<CodePageStatus> {
+    const { locale, ...answers } = body;
     const code = normalizeCode(rawCode);
     const { gate, corpora, repository } = this.deps;
     const held = await gate.codes().lookup(code);
@@ -188,7 +196,9 @@ export class CodePages {
     const { resolved } = await this.resolved(held.productId);
     const spec = resolved.corpus.product.brief_spec as BriefSpec | undefined;
     if (!spec) throw new ChatError("brief_unavailable", "This Product has no Brief.", 409);
-    const brief = briefOf(spec, answers, code);
+    // The first intake decides the language: a repeat (another tab, a retry) is the same conversation, whatever it says.
+    const first = await repository.findOwnedConversation({ ownerAccountId: codeOwner(code), creatorId: resolved.corpus.creator.id }, codeConversationId(code));
+    const brief = briefOf(spec, answers, code, briefLocale(first?.briefSnapshot) ?? localeOf(locale));
     const scope = { creatorId: resolved.corpus.creator.id, userId: codeOwner(code), productId: held.productId, corpusDigest: resolved.digest, explicit: true };
     const id = durableConversationId(scope, codeConversationId(code));
     await gate.admit(held.productId, id, brief);

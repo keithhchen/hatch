@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Resend } from "resend";
+import { DEFAULT_LOCALE, type Locale } from "../locale.js";
 import type { Prompts } from "../prompts.js";
 import type { HtmlPageRepository } from "./htmlPages.js";
 
@@ -80,10 +81,12 @@ export function htmlToText(html: string): string {
 
 /** An Expert's own template, in the Product Corpus beside the system prompt; either file may be absent. */
 export type ReportEmailTemplate = { html?: string; subject?: string };
-export async function readCorpusEmailTemplate(corpusRoot: string | undefined): Promise<ReportEmailTemplate | undefined> {
+/** `report.html` is the Chinese one; another language has its own files (`report.en.html`, `report.subject.en.txt`), and without them gets the platform's email in its language, never a template of another language. */
+export async function readCorpusEmailTemplate(corpusRoot: string | undefined, locale: Locale = DEFAULT_LOCALE): Promise<ReportEmailTemplate | undefined> {
   if (!corpusRoot) return undefined;
+  const mid = locale === DEFAULT_LOCALE ? "" : `.${locale}`;
   const read = (name: string) => readFile(path.join(corpusRoot, "runtime", "email", name), "utf8").then(text => text.trim() || undefined, () => undefined);
-  const [html, subject] = await Promise.all([read("report.html"), read("report.subject.txt")]);
+  const [html, subject] = await Promise.all([read(`report${mid}.html`), read(`report.subject${mid}.txt`)]);
   return html || subject ? { ...html ? { html } : {}, ...subject ? { subject } : {} } : undefined;
 }
 
@@ -105,6 +108,8 @@ export type ReportEmailJob = {
   code?: string;
   codeUrl?: string;
   template?: ReportEmailTemplate;
+  /** The language of the mail; Chinese when absent. */
+  locale?: Locale;
 };
 
 export type ReportEmailLog = (event: string, fields: Record<string, unknown>) => void;
@@ -147,10 +152,11 @@ export class ReportEmails {
     if (!sender) return this.log("report_email_off", { page_id: job.pageId, reason: "RESEND_API_KEY is not set" });
     if (!await pages.claimEmail(job.pageId, to, STALE_CLAIM_SECONDS)) return this.log("report_email_skipped", { page_id: job.pageId, to });
     try {
+      const suffix = job.locale === "en" || job.locale === "ja" ? `-${job.locale}` as const : "";
       const values = { report_url: job.reportUrl, chat_url: job.chatUrl, product_name: job.productName, expert_name: job.expertName, website: job.website, domain: bareDomain(job.website), name: job.name, code: job.code, code_url: job.codeUrl };
       const [html, subject] = await Promise.all([
-        job.template?.html ?? prompts.get("report-email-default"),
-        job.template?.subject ?? prompts.get("report-email-default-subject")
+        job.template?.html ?? prompts.get(`report-email-default${suffix}`),
+        job.template?.subject ?? prompts.get(`report-email-default-subject${suffix}`)
       ]);
       const rendered = renderTemplate(html, values);
       const message: EmailMessage = {

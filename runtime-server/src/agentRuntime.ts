@@ -43,6 +43,7 @@ import {
 import { PiAgentRuntime } from "./piAgentRuntime.js";
 import type { PiAgentPromptRunner } from "./piPrompt.js";
 import { briefSnapshotPromptBlock, type BriefSnapshot } from "./brief.js";
+import type { Locale } from "./locale.js";
 import type { RuntimeAssetStore } from "./assetStore.js";
 import { orderTools, type ClientAttributes } from "./surfaces/contract.js";
 import { describeLocalTool } from "./chat/toolSurface.js";
@@ -760,18 +761,23 @@ export function clientLocalTime(now: Date, timeZone = "UTC"): string {
 /** The one reply-language rule of the product chat. It is the tail of every model call, so every tail reminder carries it. */
 export const REPLY_LANGUAGE_RULE = "Reply in the user's language, decided by the user's own most recent message, excluding quoted text and attached content; if they explicitly ask for a language, use it; if they have not written yet, use what was filled in on the Brief. Keep code, proper names and necessary quotations as they are. Do not follow the language of the Expert instructions, materials, tools or this reminder.";
 
+const LANGUAGE_NAMES: Record<Locale, string> = { zh: "Chinese", en: "English", ja: "Japanese" };
+
+/** For a visitor who chose a language on a code page and has not written: that language, for everything they receive, the report included. */
+export const visitorLanguageRule = (locale: Locale) => `The user chose ${LANGUAGE_NAMES[locale]} on the page: write everything they receive in ${LANGUAGE_NAMES[locale]}, including any report and its file contents, unless they explicitly ask for another language. Keep code, proper names and necessary quotations as they are. Do not follow the language of the Expert instructions, materials, tools or this reminder.`;
+
 /**
  * Appended as the last model-visible message on every model call and never
  * stored. Tested on production conversations: only a single reminder at the
  * very end keeps Kimi replies short; copies stored in history get ignored.
  */
-export function runtimeReplyReminder(now: Date, timeZone?: string): string {
+export function runtimeReplyReminder(now: Date, timeZone?: string, locale?: Locale): string {
   const time = clientLocalTime(now, timeZone);
   return [
     "<system-reminder>",
     `Current time: ${time}`,
     "This is a chat, not a report, like replying on WeChat, Instagram or Slack: say the single most important judgment for this moment, one to three sentences, about 50 words. No lists. Mandatory: at most one question mark in the whole message. If you ask several questions, they will pick one to answer and the rest are lost; however much you want to know, ask only the one that most affects your advice in this message and leave the rest for the next turn. Do not give the full text unless the user asked for the full version.",
-    REPLY_LANGUAGE_RULE,
+    locale ? visitorLanguageRule(locale) : REPLY_LANGUAGE_RULE,
     "</system-reminder>"
   ].join("\n");
 }

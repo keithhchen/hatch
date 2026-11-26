@@ -109,6 +109,17 @@ run("createPending draws a typable 8-character code and a unique trade number", 
   assert.equal((await db.codes.peek(a.code))!.status, "pending");
 });
 
+run("the visitor's language and name are kept with the pending code and come back on activation, once", async db => {
+  const { outTradeNo } = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co", name: "Ann", locale: "ja" });
+  const { outTradeNo: plain } = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co" });
+  assert.equal((await db.codes.order(outTradeNo))!.locale, "ja");
+  assert.equal((await db.codes.order(plain))!.locale, null, "no language is stored as none: the mail is Chinese");
+  const first = await db.codes.activatePaid({ outTradeNo, transactionId: "42001", amountFen: 990 });
+  assert.deepEqual([first!.activated, first!.locale, first!.name], [true, "ja", "Ann"]);
+  assert.equal((await db.codes.activatePaid({ outTradeNo, transactionId: "42001", amountFen: 990 }))!.locale, "ja");
+  await assert.rejects(db.pool.query("UPDATE hatch_access_codes SET locale = 'fr' WHERE out_trade_no = $1", [outTradeNo]), /check/);
+});
+
 run("activatePaid twice at once activates once; a repeat and a wrong amount activate nothing", async db => {
   const { outTradeNo } = await db.codes.createPending({ productId: PRODUCT, email: "a@b.co" });
   const paid = { outTradeNo, transactionId: "42000", amountFen: 990 };

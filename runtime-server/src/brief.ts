@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { normalizeLocale, type Locale } from "./locale.js";
 
 export const BRIEF_SPEC_CONTRACT_VERSION = "1" as const;
 export const MAX_BRIEF_FIELDS = 16;
@@ -273,6 +274,14 @@ export function briefEmail(snapshot: BriefSnapshot | undefined): string | undefi
   const field = snapshot?.fields.find((entry) => entry.type === "email");
   const value = field ? briefAnswer(snapshot, field.id) : undefined;
   return value && isEmailAddress(value) ? value : undefined;
+}
+
+/** The Brief field that holds the language the visitor chose on a code page. */
+export const BRIEF_LOCALE_FIELD = "locale";
+
+/** The language the visitor chose, when the Brief has it; undefined for a Brief that was made without one. */
+export function briefLocale(snapshot: BriefSnapshot | undefined): Locale | undefined {
+  return normalizeLocale(briefAnswer(snapshot, BRIEF_LOCALE_FIELD)) ?? undefined;
 }
 
 /** The access code the Brief was answered with: its `access_code` field. */
